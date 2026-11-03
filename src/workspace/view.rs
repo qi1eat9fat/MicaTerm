@@ -8,27 +8,36 @@ use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportProvider};
+
 use super::handlers;
 use super::host_sidebar::render_host_sidebar;
 use super::right_sidebar::render_right_sidebar;
 use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
-use crate::settings::{SettingsStore, SettingsStoreEvent};
+use crate::card::{CardId, TerminalCard};
+use crate::settings::{SettingsStore, SettingsStoreEvent, apply_terminal};
+use crate::tabs::{TabId, TabList, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
 
 /// 窗口壳用到的外部服务。生产代码用 `WorkspaceServices::new()` 建真实的，
 /// 测试用 `tests/ui/support` 的 `fake_services()` 建假的。
 ///
-/// 后续工单每加一项服务（本地终端传输、主机数据库、保险库、SFTP……），就在这里加一个字段，
+/// 后续工单每加一项服务（主机数据库、保险库、SFTP……），就在这里加一个字段，
 /// 同时在 `fake_services()` 里给它一个假实现。
-pub struct WorkspaceServices {}
+pub struct WorkspaceServices {
+    /// 本地终端的传输：生产是本机 PTY，测试注入假的。
+    pub local_terminals: SharedLocalTerminalTransportProvider,
+}
 
 impl WorkspaceServices {
     /// 真实的服务。
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self {}
+        Self {
+            local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
+        }
     }
 }
 
@@ -39,10 +48,13 @@ pub struct Workspace {
     /// 开始卡片的焦点：没有标签时由它持有焦点，快捷键才有焦点路径可走。
     pub(super) start_card_focus: FocusHandle,
     pub(super) settings: Entity<SettingsStore>,
-    #[allow(dead_code)]
     pub(super) services: WorkspaceServices,
     /// 主机栏是否显示。
     pub(super) host_sidebar_open: bool,
+    /// 终端标签，从左到右，和在前的那个。
+    pub(super) tabs: TabList<TerminalTab>,
+    /// 下一张卡片的 id：从 1 起，不复用。
+    pub(super) next_card_id: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -74,7 +86,12 @@ impl Workspace {
                     }
                 },
             ),
+            // 终端的字体、交互跟着设置走：开着的终端立刻变。
+            cx.observe(&settings, |_, settings, cx| {
+                apply_terminal(&settings.read(cx).settings(), cx);
+            }),
         ];
+        apply_terminal(&settings.read(cx).settings(), cx);
         let start_card_focus = cx.focus_handle();
         // 启动时没有标签：开始卡片持有焦点。
         start_card_focus.focus(window, cx);
@@ -84,6 +101,8 @@ impl Workspace {
             settings,
             services,
             host_sidebar_open: true,
+            tabs: TabList::default(),
+            next_card_id: 1,
             _subscriptions: subscriptions,
         }
     }
@@ -97,23 +116,77 @@ impl Workspace {
     pub fn is_host_sidebar_open(&self) -> bool {
         self.host_sidebar_open
     }
+
+    /// 标签，从左到右。
+    pub fn tab_ids(&self) -> Vec<TabId> {
+        self.tabs.ids()
+    }
+
+    /// 在前的标签。
+    pub fn active_tab(&self) -> Option<TabId> {
+        self.tabs.active()
+    }
+
+    /// 一个标签里的卡片。
+    pub fn tab_cards(&self, tab: TabId) -> Vec<Entity<TerminalCard>> {
+        self.tabs
+            .get(tab)
+            .map(|tab| tab.cards().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// id 为 `card` 的卡片，在哪个标签里都找。
+    pub fn card(&self, card: CardId, cx: &App) -> Option<Entity<TerminalCard>> {
+        self.tabs
+            .iter()
+            .flat_map(|(_, tab)| tab.cards())
+            .find(|entity| entity.read(cx).id() == card)
+            .cloned()
+    }
+
+    /// 卡片终端屏幕上的文字，测试用。
+    pub fn card_screen_text(&self, card: CardId, cx: &App) -> Option<String> {
+        self.card(card, cx)
+            .map(|entity| entity.read(cx).screen_text(cx))
+    }
+
+    /// 标签轨道要画的快照：渲染函数不读实体。
+    fn tab_snapshots(&self, cx: &App) -> Vec<TabSnapshot> {
+        let active = self.tabs.active();
+        self.tabs
+            .iter()
+            .map(|(id, tab)| {
+                let card = tab.focused_card().read(cx);
+                TabSnapshot {
+                    id,
+                    name: card.name(),
+                    directory: card.directory_label().into(),
+                    active: active == Some(id),
+                }
+            })
+            .collect()
+    }
 }
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let target = self.focus_handle.clone();
+        // 有标签时是在前那个标签的内容，没有时是开始卡片。
         let content = div()
             .flex()
             .flex_1()
             .min_w_0()
             .when(!self.host_sidebar_open, |content| content.pl(GAP))
-            .child(render_start_card(
-                &self.start_card_focus,
-                &target,
-                &tokens,
-                window,
-            ));
+            .map(|content| match self.tabs.active_content() {
+                Some(tab) => content.child(tab.content()),
+                None => content.child(render_start_card(
+                    &self.start_card_focus,
+                    &target,
+                    &tokens,
+                    window,
+                )),
+            });
         let main = div()
             .flex()
             .flex_col()
@@ -121,6 +194,7 @@ impl Render for Workspace {
             .min_w_0()
             .child(render_title_bar(
                 self.host_sidebar_open,
+                self.tab_snapshots(cx),
                 &target,
                 &tokens,
                 window,

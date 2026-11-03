@@ -1,0 +1,5 @@
+_version: 2
+card.close:
+  zh-CN: 关闭卡片
+card.local.title:
+  zh-CN: 本地终端

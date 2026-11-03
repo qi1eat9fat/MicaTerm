@@ -21,12 +21,20 @@
 //! 元素要能被查到，需要 `.id(..)` 加 `.test_support()`；`ElementSnapshot` 里没有文字和样式，
 //! 要断言的文字放进 `aria_label`，样式类状态给实体加只读查询方法。
 
+mod terminal;
+
+pub use std::sync::Arc;
+
 pub use gpui_kit::component::{Root, WindowExt as _};
 pub use gpui_kit::test::TestWindowExt;
 pub use gpui_kit::{Action, App, AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
-pub use qishell::app::ToggleHostSidebar;
+pub use qishell::app::{CloseCard, NewLocalTerminalTab, ToggleHostSidebar};
+pub use qishell::card::CardId;
 pub use qishell::settings::{Appearance, SettingsStore};
+pub use qishell::tabs::TabId;
 pub use qishell::workspace::{Workspace, WorkspaceServices};
+pub use qishell_terminal::{FixedLocalTerminalTransportProvider, LocalShell, LocalShellInfo};
+pub use terminal::*;
 
 /// 每个夹具都先做的事：QiShell 的全局量（文案、字体、快捷键）。
 pub fn init_app(cx: &mut TestAppContext) {
@@ -41,7 +49,14 @@ pub fn settings_store() -> SettingsStore {
 /// 注入窗口壳的服务，全部是假实现：测试不碰真实的终端、钥匙串和网络。
 /// 后续工单每给 `WorkspaceServices` 加一项服务，就在这里填上它的假实现。
 pub fn fake_services() -> WorkspaceServices {
-    WorkspaceServices::new()
+    services_with_terminals(fake_local_terminals())
+}
+
+/// 假服务，本地终端用给定的假 provider：测试拿着它看启动了什么、关了什么。
+pub fn services_with_terminals(
+    local_terminals: Arc<FixedLocalTerminalTransportProvider>,
+) -> WorkspaceServices {
+    WorkspaceServices { local_terminals }
 }
 
 /// 用内存设置和假服务打开窗口壳。

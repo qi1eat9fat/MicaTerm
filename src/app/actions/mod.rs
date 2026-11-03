@@ -2,13 +2,15 @@
 //!
 //! 一个命令一个处理器：按钮、菜单、快捷键都派发这里的 action，由窗口壳统一处理
 //! （处理器在 `workspace/handlers/` 下同名领域的文件里）。各工单只往自己领域的文件里加 action：
-//! `window`（窗口壳、侧栏）、`tabs`（标签）、`settings`（设置）；卡片的 action 由工单 05 新建 `cards.rs`。
+//! `window`（窗口壳、侧栏）、`tabs`（标签）、`cards`（卡片，02 建、05 补全）、`settings`（设置）。
 //! 命名空间一律是 `qishell`；终端自己的 action 在终端 crate 里（命名空间 `qishell_terminal`）。
 
+mod cards;
 mod settings;
 mod tabs;
 mod window;
 
+pub use cards::*;
 pub use settings::*;
 pub use tabs::*;
 pub use window::*;

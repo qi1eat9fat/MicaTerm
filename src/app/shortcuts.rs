@@ -135,6 +135,8 @@ pub fn bind(cx: &mut App) {
         })
         .collect::<Vec<_>>();
     cx.bind_keys(bindings);
+    // 终端里的 Tab 和 Shift+Tab 发给 shell，不让焦点跳走（终端 crate 自带的绑定）。
+    cx.bind_keys(qishell_terminal::terminal_key_bindings());
 }
 
 #[cfg(test)]

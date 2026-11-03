@@ -6,13 +6,15 @@
 //!
 //! 写进文件的键（字段名、枚举的 `snake_case` 值、主题 key）发布后不能改。
 // 来自 since2006/shell-rs @ b2a307a: src/settings/model.rs（裁剪：只留 M1 的字段；
-// 终端相关的类型不依赖终端 crate，JSON 形状与 shell-rs 的 `TerminalInteraction` 一致）
+// 「终端交互」直接用终端 crate 的 `TerminalInteraction`，终端字体的默认值和范围也取自终端 crate）
 
 use std::ops::RangeInclusive;
 
 use gpui_kit::WindowAppearance;
 use gpui_kit::component::ThemeMode;
 use serde::{Deserialize, Serialize};
+
+pub use qishell_terminal::{RightClick, TerminalCursorStyle, TerminalInteraction};
 
 /// 全部设置。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -26,8 +28,8 @@ pub struct AppSettings {
     pub terminal_theme: TerminalThemeSettings,
     /// 终端 → 字体、字号、行高。
     pub terminal_font: TerminalFontSettings,
-    /// 终端 → 选中即复制、右键行为、光标。
-    pub terminal_interaction: TerminalInteractionSettings,
+    /// 终端 → 选中即复制、右键行为、光标。原样交给终端的全局量。
+    pub terminal_interaction: TerminalInteraction,
     /// 终端 → 本地终端的 shell。
     pub local_terminal: LocalTerminalSettings,
 }
@@ -126,15 +128,15 @@ impl Default for TerminalThemeSettings {
 }
 
 /// 终端默认字体：随包附带的 JetBrains Mono（`assets/fonts/`）。
-pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "JetBrains Mono";
+pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = qishell_terminal::DEFAULT_FONT_FAMILY;
 /// 终端默认字号，单位像素（gorex 的取值）。
-pub const DEFAULT_TERMINAL_FONT_SIZE: f32 = 11.6;
+pub const DEFAULT_TERMINAL_FONT_SIZE: f32 = qishell_terminal::DEFAULT_FONT_SIZE;
 /// 终端默认行高，字号的倍数。
-pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.45;
+pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = qishell_terminal::DEFAULT_LINE_HEIGHT;
 /// 终端接受的字号。
-pub const TERMINAL_FONT_SIZE_RANGE: RangeInclusive<f32> = 10.0..=28.0;
+pub const TERMINAL_FONT_SIZE_RANGE: RangeInclusive<f32> = qishell_terminal::FONT_SIZE_RANGE;
 /// 终端接受的行高。
-pub const TERMINAL_LINE_HEIGHT_RANGE: RangeInclusive<f32> = 1.0..=2.0;
+pub const TERMINAL_LINE_HEIGHT_RANGE: RangeInclusive<f32> = qishell_terminal::LINE_HEIGHT_RANGE;
 
 /// 终端 → 字体。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -191,58 +193,7 @@ impl TerminalFontSettings {
     }
 }
 
-/// 终端 → 终端交互。JSON 形状与终端 crate 的 `TerminalInteraction` 相同，
-/// 「应用设置」时原样交给终端的全局量。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TerminalInteractionSettings {
-    /// 选中即复制，默认关。
-    pub copy_on_select: bool,
-    /// 右键行为，默认显示菜单。
-    pub right_click: RightClick,
-    /// 默认光标形状；终端里的程序可以要求别的形状。
-    pub cursor_style: CursorStyle,
-    /// 光标默认闪烁，除非程序另有要求。
-    pub cursor_blinking: bool,
-}
-
-impl Default for TerminalInteractionSettings {
-    fn default() -> Self {
-        Self {
-            copy_on_select: false,
-            right_click: RightClick::default(),
-            cursor_style: CursorStyle::default(),
-            cursor_blinking: true,
-        }
-    }
-}
-
-/// 右键行为：在终端里按右键时做什么。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RightClick {
-    /// 显示菜单。
-    #[default]
-    Menu,
-    /// 粘贴。
-    Paste,
-    /// 有选中文字就复制，否则粘贴。
-    CopyOrPaste,
-    /// 无动作。
-    Nothing,
-}
-
-/// 光标形状。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CursorStyle {
-    #[default]
-    Block,
-    Underline,
-    Beam,
-}
-
-/// 终端 → 本地终端。
+/// 终端 → 本地终端。/// 终端 → 本地终端。
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocalTerminalSettings {
@@ -262,7 +213,7 @@ fn clamp_or(value: f32, range: RangeInclusive<f32>, default: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, Appearance, CursorStyle, RightClick};
+    use super::{AppSettings, Appearance, RightClick, TerminalCursorStyle};
 
     #[test]
     fn an_empty_file_gives_the_defaults() {
@@ -306,7 +257,7 @@ mod tests {
         );
         assert_eq!(
             settings.terminal_interaction.cursor_style,
-            CursorStyle::Beam
+            TerminalCursorStyle::Beam
         );
         assert_eq!(
             settings.local_terminal.shell.as_deref(),

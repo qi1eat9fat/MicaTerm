@@ -32,6 +32,8 @@ dunce = "1"
 rust-i18n = "4.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 终端引擎、视图和本地 PTY（拷自 shell-rs，见 crates/qishell-terminal）。
+qishell-terminal = { path = "crates/qishell-terminal" }
 
 # Windows 可执行文件里的图标与版本信息（build.rs）。
 [target.'cfg(windows)'.build-dependencies]
@@ -39,6 +41,8 @@ winresource = "0.1"
 
 [dev-dependencies]
 gpui-kit = { version = "0.6.1", features = ["test-support"] }
+# 假终端传输往终端发事件用。
+async-channel = "2"
 regex = "1"
 tempfile = "3"
 
