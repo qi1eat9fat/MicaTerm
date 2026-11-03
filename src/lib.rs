@@ -1,0 +1,25 @@
+//! QiShell：以 SSH 主机管理为核心的桌面终端，Rex 风格的卡片分屏。
+//!
+//! 模块按能力划分，功能模块不依赖窗口壳（`workspace`），也不碰彼此的内部：
+//! - `app`：全部 action（`app/actions/` 按领域分文件）、快捷键表、数据目录、图标与字体资源；
+//! - `settings`：设置模型与 `settings.json` 的读写；
+//! - `theme`：原型里 `.win.light` / `.win.dark` 两组颜色 token 和尺寸常量；
+//! - `i18n`：文案翻译表（`locales/*.yml`，只有简体中文）；
+//! - `workspace`：窗口壳，持有全部 action 的处理器（`workspace/handlers/` 按领域分文件）。
+
+pub mod app;
+pub mod i18n;
+pub mod settings;
+pub mod theme;
+pub mod workspace;
+
+// 全部文案，来自 `locales/`：见 `i18n`。
+rust_i18n::i18n!("locales", fallback = "zh-CN");
+
+/// 初始化 gpui-kit、文案、字体、快捷键和全局 action。
+/// 在 `Application::run` 里、建任何视图之前调用一次。
+pub fn init(cx: &mut gpui_kit::App) {
+    // 系统通知用的身份（Windows 上是 AppUserModelID），要在开窗口之前设。
+    cx.set_app_identity(app::APP_IDENTITY, app::PRODUCT_NAME);
+    app::init(cx);
+}
