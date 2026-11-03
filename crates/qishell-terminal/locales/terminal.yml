@@ -1,0 +1,98 @@
+_version: 2
+
+# 来自 since2006/shell-rs @ b2a307a: locales/terminal.yml（只留 zh-CN，去掉不拷的功能的键）
+
+terminal.notice.exited_signal:
+  zh-CN: 进程已退出：%{signal}，退出码 %{code}
+terminal.notice.exited:
+  zh-CN: 进程已退出，退出码 %{code}
+terminal.notice.error:
+  zh-CN: 终端错误：%{error}
+
+# A command put on the input line (history, snippets)
+terminal.command.not_connected:
+  zh-CN: 终端没有连接
+terminal.command.full_screen:
+  zh-CN: 终端里正在运行全屏程序，先退出它
+terminal.command.multiline:
+  zh-CN: 这是一条多行命令，在这个终端里只能直接执行
+
+# State of a terminal
+terminal.lifecycle.starting:
+  zh-CN: 正在启动
+terminal.lifecycle.running:
+  zh-CN: 运行中
+terminal.lifecycle.exited:
+  zh-CN: 已退出
+terminal.lifecycle.failed:
+  zh-CN: 启动失败
+terminal.lifecycle.closing:
+  zh-CN: 正在关闭
+terminal.lifecycle.exited_signal:
+  zh-CN: 已退出（%{signal}，退出码 %{code}）
+terminal.lifecycle.exited_code:
+  zh-CN: 已退出（退出码 %{code}）
+terminal.lifecycle.failed_with:
+  zh-CN: 启动失败：%{error}
+
+# Context menu
+terminal.menu.copy:
+  zh-CN: 复制
+terminal.menu.paste:
+  zh-CN: 粘贴
+terminal.menu.select_all:
+  zh-CN: 全选
+terminal.menu.find:
+  zh-CN: 查找…
+terminal.menu.clear:
+  zh-CN: 清屏
+
+# Links
+terminal.link.open_hint:
+  zh-CN: "%{key} 单击打开"
+
+# Find bar
+terminal.find.placeholder:
+  zh-CN: 查找
+terminal.find.previous:
+  zh-CN: 上一项（⇧↩）
+terminal.find.next:
+  zh-CN: 下一项（↩）
+terminal.find.close:
+  zh-CN: 关闭（Esc）
+terminal.find.no_results:
+  zh-CN: 无结果
+terminal.find.count:
+  zh-CN: "%{count} 项"
+
+# Font preview in settings, for screen readers
+terminal.font.preview:
+  zh-CN: "%{family} %{size} px，行高 %{line_height}"
+
+# Local shell
+terminal.pty.open_failed:
+  zh-CN: 无法创建本地 PTY
+terminal.pty.shell_failed:
+  zh-CN: 无法启动系统默认 shell
+# The program 设置 › 终端 › 本地终端 names, as written there, and why.
+terminal.pty.command_failed:
+  zh-CN: 无法启动 %{command}：%{error}
+terminal.pty.unmatched_quote:
+  zh-CN: 设置 → 终端 → 本地终端里的 Shell 有引号没有配对：%{command}
+terminal.pty.reader_failed:
+  zh-CN: 无法读取本地 PTY
+terminal.pty.writer_failed:
+  zh-CN: 无法写入本地 PTY
+terminal.pty.reader_thread:
+  zh-CN: 无法启动 PTY 读取线程
+terminal.pty.read_error:
+  zh-CN: 读取 PTY 失败：%{error}
+terminal.pty.write_error:
+  zh-CN: 写入 PTY 失败：%{error}
+terminal.pty.resize_error:
+  zh-CN: 调整 PTY 尺寸失败：%{error}
+terminal.pty.exit_status:
+  zh-CN: 无法读取 shell 退出状态
+
+terminal.notice.reconnect_or_close:
+  zh-CN: 按 Enter 重新连接，按 Space 关闭标签页
