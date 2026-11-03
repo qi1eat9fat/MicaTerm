@@ -5269,8 +5269,10 @@ name = "qishell"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "dunce",
  "gpui-kit",
+ "qishell-terminal",
  "regex",
  "rust-i18n",
  "serde",
