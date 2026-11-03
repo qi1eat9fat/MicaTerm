@@ -1,0 +1,66 @@
+[package]
+name = "qishell"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "以 SSH 主机管理为核心的桌面终端，Rex 风格的卡片分屏"
+license = "GPL-3.0-only"
+default-run = "qishell"
+
+# 桌面应用：单一二进制，同时带 lib target，好让 tests/ui/ 驱动生产环境的 Workspace。
+[[bin]]
+name = "qishell"
+path = "src/main.rs"
+
+[lib]
+name = "qishell"
+path = "src/lib.rs"
+
+# crates/ 下的每个目录都是 workspace 成员（qishell-terminal、qishell-ssh、qishell-hosts……），
+# 后续工单新建 crate 时不用改这里。
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[dependencies]
+# M1 不需要 tree-sitter 系列 feature，编辑器到 M3 才加。
+gpui-kit = { version = "0.6.1" }
+anyhow = "1"
+# 规范化本地路径，去掉 Windows 上 std 加的 `\\?\` 前缀。
+dunce = "1"
+# 文案翻译表：gpui-kit 自己的文案也用它。
+rust-i18n = "4.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Windows 可执行文件里的图标与版本信息（build.rs）。
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[dev-dependencies]
+gpui-kit = { version = "0.6.1", features = ["test-support"] }
+regex = "1"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# debug 版也把渲染栈优化起来（照 gpui-kit 的安装指南），否则渲染很卡；qishell 自己保持未优化、可调试。
+[profile.dev.package]
+gpui-pre = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+gpui-pre-macos = { opt-level = 3 }
+gpui-base = { opt-level = 3 }
+gpui-component = { opt-level = 3 }
+gpui-kit = { opt-level = 3 }
+gpui-kit-assets = { opt-level = 3 }
+cosmic-text = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+swash = { opt-level = 3 }
+taffy = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }
+resvg = { opt-level = 3 }
+usvg = { opt-level = 3 }
+zed-font-kit = { opt-level = 3 }
