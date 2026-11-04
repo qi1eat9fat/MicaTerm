@@ -132,6 +132,16 @@ impl TerminalTab {
         focused
     }
 
+    /// 让 `card` 看得见并成为焦点卡片（点了它的通知）：放大的是别的卡片时先还原。
+    /// 不在这个标签里返回 `false`。
+    pub fn reveal_card(&mut self, card: CardId, cx: &mut App) -> bool {
+        let revealed = self.tree.reveal(card);
+        if revealed {
+            self.sync_cards(cx);
+        }
+        revealed
+    }
+
     /// 焦点移到那一边紧挨着的卡片，返回它；那边没有卡片或正放大着返回 `None`。
     pub fn move_focus(
         &mut self,
