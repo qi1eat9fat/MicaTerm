@@ -17,6 +17,7 @@ use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate, NoAction};
 use qishell_terminal::actions::*;
 
 use super::actions::*;
+use crate::split::Direction;
 
 /// 快捷键表里的一项。
 pub struct Shortcut {
@@ -179,8 +180,81 @@ pub const TAB_KEYS: &[Shortcut] = &[
     },
 ];
 
-/// 卡片的快捷键（工单 05 填写）。
-pub const CARD_KEYS: &[Shortcut] = &[];
+/// 卡片的快捷键（工单 05）：分屏、关闭、放大、焦点移动、移动分隔线。
+pub const CARD_KEYS: &[Shortcut] = &[
+    Shortcut {
+        keys: "ctrl-shift-d",
+        mac: "cmd-d",
+        action: || Box::new(SplitRight),
+        context: None,
+    },
+    Shortcut {
+        keys: "ctrl-shift-e",
+        mac: "cmd-shift-d",
+        action: || Box::new(SplitDown),
+        context: None,
+    },
+    Shortcut {
+        keys: "ctrl-shift-w",
+        mac: "cmd-w",
+        action: || Box::new(CloseFocusedCard),
+        context: None,
+    },
+    Shortcut {
+        keys: "ctrl-shift-enter",
+        mac: "cmd-shift-enter",
+        action: || Box::new(ToggleZoomCard),
+        context: None,
+    },
+    Shortcut {
+        keys: "alt-left",
+        mac: "alt-cmd-left",
+        action: || Box::new(FocusCard(Direction::Left)),
+        context: None,
+    },
+    Shortcut {
+        keys: "alt-right",
+        mac: "alt-cmd-right",
+        action: || Box::new(FocusCard(Direction::Right)),
+        context: None,
+    },
+    Shortcut {
+        keys: "alt-up",
+        mac: "alt-cmd-up",
+        action: || Box::new(FocusCard(Direction::Up)),
+        context: None,
+    },
+    Shortcut {
+        keys: "alt-down",
+        mac: "alt-cmd-down",
+        action: || Box::new(FocusCard(Direction::Down)),
+        context: None,
+    },
+    Shortcut {
+        keys: "alt-shift-left",
+        mac: "ctrl-cmd-left",
+        action: || Box::new(MoveDivider(Direction::Left)),
+        context: None,
+    },
+    Shortcut {
+        keys: "alt-shift-right",
+        mac: "ctrl-cmd-right",
+        action: || Box::new(MoveDivider(Direction::Right)),
+        context: None,
+    },
+    Shortcut {
+        keys: "alt-shift-up",
+        mac: "ctrl-cmd-up",
+        action: || Box::new(MoveDivider(Direction::Up)),
+        context: None,
+    },
+    Shortcut {
+        keys: "alt-shift-down",
+        mac: "ctrl-cmd-down",
+        action: || Box::new(MoveDivider(Direction::Down)),
+        context: None,
+    },
+];
 
 /// 只在终端里生效。
 const IN_TERMINAL: Option<&str> = Some(qishell_terminal::TERMINAL_KEY_CONTEXT);

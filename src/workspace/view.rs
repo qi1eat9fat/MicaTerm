@@ -21,6 +21,7 @@ use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
 use crate::card::{CardId, TerminalCard};
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
+use crate::split::NodeId;
 use crate::tabs::{TabId, TabList, TabRail, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
 
@@ -163,6 +164,33 @@ impl Workspace {
     pub fn card_screen_text(&self, card: CardId, cx: &App) -> Option<String> {
         self.card(card, cx)
             .map(|entity| entity.read(cx).screen_text(cx))
+    }
+
+    /// 在前那个标签的焦点卡片。
+    pub fn focused_card(&self, cx: &App) -> Option<CardId> {
+        self.tabs
+            .active_content()
+            .map(|tab| tab.focused_card().read(cx).id())
+    }
+
+    /// 在前那个标签里放大着的卡片。
+    pub fn zoomed_card(&self) -> Option<CardId> {
+        self.tabs
+            .active_content()
+            .and_then(|tab| tab.tree().zoomed())
+    }
+
+    /// 在前那个标签里分隔线 `node` 的比例（左边或上边占的份额）。
+    pub fn divider_ratio(&self, node: NodeId) -> Option<f32> {
+        self.tabs
+            .active_content()
+            .and_then(|tab| tab.tree().ratio(node))
+    }
+
+    /// 卡片终端内容的不透明度：焦点卡片 1，其余 0.85，窗口失活时 0.7。
+    pub fn card_opacity(&self, card: CardId, window: &Window, cx: &App) -> Option<f32> {
+        self.card(card, cx)
+            .map(|entity| entity.read(cx).content_opacity(window))
     }
 
     /// 标签轨道要画的快照：渲染函数不读实体。

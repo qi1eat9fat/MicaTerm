@@ -67,6 +67,14 @@ impl<T> TabList<T> {
             .map(|(_, content)| content)
     }
 
+    /// 改 `id` 的内容（工单 05：分屏、关卡片、移动焦点都改终端标签里的分屏树）。
+    pub fn get_mut(&mut self, id: TabId) -> Option<&mut T> {
+        self.tabs
+            .iter_mut()
+            .find(|(tab, _)| *tab == id)
+            .map(|(_, content)| content)
+    }
+
     /// 从左到右的标签。
     pub fn iter(&self) -> impl Iterator<Item = (TabId, &T)> {
         self.tabs.iter().map(|(id, content)| (*id, content))

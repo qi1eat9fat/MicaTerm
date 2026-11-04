@@ -9,7 +9,6 @@ use crate::app::{
     ActivateTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NewLocalTerminalTab, NextTab,
     OpenTabMenu, PreviousTab, SwitchToTab,
 };
-use crate::card::CardEvent;
 use crate::tabs::{TabId, TerminalTab, build_tab_menu};
 use crate::workspace::Workspace;
 
@@ -45,8 +44,8 @@ impl Workspace {
             .unwrap_or_default();
         let launch = LocalLaunch::new(LocalShell::new(&shell));
         let card = self.open_local_card(launch, window, cx);
-        let subscriptions = vec![cx.subscribe(&card, |_, _, _: &CardEvent, cx| cx.notify())];
-        self.open_tab(TerminalTab::new(card, subscriptions), window, cx);
+        let subscriptions = self.card_subscriptions(&card, window, cx);
+        self.open_tab(TerminalTab::new(card, subscriptions, cx), window, cx);
     }
 
     fn on_next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {

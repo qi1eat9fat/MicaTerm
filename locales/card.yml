@@ -3,3 +3,11 @@ card.close:
   zh-CN: 关闭卡片
 card.local.title:
   zh-CN: 本地终端
+card.split_right:
+  zh-CN: 向右分屏
+card.split_down:
+  zh-CN: 向下分屏
+card.zoom:
+  zh-CN: 放大卡片
+card.restore:
+  zh-CN: 还原卡片

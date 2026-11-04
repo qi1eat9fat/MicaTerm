@@ -12,7 +12,7 @@ use qishell_terminal::{
 
 use super::CardId;
 use super::directory::{display_directory, home_dir, reported_path};
-use super::header::render_header;
+use super::header::{HeaderState, render_header};
 use super::status_bar::{StatusBar, render_status_bar};
 use crate::i18n::t;
 use crate::theme::{CARD_RADIUS, Tokens};
@@ -47,6 +47,10 @@ pub struct TerminalCard {
     reported_directory: Option<PathBuf>,
     /// 本机说 shell 在的目录。
     working_directory: Option<PathBuf>,
+    /// 是不是所在标签的焦点卡片：强调色描边、头部按钮常显、内容不变淡。由标签按分屏树告诉它。
+    focused: bool,
+    /// 是不是放大着：头部的放大按钮换成还原。
+    zoomed: bool,
     _info_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -81,6 +85,8 @@ impl TerminalCard {
             // 聚焦与否换描边和按钮：终端拿到或失去焦点时重画卡片。
             cx.on_focus_in(&focus, window, |_, _, cx| cx.notify()),
             cx.on_focus_out(&focus, window, |_, _, _, cx| cx.notify()),
+            // 窗口失活时非焦点卡片更淡。
+            cx.observe_window_activation(window, |_, _, cx| cx.notify()),
         ];
         // shell 名和版本要看文件系统，放到后台查。
         let shell = launch.shell.clone();
@@ -108,6 +114,9 @@ impl TerminalCard {
             launch_directory: launch.directory,
             reported_directory: None,
             working_directory: None,
+            // 新卡片总是它所在标签的焦点卡片（新标签、分屏都把焦点给新卡片）。
+            focused: true,
+            zoomed: false,
             _info_task: info_task,
             _subscriptions: subscriptions,
         }
@@ -149,6 +158,36 @@ impl TerminalCard {
     /// 焦点在不在这张卡片里。
     pub fn is_focused(&self, window: &Window, cx: &App) -> bool {
         self.focus.contains_focused(window, cx)
+    }
+
+    /// 标签按分屏树告诉卡片：它是不是焦点卡片、是不是放大着。
+    pub fn set_place(&mut self, focused: bool, zoomed: bool, cx: &mut Context<Self>) {
+        if (self.focused, self.zoomed) != (focused, zoomed) {
+            self.focused = focused;
+            self.zoomed = zoomed;
+            cx.notify();
+        }
+    }
+
+    /// 是不是所在标签的焦点卡片。
+    pub fn is_focused_card(&self) -> bool {
+        self.focused
+    }
+
+    /// 是不是放大着。
+    pub fn is_zoomed(&self) -> bool {
+        self.zoomed
+    }
+
+    /// 终端内容的不透明度：焦点卡片 1，其余 0.85，窗口失活时 0.7。
+    pub fn content_opacity(&self, window: &Window) -> f32 {
+        if self.focused {
+            1.
+        } else if window.is_window_active() {
+            0.85
+        } else {
+            0.7
+        }
     }
 
     /// 本地卡片跑的 shell。
@@ -218,7 +257,8 @@ impl TerminalCard {
 impl Render for TerminalCard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
-        let focused = self.is_focused(window, cx);
+        let focused = self.focused;
+        let opacity = self.content_opacity(window);
         let id = self.id;
         let name = self.name();
         let directory = self.directory_label();
@@ -266,7 +306,10 @@ impl Render for TerminalCard {
                 id,
                 name,
                 directory,
-                focused,
+                HeaderState {
+                    focused,
+                    zoomed: self.zoomed,
+                },
                 &self.target,
                 &tokens,
             ))
@@ -278,6 +321,7 @@ impl Render for TerminalCard {
                     .min_h_0()
                     .px(px(4.))
                     .pb(px(4.))
+                    .opacity(opacity)
                     .child(terminal),
             )
             .child(render_status_bar(id, &status, &tokens))

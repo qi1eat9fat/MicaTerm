@@ -29,7 +29,13 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # 卡片状态栏的 shell 版本：读 exe 的版本资源。
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+# 分屏在同一个目录里开：读 shell 进程 PEB 里的当前目录（工单 05）。
+windows-sys = { version = "0.61", features = [
+    "Win32_Storage_FileSystem",
+    "Wdk_System_Threading",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 gpui-kit = { version = "0.6.1", features = ["test-support"] }
