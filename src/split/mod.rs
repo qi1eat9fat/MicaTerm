@@ -4,6 +4,8 @@
 //!
 //! 只认 `CardId`，不认卡片实体：叶子画什么由调用方给。
 
+mod render;
 mod tree;
 
+pub use render::SplitPanels;
 pub use tree::*;

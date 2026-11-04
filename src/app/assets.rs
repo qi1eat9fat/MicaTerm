@@ -9,7 +9,13 @@ use qishell_terminal::TerminalIcons;
 
 // 默认组件图标包以外的图标，从 gpui-kit-assets 自带的 Lucide 目录里挑。要用新图标就加在这里。
 // Terminal：开始卡片「新建本地终端」；CodeXml：右侧栏「命令片段」；KeyRound：右侧栏「凭据」。
-icon_assets!(ExtraIcons, [Terminal, CodeXml, KeyRound]);
+// Columns2 / Rows2 / Maximize2 / Minimize2：卡片头部的向右分屏、向下分屏、放大、还原（工单 05）。
+icon_assets!(
+    ExtraIcons,
+    [
+        Terminal, CodeXml, KeyRound, Columns2, Rows2, Maximize2, Minimize2
+    ]
+);
 
 /// 图标名，凡是建 `Icon` 的地方都能用（`ExtraIcons` 和默认图标包里的都在里面）。
 pub use gpui_kit::assets::IconName as CatalogIcon;

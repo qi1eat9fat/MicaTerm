@@ -118,7 +118,7 @@ fn the_shell_from_the_settings_is_started(cx: &mut TestAppContext) {
     assert_eq!(provider.shells(), [LocalShell::new("cmd.exe /k")]);
 }
 
-/// 头部高 33：程序图标、shell 名、目录；右边只有关闭按钮。
+/// 头部高 33：程序图标、shell 名、目录；右边是分屏、放大、关闭按钮。
 #[gpui_kit::test]
 fn the_card_header_shows_the_shell_and_its_folder(cx: &mut TestAppContext) {
     let factory = Arc::new(FakeTerminalFactory::default());
@@ -145,8 +145,19 @@ fn the_card_header_shows_the_shell_and_its_folder(cx: &mut TestAppContext) {
         assert!(header.bounds().contains(&close.bounds().center()));
         // 关闭在最右边，图标在最左边。
         assert!(tile.bounds().right() < close.bounds().left());
-        for button in ["card-split-right", "card-split-down", "card-zoom"] {
-            assert!(window.try_find((button, 1usize)).is_none(), "{button}");
+        // 关闭前面依次是向右分屏、向下分屏、放大（工单 05）。
+        let mut left = tile.bounds().right();
+        for (button, label) in [
+            ("card-split-right", "向右分屏"),
+            ("card-split-down", "向下分屏"),
+            ("card-zoom", "放大卡片"),
+            ("card-close", "关闭卡片"),
+        ] {
+            let button = window.find((button, 1usize));
+            assert_eq!(button.label(), Some(label));
+            assert!(header.bounds().contains(&button.bounds().center()));
+            assert!(left < button.bounds().left(), "{label}");
+            left = button.bounds().left();
         }
         // 标签也写 shell 名和目录。
         assert_eq!(window.find(TAB).label(), Some("pwsh ~"));

@@ -35,6 +35,10 @@ pub use qishell::tabs::TabId;
 pub use qishell::workspace::{Workspace, WorkspaceServices};
 pub use qishell_terminal::{FixedLocalTerminalTransportProvider, LocalShell, LocalShellInfo};
 pub use terminal::*;
+// 卡片分屏（工单 05）。
+pub use gpui_kit::VisualTestContext;
+pub use qishell::app::{CloseFocusedCard, SplitDown, SplitRight, ToggleZoomCard};
+pub use qishell::split::NodeId;
 
 /// 每个夹具都先做的事：QiShell 的全局量（文案、字体、快捷键）。
 pub fn init_app(cx: &mut TestAppContext) {

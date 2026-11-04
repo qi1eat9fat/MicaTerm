@@ -4,7 +4,6 @@ use gpui_kit::*;
 use qishell_terminal::{LocalLaunch, LocalShell};
 
 use crate::app::NewLocalTerminalTab;
-use crate::card::CardEvent;
 use crate::tabs::{TabId, TerminalTab};
 use crate::workspace::Workspace;
 
@@ -32,8 +31,8 @@ impl Workspace {
             .unwrap_or_default();
         let launch = LocalLaunch::new(LocalShell::new(&shell));
         let card = self.open_local_card(launch, window, cx);
-        let subscriptions = vec![cx.subscribe(&card, |_, _, _: &CardEvent, cx| cx.notify())];
-        self.open_tab(TerminalTab::new(card, subscriptions), window, cx);
+        let subscriptions = self.card_subscriptions(&card, window, cx);
+        self.open_tab(TerminalTab::new(card, subscriptions, cx), window, cx);
     }
 
     /// 把标签加在最后、放到前面，焦点给它的焦点卡片。
