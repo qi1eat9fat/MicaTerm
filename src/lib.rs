@@ -6,6 +6,7 @@
 //! - `theme`：原型里 `.win.light` / `.win.dark` 两组颜色 token 和尺寸常量；
 //! - `i18n`：文案翻译表（`locales/*.yml`，只有简体中文）；
 //! - `card`：卡片（标签里的一格终端：头部、终端、状态栏），只认 `qishell_terminal` 的公开类型；
+//! - `split`：终端标签里的卡片分屏树（纯逻辑）和它的渲染；
 //! - `tabs`：标签列表的纯逻辑、终端标签、标签轨道里的标签；
 //! - `workspace`：窗口壳，持有全部 action 的处理器（`workspace/handlers/` 按领域分文件）。
 
@@ -13,6 +14,7 @@ pub mod app;
 pub mod card;
 pub mod i18n;
 pub mod settings;
+pub mod split;
 pub mod tabs;
 pub mod theme;
 pub mod workspace;
