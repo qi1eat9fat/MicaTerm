@@ -131,14 +131,7 @@ pub fn program_of(name: &str) -> Program {
         };
     }
     if SHELLS.contains(&key.as_str()) {
-        return Program {
-            name: base.to_string(),
-            glyph: TERMINAL_GLYPH,
-            tile_bg: SHELL_BG,
-            tile_fg: SHELL_FG,
-            border: false,
-            shell: true,
-        };
+        return shell_program(base);
     }
     Program {
         name: base.to_string(),
@@ -147,6 +140,18 @@ pub fn program_of(name: &str) -> Program {
         tile_fg: 0xffffff,
         border: false,
         shell: false,
+    }
+}
+
+/// 在提示符下的 shell `name`：不管表里有没有它，都是终端图块（卡片的 shell 自己在前台时用）。
+pub fn shell_program(name: &str) -> Program {
+    Program {
+        name: name.to_string(),
+        glyph: TERMINAL_GLYPH,
+        tile_bg: SHELL_BG,
+        tile_fg: SHELL_FG,
+        border: false,
+        shell: true,
     }
 }
 

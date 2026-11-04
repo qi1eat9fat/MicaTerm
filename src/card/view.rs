@@ -3,25 +3,30 @@
 //! `src/terminal/local_terminal_panel.rs`（目录事件的转发）。
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 use gpui_kit::*;
 use qishell_terminal::{
     LocalLaunch, LocalShell, LocalShellInfo, SharedLocalTerminalTransportProvider, TerminalEvent,
-    TerminalView,
+    TerminalNotice, TerminalView,
 };
 
 use super::CardId;
 use super::directory::{display_directory, home_dir, reported_path};
 use super::header::{HeaderState, render_header};
 use super::status_bar::{StatusBar, render_status_bar};
+use super::status_dot::{ACTIVE_FOR, StatusDot};
 use crate::i18n::t;
+use crate::programs::{Program, program_of, shell_program};
 use crate::theme::{CARD_RADIUS, Tokens};
 
 /// 卡片告诉持有它的人（窗口壳）的事。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CardEvent {
-    /// 名称、目录变了：标签跟着重画。
+    /// 名称、目录、程序图块、状态点变了：标签跟着重画。
     Changed,
+    /// 程序结束了（前台从别的程序回到 shell），或者响铃了：卡片看不见时，窗口壳给它亮橙点（工单 06）。
+    WantsAttention,
 }
 
 /// 卡片里跑的是什么。M2 加远程（工单 12）。
@@ -51,6 +56,17 @@ pub struct TerminalCard {
     focused: bool,
     /// 是不是放大着：头部的放大按钮换成还原。
     zoomed: bool,
+    /// 前台程序（本机看到的进程名）；`None` 是 shell 自己在提示符下（工单 06）。
+    program: Option<String>,
+    /// 最近一次有输出的时候（执行器的时钟，测试能拨它）。
+    output_at: Option<Instant>,
+    /// 在看不见的地方结束或响铃过，还没被看见：橙点。由窗口壳设、清。
+    attention: bool,
+    /// 上一次告诉窗口壳的状态点：变了才再说。
+    shown_dot: StatusDot,
+    /// 绿点到点熄灭的定时器，和它是不是还在等。
+    _quiet_task: Option<Task<()>>,
+    quiet_scheduled: bool,
     _info_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -117,6 +133,12 @@ impl TerminalCard {
             // 新卡片总是它所在标签的焦点卡片（新标签、分屏都把焦点给新卡片）。
             focused: true,
             zoomed: false,
+            program: None,
+            output_at: None,
+            attention: false,
+            shown_dot: StatusDot::None,
+            _quiet_task: None,
+            quiet_scheduled: false,
             _info_task: info_task,
             _subscriptions: subscriptions,
         }
@@ -135,10 +157,103 @@ impl TerminalCard {
             TerminalEvent::WorkingDirectory(folder) => {
                 self.working_directory = Some(folder.clone());
             }
+            TerminalEvent::ForegroundProgram(program) => {
+                // 别的程序结束、回到了 shell：卡片看不见时要亮橙点（gorex 的 `apply`）。
+                let finished = self.running_program().is_some()
+                    && program
+                        .as_deref()
+                        .is_none_or(|program| program_of(program).shell);
+                self.program = program.clone();
+                if finished {
+                    cx.emit(CardEvent::WantsAttention);
+                }
+                self.refresh_dot(cx);
+            }
+            // 重新启动（Enter 原地重连）：新的 shell 在提示符下。
+            TerminalEvent::Started => {
+                self.program = None;
+                self.refresh_dot(cx);
+            }
+            TerminalEvent::Output => {
+                self.output_at = Some(cx.background_executor().now());
+                self.refresh_dot(cx);
+                return;
+            }
+            TerminalEvent::Notice(TerminalNotice::Bell { .. }) => {
+                cx.emit(CardEvent::WantsAttention);
+                return;
+            }
             _ => return,
         }
         cx.emit(CardEvent::Changed);
         cx.notify();
+    }
+
+    /// 前台在跑的程序（shell 以外的）。
+    fn running_program(&self) -> Option<Program> {
+        self.program
+            .as_deref()
+            .map(program_of)
+            .filter(|program| !program.shell)
+    }
+
+    /// 图块上显示的程序：前台程序；shell 在提示符下时是 shell 的终端图块。
+    pub fn tile_program(&self) -> Program {
+        self.running_program()
+            .unwrap_or_else(|| shell_program(&self.name()))
+    }
+
+    /// 状态点：在看不见的地方结束或响铃过是橙点，shell 以外的程序 1.5 秒内有输出是绿点。
+    pub fn status_dot(&self, cx: &App) -> StatusDot {
+        StatusDot::of(
+            self.attention,
+            self.running_program().as_ref(),
+            self.output_at,
+            cx.background_executor().now(),
+        )
+    }
+
+    /// 窗口壳说这张卡片要不要注意（看不见时结束或响铃了 / 又看得见了）。
+    pub fn set_attention(&mut self, attention: bool, cx: &mut Context<Self>) {
+        if self.attention != attention {
+            self.attention = attention;
+            self.refresh_dot(cx);
+        }
+    }
+
+    /// 是不是在等着被看见（橙点）。
+    pub fn wants_attention(&self) -> bool {
+        self.attention
+    }
+
+    /// 状态点变了就重画、告诉窗口壳（标签上的点跟着变）；亮着绿点就定好熄灭的时候。
+    fn refresh_dot(&mut self, cx: &mut Context<Self>) {
+        let dot = self.status_dot(cx);
+        if dot != self.shown_dot {
+            self.shown_dot = dot;
+            cx.emit(CardEvent::Changed);
+            cx.notify();
+        }
+        if dot == StatusDot::Busy && !self.quiet_scheduled {
+            self.quiet_scheduled = true;
+            self._quiet_task = Some(cx.spawn(async move |this, cx| {
+                loop {
+                    let Ok(Some(left)) = this.update(cx, |this, cx| {
+                        let now = cx.background_executor().now();
+                        this.output_at
+                            .map(|at| ACTIVE_FOR.saturating_sub(now.saturating_duration_since(at)))
+                            .filter(|left| !left.is_zero())
+                    }) else {
+                        break;
+                    };
+                    cx.background_executor().timer(left).await;
+                }
+                let _ = this.update(cx, |this, cx| {
+                    this.quiet_scheduled = false;
+                    this.refresh_dot(cx);
+                });
+            }));
+        }
     }
 
     pub fn id(&self) -> CardId {
@@ -309,6 +424,8 @@ impl Render for TerminalCard {
                 HeaderState {
                     focused,
                     zoomed: self.zoomed,
+                    program: self.tile_program(),
+                    dot: self.status_dot(cx),
                 },
                 &self.target,
                 &tokens,

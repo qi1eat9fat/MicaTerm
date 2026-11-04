@@ -38,6 +38,9 @@ pub enum TerminalTransportEvent {
     /// The folder a local terminal's shell is in now, sent when it changes;
     /// only a local transport of a system that tells sends it.
     WorkingDirectory(PathBuf),
+    /// 本地 shell 的前台程序换了：程序名（`program_name` 起的），`None` 是 shell 自己在提示符下。
+    /// 只有能看到进程的本地传输发它（工单 06）。
+    ForegroundProgram(Option<String>),
     Exited {
         code: u32,
         signal: Option<String>,

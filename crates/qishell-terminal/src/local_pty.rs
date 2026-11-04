@@ -15,6 +15,7 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use crate::i18n::t;
 
 use crate::environment::strip_launcher_vars;
+use crate::foreground::foreground_program;
 use crate::transport::send_event;
 use crate::{
     LocalLaunch, LocalShell, LocalTerminalTransportProvider, SharedTerminalTransportFactory,
@@ -59,6 +60,9 @@ struct LocalPtyTransport {
 /// How often at most the shell's folder is read, while it writes: it moves
 /// with a `cd`, which a prompt follows.
 const LOOK_FOR_THE_FOLDER: Duration = Duration::from_millis(200);
+
+/// shell 不出声时，多久看一次它的前台程序（工单 06）。
+const LOOK_FOR_THE_PROGRAM_QUIETLY: Duration = Duration::from_secs(1);
 
 impl TerminalTransport for LocalPtyTransport {
     fn run(
@@ -106,6 +110,8 @@ impl TerminalTransport for LocalPtyTransport {
         let output_events = events.clone();
         let wrote = Arc::new(AtomicBool::new(false));
         let output_seen = wrote.clone();
+        let program_wrote = Arc::new(AtomicBool::new(false));
+        let program_output_seen = program_wrote.clone();
         let reader_thread = thread::Builder::new()
             .name("qishell-pty-reader".into())
             .spawn(move || {
@@ -115,6 +121,7 @@ impl TerminalTransport for LocalPtyTransport {
                         Ok(0) => break,
                         Ok(count) => {
                             output_seen.store(true, Ordering::Relaxed);
+                            program_output_seen.store(true, Ordering::Relaxed);
                             if !send_event(
                                 &output_events,
                                 TerminalTransportEvent::Output(buffer[..count].to_vec()),
@@ -144,6 +151,10 @@ impl TerminalTransport for LocalPtyTransport {
         // The shell's folder as last said, and when it was last read.
         let mut folder: Option<PathBuf> = None;
         let mut looked: Option<Instant> = None;
+        // 前台程序，同样是上次说的和上次看的时候（工单 06）。一开始没说过：
+        // 第一次看到的就说，哪怕是 shell 自己（`None`）。
+        let mut program: Option<Option<String>> = None;
+        let mut program_looked: Option<Instant> = None;
         let exit = loop {
             match commands.recv_timeout(Duration::from_millis(20)) {
                 Ok(TerminalTransportCommand::Write(bytes)) if !shutting_down => {
@@ -191,6 +202,24 @@ impl TerminalTransport for LocalPtyTransport {
                 {
                     folder = Some(now.clone());
                     send_event(&events, TerminalTransportEvent::WorkingDirectory(now));
+                }
+            }
+
+            // 前台程序：写了输出就最多每 200ms 看一次（程序启动、结束时都有输出），
+            // 不写也每秒看一次（不出声的程序，比如 `sleep`）。
+            if let Some(pid) = pid
+                && !shutting_down
+                && program_looked.is_none_or(|at| {
+                    let since = at.elapsed();
+                    since >= LOOK_FOR_THE_PROGRAM_QUIETLY
+                        || (since >= LOOK_FOR_THE_FOLDER && program_wrote.swap(false, Ordering::Relaxed))
+                })
+            {
+                program_looked = Some(Instant::now());
+                let now = foreground_program(pid, pair.master.as_ref());
+                if program.as_ref() != Some(&now) {
+                    program = Some(now.clone());
+                    send_event(&events, TerminalTransportEvent::ForegroundProgram(now));
                 }
             }
 
@@ -829,6 +858,46 @@ mod windows_tests {
         let _ = commands.send(TerminalTransportCommand::Shutdown);
         worker.join().unwrap().unwrap();
         assert_eq!(folders, [comparable(start.path()), comparable(next.path())]);
+    }
+
+    /// shell 跑起程序、程序结束：传输先说前台是那个程序，再说回到了 shell（工单 06）。
+    #[test]
+    fn the_foreground_program_is_told_as_it_comes_and_goes() {
+        let _forks = crate::testing::no_forks();
+        let script = "echo a& ping -n 3 127.0.0.1 >nul& echo b& ping -n 3 127.0.0.1 >nul";
+        let transport = cmd_transport(script);
+        let (commands, command_receiver) = mpsc::channel();
+        let (events, event_receiver) = async_channel::unbounded();
+        let worker =
+            thread::spawn(move || transport.run(TerminalSize::DEFAULT, command_receiver, events));
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut programs = Vec::new();
+        while Instant::now() < deadline {
+            match event_receiver.try_recv() {
+                Ok(TerminalTransportEvent::Output(bytes)) => {
+                    if bytes.windows(4).any(|window| window == b"\x1b[6n") {
+                        let _ =
+                            commands.send(TerminalTransportCommand::Write(b"\x1b[1;1R".to_vec()));
+                    }
+                }
+                Ok(TerminalTransportEvent::ForegroundProgram(program)) => {
+                    programs.push(program.map(|name| name.to_lowercase()))
+                }
+                Ok(TerminalTransportEvent::Exited { .. })
+                | Err(async_channel::TryRecvError::Closed) => break,
+                Ok(_) => {}
+                Err(async_channel::TryRecvError::Empty) => thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        let _ = commands.send(TerminalTransportCommand::Shutdown);
+        worker.join().unwrap().unwrap();
+        // 两次 ping 之间可能来不及看到 shell 自己在前台；只要求看到过 ping，且不会连着说两遍同一个。
+        assert!(programs.contains(&Some("ping".into())), "{programs:?}");
+        assert!(
+            programs.windows(2).all(|pair| pair[0] != pair[1]),
+            "{programs:?}"
+        );
     }
 
     #[test]

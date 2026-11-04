@@ -16,7 +16,8 @@ use gpui_kit::{
     Window, div,
 };
 
-use crate::card::{CardId, TerminalCard};
+use crate::card::{CardId, MAX_STACKED_TILES, StatusDot, TerminalCard};
+use crate::programs::Program;
 use crate::split::{Axis, Closed, Direction, NodeId, SplitPanels, SplitTree};
 
 /// 一个终端标签：一棵卡片分屏树。
@@ -53,6 +54,27 @@ impl TerminalTab {
 
     pub fn contains(&self, card: CardId, _cx: &App) -> bool {
         self.cards.contains_key(&card)
+    }
+
+    /// 标签在前时 `card` 画不画出来：放大着时只画放大的那张，其余被藏起来了。
+    pub fn shows(&self, card: CardId) -> bool {
+        self.cards.contains_key(&card) && self.tree.zoomed().is_none_or(|zoomed| zoomed == card)
+    }
+
+    /// 标签上叠放的图块：焦点卡片的在最前面，其余按分屏树的顺序，最多 `MAX_STACKED_TILES` 块。
+    pub fn tiles(&self, cx: &App) -> Vec<Program> {
+        let focused = self.tree.focused();
+        std::iter::once(focused)
+            .chain(self.tree.cards().into_iter().filter(|id| *id != focused))
+            .filter_map(|id| self.card(id))
+            .take(MAX_STACKED_TILES)
+            .map(|card| card.read(cx).tile_program())
+            .collect()
+    }
+
+    /// 标签上的状态点：有卡片要注意是橙点，否则有卡片在输出是绿点。
+    pub fn dot(&self, cx: &App) -> StatusDot {
+        StatusDot::of_tab(self.cards().map(|card| card.read(cx).status_dot(cx)))
     }
 
     /// id 为 `card` 的卡片。
