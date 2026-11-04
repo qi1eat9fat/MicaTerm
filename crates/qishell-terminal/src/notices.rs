@@ -1,8 +1,9 @@
 // 来自 since2006/shell-rs @ b2a307a: src/terminal/notices.rs
+// 裁剪：QiShell 不做关键字高亮，去掉 `Keyword` 变体
 
 //! What a terminal has to tell the user while they look elsewhere: a
 //! notification a program asks for (OSC 9 as iTerm2 has it, OSC 777 as urxvt
-//! and VTE have it), the bell, or a line a 关键字高亮 rule tells of.
+//! and VTE have it), or the bell.
 //!
 //! Alacritty drops both OSC sequences, so the parser thread runs the output
 //! through `NoticeScanner` too. The same pass picks up the folder a shell
@@ -15,8 +16,6 @@ use super::directory::{ReportedDirectory, reported_directory};
 /// The longest title and body a notification shows, in characters.
 const TITLE_LIMIT: usize = 80;
 const BODY_LIMIT: usize = 240;
-/// The longest rule name a notification's title has, in characters.
-const RULE_LIMIT: usize = 40;
 
 /// Something a terminal asks the user to look at.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,23 +25,12 @@ pub enum TerminalNotice {
     /// The bell rang. The line the cursor is on, which a program waiting
     /// for an answer usually has its question on.
     Bell { line: String },
-    /// A line of new output matched a 关键字高亮 rule that notifies: the
-    /// rule, by its note or pattern, and the line.
-    Keyword { rule: String, line: String },
 }
 
 impl TerminalNotice {
     /// The bell, with the line the cursor is on.
     pub fn bell(line: &str) -> Self {
         TerminalNotice::Bell {
-            line: clean_text(line, BODY_LIMIT),
-        }
-    }
-
-    /// The rule called `rule` matched `line`.
-    pub fn keyword(rule: &str, line: &str) -> Self {
-        TerminalNotice::Keyword {
-            rule: clean_text(rule, RULE_LIMIT),
             line: clean_text(line, BODY_LIMIT),
         }
     }
@@ -237,13 +225,6 @@ mod tests {
         assert_eq!(clean_text(" a\tb\n\x1bc  ", 10), "a b c");
         assert_eq!(clean_text("一二三四五", 4), "一二三…");
         assert_eq!(clean_text("一二三四", 4), "一二三四");
-        assert_eq!(
-            TerminalNotice::keyword(" ERROR ", "12:00\tERROR\x1b boom"),
-            TerminalNotice::Keyword {
-                rule: "ERROR".into(),
-                line: "12:00 ERROR boom".into()
-            }
-        );
         assert_eq!(
             notice(Some(" "), "x").cleaned(),
             TerminalNotice::Program {

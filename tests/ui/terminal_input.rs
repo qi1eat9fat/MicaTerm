@@ -589,3 +589,116 @@ fn no_binding_takes_ctrl_with_a_letter_inside_a_terminal(cx: &mut TestAppContext
         }
     });
 }
+
+// ---- 通知和响铃（OSC 9 / 777、BEL） ----
+
+/// 让卡片 `card` 的终端打出 `text`：假 shell 回显写进来的东西，括号粘贴没开时粘贴原样发过去。
+fn print_into(cx: &mut TestAppContext, workspace: &Entity<Workspace>, card: CardId, text: &str) {
+    set_clipboard(cx, text);
+    cx.update(|cx| {
+        let terminal = workspace
+            .read(cx)
+            .card(card, cx)
+            .expect("the card is open")
+            .read(cx)
+            .terminal()
+            .clone();
+        terminal.update(cx, |terminal, cx| terminal.paste_clipboard(cx));
+    });
+}
+
+fn in_window_notifications(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> usize {
+    in_frame(cx, handle, |window, cx| window.notifications(cx).len())
+}
+
+fn activate_window(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
+    in_frame(cx, handle, |window, _| window.activate_window());
+}
+
+/// 窗口在前、卡片看得见：程序要的通知在窗口里提示；响铃不提示（用户就看着它）。
+#[gpui_kit::test]
+fn a_program_notifies_in_the_window_and_the_bell_in_sight_says_nothing(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_running(cx, FakeTerminalFactory::default());
+    activate_window(cx, handle);
+
+    print_into(
+        cx,
+        &workspace,
+        CardId(1),
+        "\x1b]777;notify;构建;完成\x07\x07",
+    );
+
+    let shown = wait_until(cx, handle, |cx| in_window_notifications(cx, handle) == 1);
+    assert!(
+        shown,
+        "窗口里有 {} 条提示",
+        in_window_notifications(cx, handle)
+    );
+    // 响铃没有再加一条。
+    assert!(!wait_until(cx, handle, |cx| in_window_notifications(
+        cx, handle
+    ) > 1));
+    assert!(cx.shown_system_notifications().is_empty());
+}
+
+/// 卡片在后面的标签里（看不见）：响铃在窗口里提示。
+#[gpui_kit::test]
+fn the_bell_of_a_card_out_of_sight_notifies_in_the_window(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_running(cx, FakeTerminalFactory::default());
+    activate_window(cx, handle);
+    dispatch(cx, handle, NewLocalTerminalTab);
+    cx.update(|cx| assert_eq!(workspace.read(cx).active_tab(), Some(TabId(2))));
+
+    print_into(cx, &workspace, CardId(1), "y/N?\x07");
+
+    let shown = wait_until(cx, handle, |cx| in_window_notifications(cx, handle) == 1);
+    assert!(
+        shown,
+        "窗口里有 {} 条提示",
+        in_window_notifications(cx, handle)
+    );
+    assert!(cx.shown_system_notifications().is_empty());
+}
+
+/// 窗口不在前：通知走系统，标题是卡片的名称；点它就把窗口和那张卡片带到前面。
+#[gpui_kit::test]
+fn with_the_window_away_a_notice_goes_to_the_system(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_running(cx, FakeTerminalFactory::default());
+    dispatch(cx, handle, NewLocalTerminalTab);
+    gpui_kit::VisualTestContext::from_window(handle.into(), cx).deactivate_window();
+
+    print_into(cx, &workspace, CardId(1), "\x1b]9;部署完成\x07");
+
+    let shown = wait_until(cx, handle, |cx| !cx.shown_system_notifications().is_empty());
+    assert!(shown, "没有系统通知");
+    let shown = cx.shown_system_notifications();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].title.as_ref(), "pwsh");
+    assert_eq!(shown[0].body.as_ref(), "部署完成");
+    assert_eq!(in_window_notifications(cx, handle), 0);
+
+    cx.simulate_system_notification_response(gpui_kit::SystemNotificationResponse {
+        tag: shown[0].tag.clone(),
+        action_id: None,
+    });
+    cx.run_until_parked();
+    cx.update(|cx| assert_eq!(workspace.read(cx).active_tab(), Some(TabId(1))));
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find(TERMINAL).focused(), Some(true))
+    });
+}
+
+/// 响铃的系统通知标题写明是响铃，正文是光标所在的那一行。
+#[gpui_kit::test]
+fn a_bell_notice_is_titled_as_a_bell(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_running(cx, FakeTerminalFactory::default());
+    gpui_kit::VisualTestContext::from_window(handle.into(), cx).deactivate_window();
+
+    print_into(cx, &workspace, CardId(1), "继续吗 y/N?\x07");
+
+    let shown = wait_until(cx, handle, |cx| !cx.shown_system_notifications().is_empty());
+    assert!(shown, "没有系统通知");
+    let shown = cx.shown_system_notifications();
+    assert_eq!(shown[0].title.as_ref(), "pwsh：响铃");
+    assert_eq!(shown[0].body.as_ref(), "继续吗 y/N?");
+}
