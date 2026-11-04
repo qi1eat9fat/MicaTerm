@@ -3,6 +3,9 @@
 //! 唯一的 UI 级 seam 是注入式构造 `Workspace::new_with_services`：生产代码传真实服务，
 //! 无头 UI 测试传假实现（`tests/ui/support/mod.rs` 的 `fake_services`）。
 
+use std::collections::HashMap;
+use std::time::Instant;
+
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -55,6 +58,8 @@ pub struct Workspace {
     pub(super) tabs: TabList<TerminalTab>,
     /// 下一张卡片的 id：从 1 起，不复用。
     pub(super) next_card_id: u64,
+    /// 每张卡片每类通知上一次发出的时间，用来限频（`notices`）。
+    pub(super) notice_times: HashMap<String, Instant>,
     /// 标签轨道的滚动位置。
     pub(super) tab_rail: TabRail,
     _subscriptions: Vec<Subscription>,
@@ -94,6 +99,8 @@ impl Workspace {
             }),
         ];
         apply_terminal(&settings.read(cx).settings(), cx);
+        // 点终端的系统通知，回到那张卡片。
+        Self::listen_for_notice_clicks(window, cx);
         let start_card_focus = cx.focus_handle();
         // 启动时没有标签：开始卡片持有焦点。
         start_card_focus.focus(window, cx);
@@ -105,6 +112,7 @@ impl Workspace {
             host_sidebar_open: true,
             tabs: TabList::default(),
             next_card_id: 1,
+            notice_times: HashMap::new(),
             tab_rail: TabRail::default(),
             _subscriptions: subscriptions,
         }
