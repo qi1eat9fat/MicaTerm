@@ -15,7 +15,9 @@ icon_assets!(
     [
         Terminal, CodeXml, KeyRound, Columns2, Rows2, Maximize2, Minimize2,
         // 程序图块（工单 06，`crate::programs`）。
-        Activity, Globe, Cpu, FileCode, Diff, GitBranch
+        Activity, Globe, Cpu, FileCode, Diff, GitBranch,
+        // 命令片段面板：悬停时的 ⚡（点击就执行，工单 19）。
+        Zap
     ]
 );
 

@@ -9,13 +9,17 @@
 //! - `programs`：程序名表（命令名映射到程序图块，纯函数，本地和远程卡片共用）；
 //! - `split`：终端标签里的卡片分屏树（纯逻辑）和它的渲染；
 //! - `tabs`：标签列表的纯逻辑、终端标签、标签轨道里的标签；
+//! - `host`：主机核心（`qishell-hosts`）包成 GPUI 实体 `HostStore`；
+//! - `snippets`：命令片段面板和对话框；
 //! - `workspace`：窗口壳，持有全部 action 的处理器（`workspace/handlers/` 按领域分文件）。
 
 pub mod app;
 pub mod card;
+pub mod host;
 pub mod i18n;
 pub mod programs;
 pub mod settings;
+pub mod snippets;
 pub mod split;
 pub mod tabs;
 pub mod theme;

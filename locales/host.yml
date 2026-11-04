@@ -1,0 +1,9 @@
+_version: 2
+host.store.not_saved:
+  zh-CN: 改动没能保存到本地数据库：%{error}
+host.store.secret_not_saved:
+  zh-CN: 秘密没能写进保险库：%{error}
+host.store.secrets_unavailable:
+  zh-CN: 没有地方存放秘密
+host.store.secrets_locked:
+  zh-CN: 保险库已锁定

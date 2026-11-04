@@ -483,6 +483,11 @@ impl TerminalView {
         self.engine.read(cx).title().map(str::to_owned)
     }
 
+    /// 终端里是不是在运行全屏程序（vim、htop……占着备用屏幕）：这时不往里输入命令。
+    pub fn is_full_screen(&self, cx: &App) -> bool {
+        self.engine.read(cx).mode().contains(TermMode::ALT_SCREEN)
+    }
+
     // M2 #12 接回：`latency`（连接的往返延迟）。
 
     /// Which connection the terminal is on: counts up with every reconnect.

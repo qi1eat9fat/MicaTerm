@@ -1,0 +1,63 @@
+_version: 2
+snippets.panel.title:
+  zh-CN: 命令片段
+snippets.panel.target:
+  zh-CN: → %{card}
+snippets.panel.new:
+  zh-CN: 新建命令片段
+snippets.panel.search:
+  zh-CN: 按名称或命令搜索
+snippets.panel.empty:
+  zh-CN: 还没有命令片段
+snippets.panel.empty_hint:
+  zh-CN: 点上面的 + 新建一个
+snippets.panel.no_match:
+  zh-CN: 没有匹配的片段
+snippets.panel.no_terminal:
+  zh-CN: 当前标签没有终端
+snippets.panel.no_terminal_hint:
+  zh-CN: 切到终端标签后，点片段会发到焦点卡片
+snippets.panel.runs_on_click:
+  zh-CN: 点击就执行
+snippets.panel.types_on_click:
+  zh-CN: 点击只输入
+snippets.menu.enter:
+  zh-CN: 输入到终端
+snippets.menu.copy:
+  zh-CN: 复制命令
+snippets.menu.edit:
+  zh-CN: 编辑…
+snippets.menu.delete:
+  zh-CN: 删除
+snippets.notice.full_screen:
+  zh-CN: "%{card} 正在运行全屏程序，没有输入「%{snippet}」"
+snippets.notice.failed:
+  zh-CN: "%{card} 没有收到「%{snippet}」：%{error}"
+snippets.dialog.new_title:
+  zh-CN: 新建命令片段
+snippets.dialog.edit_title:
+  zh-CN: 编辑命令片段
+snippets.dialog.name:
+  zh-CN: 名称
+snippets.dialog.name_placeholder:
+  zh-CN: 例如：查看磁盘
+snippets.dialog.command:
+  zh-CN: 命令
+snippets.dialog.command_placeholder:
+  zh-CN: 可以多行
+snippets.dialog.run_on_click:
+  zh-CN: 点击时自动执行
+snippets.dialog.name_required:
+  zh-CN: 请输入名称
+snippets.dialog.command_required:
+  zh-CN: 请输入命令
+snippets.dialog.cancel:
+  zh-CN: 取消
+snippets.dialog.save:
+  zh-CN: 保存
+snippets.delete.title:
+  zh-CN: 删除「%{name}」？
+snippets.delete.description:
+  zh-CN: 删除后不能恢复。
+snippets.delete.ok:
+  zh-CN: 删除
