@@ -54,11 +54,13 @@ impl StatusDot {
 
     /// 标签的点：有一张卡片要注意就是橙点，否则有一张在输出就是绿点。
     pub fn of_tab(cards: impl IntoIterator<Item = Self>) -> Self {
-        cards.into_iter().fold(Self::None, |tab, card| match (tab, card) {
-            (Self::Attention, _) | (_, Self::Attention) => Self::Attention,
-            (Self::Busy, _) | (_, Self::Busy) => Self::Busy,
-            _ => Self::None,
-        })
+        cards
+            .into_iter()
+            .fold(Self::None, |tab, card| match (tab, card) {
+                (Self::Attention, _) | (_, Self::Attention) => Self::Attention,
+                (Self::Busy, _) | (_, Self::Busy) => Self::Busy,
+                _ => Self::None,
+            })
     }
 }
 
@@ -109,7 +111,10 @@ mod tests {
         // 1.5 秒没输出就熄灭。
         assert_eq!(dot(start + Duration::from_millis(1500)), StatusDot::None);
         // 一直没有输出过：不亮。
-        assert_eq!(StatusDot::of(false, Some(&vim), None, start), StatusDot::None);
+        assert_eq!(
+            StatusDot::of(false, Some(&vim), None, start),
+            StatusDot::None
+        );
     }
 
     #[test]
@@ -118,7 +123,10 @@ mod tests {
         // shell 自己在前台（提示符下打字）：有回显也不亮。
         assert_eq!(StatusDot::of(false, None, Some(now), now), StatusDot::None);
         let pwsh = program_of("pwsh");
-        assert_eq!(StatusDot::of(false, Some(&pwsh), Some(now), now), StatusDot::None);
+        assert_eq!(
+            StatusDot::of(false, Some(&pwsh), Some(now), now),
+            StatusDot::None
+        );
     }
 
     #[test]

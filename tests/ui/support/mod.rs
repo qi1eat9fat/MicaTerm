@@ -45,6 +45,8 @@ pub use terminal::*;
 pub use gpui_kit::VisualTestContext;
 pub use qishell::app::{CloseFocusedCard, SplitDown, SplitRight, ToggleZoomCard};
 pub use qishell::split::NodeId;
+// 程序图块与状态点（工单 06）。
+pub use qishell::card::StatusDot;
 
 /// 每个夹具都先做的事：QiShell 的全局量（文案、字体、快捷键）。
 pub fn init_app(cx: &mut TestAppContext) {

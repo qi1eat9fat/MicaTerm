@@ -120,9 +120,8 @@ mod unix {
         let pid = libc::c_int::try_from(pid).ok()?;
         let mut buffer = vec![0_u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
         // SAFETY: 缓冲区是 `buffer`，长度如实传入。
-        let written = unsafe {
-            libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32)
-        };
+        let written =
+            unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
         if written <= 0 {
             return None;
         }
@@ -398,7 +397,10 @@ mod windows {
             }
             let _ = child.kill();
             let _ = child.wait();
-            assert_eq!(seen.map(|name| name.to_lowercase()).as_deref(), Some("ping"));
+            assert_eq!(
+                seen.map(|name| name.to_lowercase()).as_deref(),
+                Some("ping")
+            );
             // 不存在的进程什么都没有。
             assert_eq!(foreground(u32::MAX - 3), None);
         }
@@ -437,11 +439,21 @@ mod tests {
             "codex"
         );
         assert_eq!(
-            program_name("node", &args(&["node", "--no-warnings", "/usr/lib/node_modules/npm/bin/npm-cli.js"])),
+            program_name(
+                "node",
+                &args(&[
+                    "node",
+                    "--no-warnings",
+                    "/usr/lib/node_modules/npm/bin/npm-cli.js"
+                ])
+            ),
             "npm"
         );
         // 自己的脚本：还是 node。
-        assert_eq!(program_name("node", &args(&["node", "demo/snake.mjs"])), "node");
+        assert_eq!(
+            program_name("node", &args(&["node", "demo/snake.mjs"])),
+            "node"
+        );
         assert_eq!(program_name("node", &[]), "node");
     }
 
@@ -458,7 +470,11 @@ mod tests {
     fn a_windows_command_line_splits_as_programs_split_it() {
         assert_eq!(
             split_command_line(r#""C:\Program Files\nodejs\node.exe" "C:\a b\codex.js" --x"#),
-            args(&[r"C:\Program Files\nodejs\node.exe", r"C:\a b\codex.js", "--x"])
+            args(&[
+                r"C:\Program Files\nodejs\node.exe",
+                r"C:\a b\codex.js",
+                "--x"
+            ])
         );
         assert_eq!(
             split_command_line(r#"a\\\"b c\d "e\\" f"#),

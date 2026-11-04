@@ -8,9 +8,9 @@ use gpui_kit::*;
 use super::CardId;
 use super::program_tile::render_program_tile;
 use super::status_dot::{StatusDot, render_status_dot};
-use crate::programs::Program;
 use crate::app::{CatalogIcon, CloseCard, SplitCard, ZoomCard};
 use crate::i18n::t;
+use crate::programs::Program;
 use crate::split::Axis;
 use crate::theme::{CARD_HEADER_HEIGHT, ICON_BUTTON, ICON_BUTTON_RADIUS, Tokens};
 

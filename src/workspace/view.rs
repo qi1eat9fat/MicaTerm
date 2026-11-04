@@ -214,7 +214,12 @@ impl Workspace {
     pub fn tab_tiles(&self, tab: TabId, cx: &App) -> Vec<String> {
         self.tabs
             .get(tab)
-            .map(|tab| tab.tiles(cx).into_iter().map(|program| program.name).collect())
+            .map(|tab| {
+                tab.tiles(cx)
+                    .into_iter()
+                    .map(|program| program.name)
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

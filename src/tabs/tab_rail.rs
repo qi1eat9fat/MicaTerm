@@ -16,8 +16,8 @@ use crate::app::{
     ActivateTab, CatalogIcon, CloseOtherTabs, CloseTab, CloseTabsToRight, OpenTabMenu,
 };
 use crate::card::{StatusDot, render_status_dot, render_tile_stack};
-use crate::programs::Program;
 use crate::i18n::t;
+use crate::programs::Program;
 use crate::theme::{TAB_HEIGHT, TAB_TRACK_HEIGHT, TAB_WIDTH, Tokens};
 
 /// 画一个标签要的东西。

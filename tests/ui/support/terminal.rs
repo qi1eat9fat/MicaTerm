@@ -2,6 +2,7 @@
 // 来自 since2006/shell-rs @ b2a307a: tests/ui/support/terminal.rs
 // （裁剪：去掉远程、Telnet、串口、ZMODEM、侧边执行、SFTP 通道；加了 `shutdowns`）
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -36,8 +37,8 @@ pub struct FakeTerminalFactory {
     pub resizes: Arc<Mutex<Vec<TerminalSize>>>,
     /// 收到 `Shutdown` 的次数：关卡片就是关它的 shell。
     pub shutdowns: Arc<AtomicUsize>,
-    /// 每一次启动的传输往终端发事件的口子，按启动的顺序（工单 06：测试替假 shell 报告前台程序）。
-    pub senders: Arc<Mutex<Vec<async_channel::Sender<TerminalTransportEvent>>>>,
+    /// 每一次启动的传输往终端发事件的口子，按第几次启动（从 1 数）记（工单 06：测试替假 shell 报告前台程序）。
+    pub senders: Arc<Mutex<HashMap<usize, async_channel::Sender<TerminalTransportEvent>>>>,
 }
 
 impl FakeTerminalFactory {
@@ -120,7 +121,7 @@ pub struct FakeTerminalTransport {
     pub writes: Arc<Mutex<Vec<Vec<u8>>>>,
     pub resizes: Arc<Mutex<Vec<TerminalSize>>>,
     pub shutdowns: Arc<AtomicUsize>,
-    pub senders: Arc<Mutex<Vec<async_channel::Sender<TerminalTransportEvent>>>>,
+    pub senders: Arc<Mutex<HashMap<usize, async_channel::Sender<TerminalTransportEvent>>>>,
 }
 
 impl TerminalTransport for FakeTerminalTransport {
@@ -133,11 +134,12 @@ impl TerminalTransport for FakeTerminalTransport {
         if matches!(self.behavior, FakeBehavior::FailFirst) && self.run == 1 {
             anyhow::bail!("测试启动失败");
         }
+        events.send_blocking(TerminalTransportEvent::Started)?;
+        // 在 `Started` 之后才交出去：测试发的事件总在启动之后到。
         self.senders
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .push(events.clone());
-        events.send_blocking(TerminalTransportEvent::Started)?;
+            .insert(self.run, events.clone());
         if let FakeBehavior::InFolder(folder) = self.behavior {
             events.send_blocking(TerminalTransportEvent::WorkingDirectory(folder.into()))?;
         }
@@ -222,7 +224,7 @@ impl FakeTerminalFactory {
                 .senders
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
-                .get(run - 1)
+                .get(&run)
                 .cloned();
             if let Some(sender) = sender {
                 sender
@@ -248,6 +250,9 @@ impl FakeTerminalFactory {
 
     /// 第 `run` 次启动的假 shell 打出 `text`。
     pub fn print(&self, run: usize, text: &str) {
-        self.send(run, TerminalTransportEvent::Output(text.as_bytes().to_vec()));
+        self.send(
+            run,
+            TerminalTransportEvent::Output(text.as_bytes().to_vec()),
+        );
     }
 }

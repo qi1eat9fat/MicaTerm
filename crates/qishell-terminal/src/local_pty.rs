@@ -212,7 +212,8 @@ impl TerminalTransport for LocalPtyTransport {
                 && program_looked.is_none_or(|at| {
                     let since = at.elapsed();
                     since >= LOOK_FOR_THE_PROGRAM_QUIETLY
-                        || (since >= LOOK_FOR_THE_FOLDER && program_wrote.swap(false, Ordering::Relaxed))
+                        || (since >= LOOK_FOR_THE_FOLDER
+                            && program_wrote.swap(false, Ordering::Relaxed))
                 })
             {
                 program_looked = Some(Instant::now());
