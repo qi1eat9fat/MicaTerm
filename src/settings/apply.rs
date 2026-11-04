@@ -1,12 +1,55 @@
-//! 应用设置：把设置变成终端读的全局量（`TerminalFont`、`TerminalInteraction`）。
-//! 终端 crate 不依赖设置，开着的终端靠观察这些全局量跟着变。
+//! 应用设置：应用外观、界面字号，以及终端读的全局量（`TerminalColors`、`TerminalFont`、
+//! `TerminalInteraction`）。终端 crate 不依赖设置，开着的终端靠观察这些全局量跟着变。
 //!
-//! 窗口壳在打开时和每次设置变化时调用 `apply_terminal`。工单 07 在这里加终端主题（`TerminalColors`）。
+//! 窗口壳在打开时、每次设置变化时和系统外观变化时调用 `apply`：每一步都先比较，没变的不动，
+//! 所以随便调多少次都行。
+// 参考 since2006/shell-rs @ b2a307a: src/settings/apply.rs
 
-use gpui_kit::{App, px};
-use qishell_terminal::{TerminalFont, TerminalInteraction, is_font_installed};
+use gpui_kit::component::{ActiveTheme as _, Theme, ThemeMode};
+use gpui_kit::{App, Window, px};
+use qishell_terminal::{TerminalColors, TerminalFont, TerminalInteraction, is_font_installed};
 
 use super::{AppSettings, DEFAULT_TERMINAL_FONT_FAMILY};
+use crate::theme::{component_theme, component_theme_name};
+
+/// 让窗口和设置一致：应用外观（跟随系统时看窗口当前的外观）、界面字号、终端主题、
+/// 终端字体和交互。
+pub fn apply(settings: &AppSettings, window: &mut Window, cx: &mut App) {
+    // 每次都读窗口的外观，不只在设置变化时：跟随系统时，系统一变主题就跟着变。
+    let mode = settings.appearance.theme_mode(window.appearance());
+    apply_app_theme(mode, window, cx);
+
+    // 界面字号：在换主题之后设，换主题不会动它。
+    let font_size = px(settings.interface.font_size);
+    if cx.theme().font_size != font_size {
+        Theme::global_mut(cx).font_size = font_size;
+        Theme::sync_base(cx);
+        window.refresh();
+    }
+
+    let colors = TerminalColors::new(settings.terminal_theme.theme(mode));
+    if cx.try_global::<TerminalColors>() != Some(&colors) {
+        cx.set_global(colors);
+        window.refresh();
+    }
+
+    apply_terminal(settings, cx);
+}
+
+/// 换成 `mode` 的界面主题（原型 token 映射出来的那套）；已经是它就不动。
+fn apply_app_theme(mode: ThemeMode, window: &mut Window, cx: &mut App) {
+    let name = component_theme_name(mode);
+    if cx.theme().mode == mode && cx.theme().theme_name().as_ref() == name {
+        return;
+    }
+    let config = component_theme(mode, cx);
+    let theme = Theme::global_mut(cx);
+    match mode {
+        ThemeMode::Light => theme.light_theme = config,
+        ThemeMode::Dark => theme.dark_theme = config,
+    }
+    Theme::change(mode, Some(window), cx);
+}
 
 /// 把终端相关的设置交给终端：字体、字号、行高，交互。没变的不重设，免得白白重画。
 pub fn apply_terminal(settings: &AppSettings, cx: &mut App) {

@@ -17,7 +17,7 @@ use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
 use crate::card::{CardId, TerminalCard};
-use crate::settings::{SettingsStore, SettingsStoreEvent, apply_terminal};
+use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
 use crate::tabs::{TabId, TabList, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
 
@@ -86,12 +86,16 @@ impl Workspace {
                     }
                 },
             ),
-            // 终端的字体、交互跟着设置走：开着的终端立刻变。
-            cx.observe(&settings, |_, settings, cx| {
-                apply_terminal(&settings.read(cx).settings(), cx);
+            // 应用外观、界面字号、终端主题、字体和交互跟着设置走：开着的终端立刻变。
+            cx.observe_in(&settings, window, |_, settings, window, cx| {
+                apply(&settings.read(cx).settings(), window, cx);
+            }),
+            // 跟随系统时，系统换深浅色，窗口跟着换。
+            cx.observe_window_appearance(window, |this, window, cx| {
+                apply(&this.settings.read(cx).settings(), window, cx);
             }),
         ];
-        apply_terminal(&settings.read(cx).settings(), cx);
+        apply(&settings.read(cx).settings(), window, cx);
         let start_card_focus = cx.focus_handle();
         // 启动时没有标签：开始卡片持有焦点。
         start_card_focus.focus(window, cx);
