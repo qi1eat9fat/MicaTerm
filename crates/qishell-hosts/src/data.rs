@@ -2,8 +2,8 @@
 // 裁剪：去掉同步（`sync_revision`、`edited_ms`、`secret_edits`、`sync_*`）、Telnet、串口、
 // 项目终端、端口转发、主机分组（树形拖动改成平铺列表里重新排序）、临时连接和外部连接、
 // 右侧栏工具字段、SFTP 书签、管理 `keys/` 目录的代码（私钥进保险库）、给外部 CLI 用的 capture；
-// 把主机拼成 SSH 登录的部分（`login`、`connection`、`route_login`）依赖 qishell-ssh，先去掉，
-// 主机读哪些秘密改由本文件的 `secrets_of` 算。
+// 把主机拼成 SSH 登录的部分（`login`、`login_of`、`route_login`）挪到 login.rs；
+// 主机读哪些秘密由本文件的 `secrets_of` 算，和 login.rs 拼出的登录读的是同一套条目。
 
 use std::cell::RefCell;
 use std::collections::HashSet;

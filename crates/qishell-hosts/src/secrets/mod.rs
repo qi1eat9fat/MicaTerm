@@ -1,6 +1,6 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-hosts/src/secrets/mod.rs
 // 裁剪：去掉临时连接的 `TemporarySecretStore` 和交给 SSH 连接的 `KeychainSource`（接 SSH 登录时再加）；
-// `SecretRef` 改为本 crate 自己的（见 secret_ref.rs）；加上保险库锁着时的 `SecretsLocked`。
+// 加上保险库锁着时的 `SecretsLocked`；`SecretRef` 和上游一样用 ssh crate 的（全项目只有 qishell-ssh 那一份）。
 
 //! 秘密的读写接口和不落地的几种实现。真正的实现是数据目录里的保险库（工单 10），
 //! 它实现 [`SecretStore`]。
@@ -9,16 +9,16 @@
 //! 的 `schema_never_contains_secret_columns` 守着这条不变量。
 
 mod memory;
-mod secret_ref;
 
 use std::fmt;
 use std::sync::Arc;
 
 use anyhow::Result;
+use qishell_ssh::{SecretSource, SharedSecretSource};
 use zeroize::Zeroizing;
 
 pub use memory::{InMemorySecretStore, NoSecretStore, SecretsUnavailable};
-pub use secret_ref::SecretRef;
+pub use qishell_ssh::SecretRef;
 
 /// 秘密的读写：生产里是保险库，测试里是 [`InMemorySecretStore`]。
 ///
@@ -37,6 +37,22 @@ pub trait SecretStore: Send + Sync + 'static {
 
 pub type SharedSecretStore = Arc<dyn SecretStore>;
 
+/// 秘密存储交给 SSH 连接用的那一面：只读。保险库锁着时读出的 [`SecretsLocked`]
+/// 原样交给连接，私钥登录据此失败、调用方据此弹出解锁框。
+pub struct StoreSource(SharedSecretStore);
+
+impl StoreSource {
+    pub fn shared(store: SharedSecretStore) -> SharedSecretSource {
+        Arc::new(Self(store))
+    }
+}
+
+impl SecretSource for StoreSource {
+    fn secret(&self, secret: &SecretRef) -> Result<Option<Zeroizing<String>>> {
+        self.0.get(secret)
+    }
+}
+
 /// 保险库锁着、读写不了秘密时的失败。作为 `anyhow` 链上的叶子错误返回，
 /// 调用方用 `downcast_ref::<SecretsLocked>()` 认出它（[`crate::SecretError::of`] 就是这样做的）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +69,9 @@ impl std::error::Error for SecretsLocked {}
 
 #[cfg(test)]
 mod tests {
-    use super::{InMemorySecretStore, NoSecretStore, SecretRef, SecretStore};
+    use std::sync::Arc;
+
+    use super::{InMemorySecretStore, NoSecretStore, SecretRef, SecretStore, StoreSource};
 
     #[test]
     fn the_memory_store_round_trips() {
@@ -91,6 +109,22 @@ mod tests {
         let other = SecretRef::password(2);
         store.set(&one, "hunter2").unwrap();
         assert!(store.get(&other).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_connection_reads_what_the_store_holds() {
+        let store = Arc::new(InMemorySecretStore::default());
+        store.set(&SecretRef::password(1), "hunter2").unwrap();
+        let source = StoreSource::shared(store);
+        assert_eq!(
+            source
+                .secret(&SecretRef::password(1))
+                .unwrap()
+                .as_deref()
+                .map(String::as_str),
+            Some("hunter2")
+        );
+        assert!(source.secret(&SecretRef::password(2)).unwrap().is_none());
     }
 
     #[test]
