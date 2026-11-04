@@ -1,0 +1,28 @@
+[package]
+name = "qishell-hosts"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "QiShell 的主机核心：主机、凭据、命令片段的模型，写穿的 SQLite 数据库，以及秘密存储的 SecretStore trait"
+# 拷自 since2006/shell-rs @ b2a307a 的 crates/shellrs-hosts（MIT），见 ADR 0002；
+# 原来的 MIT 许可和版权声明保留在 LICENSE 里。
+license = "GPL-3.0-only"
+
+[dependencies]
+anyhow = "1"
+# 模型里的文本类型：GPUI 自己的 SharedString，单独拆出来的小 crate（只依赖 serde 和 smol_str），
+# 和 gpui-kit 0.6.1 用的是同一个类型，界面直接拿模型用，不用转换。
+gpui-pre-shared-string = "0.3.2"
+# 凭据的 secret_id：随机字母数字。
+rand = "0.9"
+rusqlite = { version = "0.40", features = ["bundled"] }
+# 生成、解析私钥（凭据对话框的「生成」「粘贴」）。
+russh = "0.63"
+zeroize = "1"
+
+[features]
+# 给依赖本 crate 的测试用的夹具（`HostDatabase::in_memory`）：应用把它放进 dev-dependencies。
+testing = []
+
+[dev-dependencies]
+tempfile = "3"
