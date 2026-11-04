@@ -16,12 +16,13 @@
 //! 测试夹具：[`HostData::empty`]、[`HostData::seed`]、[`HostData::with_secrets`] 注入内存版秘密存储，
 //! `testing` feature 打开的 [`HostDatabase::in_memory`]。
 //!
-//! 还没接回的：把主机和凭据拼成 SSH 登录（上游的 `HostLogin::of`、`HostData::login`）依赖
-//! qishell-ssh，和本 crate 并行拷入，留给接 SSH 登录的工单（12）。
+//! 把主机和凭据拼成 SSH 登录：[`HostLoginExt::of`]、[`HostData::login`]；秘密存储交给连接用的
+//! 只读一面是 [`secrets::StoreSource`]。`SecretRef`、`ProxyKind`、`HostLogin` 都是 qishell-ssh 的。
 
 mod credential;
 mod data;
 mod database;
+mod login;
 mod mark;
 mod model;
 mod private_key;
@@ -32,10 +33,14 @@ pub use credential::*;
 pub use data::{Change, Failure, HostData, HostEvent, SecretError, SecretJob, SecretOutcome};
 pub use database::{HostDatabase, OpenError, SCHEMA_VERSION, StoredData};
 pub use gpui_shared_string::SharedString;
+pub use login::{
+    DEFAULT_KEY_FILES, HostLogin, HostLoginExt, JumpLogin, LoginMethod, LoginRoute, ProxyLogin,
+    SavedKey,
+};
 pub use mark::mark_color;
 pub use model::*;
 pub use private_key::{
     GeneratedKey, KeyAlgorithm, PastedKey, PastedKeyError, read_public_key, read_small,
 };
-pub use secrets::{SecretRef, SecretStore, SharedSecretStore};
+pub use secrets::{SecretRef, SecretStore, SharedSecretStore, StoreSource};
 pub use snippet::*;

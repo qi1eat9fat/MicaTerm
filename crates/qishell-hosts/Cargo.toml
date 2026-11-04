@@ -18,6 +18,8 @@ rand = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 # 生成、解析私钥（凭据对话框的「生成」「粘贴」）。
 russh = "0.63"
+# `SecretRef`、`ProxyKind` 和把主机拼成的 SSH 登录（`HostLogin`）都是它的类型，和上游一样。
+qishell-ssh = { path = "../qishell-ssh" }
 zeroize = "1"
 
 [features]
