@@ -896,7 +896,7 @@ async fn authenticate(
         let mut saved_rejected = false;
         if methods.contains(&MethodKind::Password) {
             // Try what the host has saved before bothering anyone.
-            if let Some(saved) = read_secret(secrets, &login.password).await {
+            if let Some(saved) = saved_password(login, secrets).await {
                 saved_offered = true;
                 let result = handle
                     .authenticate_password(user, saved.to_string())
@@ -946,7 +946,7 @@ async fn authenticate(
                     saved: if saved_offered {
                         None
                     } else {
-                        read_secret(secrets, &login.password).await
+                        saved_password(login, secrets).await
                     },
                     rejected: saved_rejected,
                 })
@@ -961,6 +961,14 @@ async fn authenticate(
         }
     }
     bail!(AuthError::Failed)
+}
+
+/// The password saved for `login`, if it names one and the vault has it.
+async fn saved_password(
+    login: &HostLogin,
+    secrets: &SharedSecretSource,
+) -> Option<Zeroizing<String>> {
+    read_secret(secrets, login.password.as_ref()?).await
 }
 
 /// What a password login brings to keyboard-interactive authentication.

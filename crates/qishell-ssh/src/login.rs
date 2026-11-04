@@ -1,5 +1,6 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/login.rs
-// 改造：私钥进保险库：`key_path` 换成 `key: Option<SavedKey>`，加 `PrivateKeySource`。
+// 改造：私钥进保险库：`key_path` 换成 `key: Option<SavedKey>`，加 `PrivateKeySource`；
+// 密码按主机存以后，`password` 改成 `Option<SecretRef>`：没保存的登录（快速连接）没有它。
 //! How a connection logs in to a host, with every secret named by where it
 //! is kept rather than held. The app builds one from what it saved and
 //! hands it to a worker, which never reads the app's own records.
@@ -40,41 +41,46 @@ pub struct HostLogin {
     /// The private key of [`LoginMethod::Key`], and `None` for every other
     /// method.
     pub key: Option<SavedKey>,
-    /// The saved password the password step reads: the endpoint's own, or a
-    /// password credential's. Every other login keeps the endpoint's for a
-    /// server that asks for a password after the key.
-    pub password: SecretRef,
+    /// The saved password the password step reads: the host's own, or a
+    /// password credential's. A key or agent login keeps the host's own for
+    /// a server that asks for a password after the key. `None` when nothing
+    /// is saved for it (a quick connection): the password is asked.
+    pub password: Option<SecretRef>,
     /// How the connection reaches the host.
     pub route: LoginRoute,
     /// The connection carries the terminal and nothing beside it: no
     /// channel of its own for the system probe or the commands run beside
-    /// the shell. A bastion host that opened ShellRS with a link serves one
-    /// session per connection and ends it when another channel comes and
-    /// goes, as Xshell and OpenSSH never make it do.
+    /// the shell. Some bastion hosts serve one session per connection and
+    /// end it when another channel comes and goes, as Xshell and OpenSSH
+    /// never make it do.
     pub shell_only: bool,
 }
 
 impl HostLogin {
-    /// `user@host:port` reached directly by `method`, with the endpoint's
-    /// own password.
+    /// `user@host:port` reached directly by `method`, with no saved
+    /// password.
     pub fn new(
         host: impl Into<String>,
         port: u16,
         user: impl Into<String>,
         method: LoginMethod,
     ) -> Self {
-        let host = host.into();
-        let user = user.into();
         Self {
-            password: SecretRef::password(&user, &host, port),
-            host,
+            host: host.into(),
             port,
-            user,
+            user: user.into(),
             method,
             key: None,
+            password: None,
             route: LoginRoute::Direct,
             shell_only: false,
         }
+    }
+
+    /// The same login, reading its saved password from `password`.
+    pub fn with_password(mut self, password: SecretRef) -> Self {
+        self.password = Some(password);
+        self
     }
 
     /// The same login, with `key` as its private key.
@@ -96,33 +102,33 @@ impl HostLogin {
 }
 
 /// A private key kept in the vault, named by its credential's random
-/// `keychain_id`: the key's text and its passphrase, if it has one, are two
+/// `secret_id`: the key's text and its passphrase, if it has one, are two
 /// secrets of it. The connection reads the text into memory and decodes it
 /// there; no key file is ever read for it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SavedKey {
-    keychain_id: String,
+    secret_id: String,
 }
 
 impl SavedKey {
-    pub fn new(keychain_id: impl Into<String>) -> Self {
+    pub fn new(secret_id: impl Into<String>) -> Self {
         Self {
-            keychain_id: keychain_id.into(),
+            secret_id: secret_id.into(),
         }
     }
 
-    pub fn keychain_id(&self) -> &str {
-        &self.keychain_id
+    pub fn secret_id(&self) -> &str {
+        &self.secret_id
     }
 
     /// Where the key's text is kept.
     pub fn private_key(&self) -> SecretRef {
-        SecretRef::private_key(&self.keychain_id)
+        SecretRef::private_key(self.secret_id.as_str())
     }
 
     /// Where the key's passphrase is kept.
     pub fn passphrase(&self) -> SecretRef {
-        SecretRef::passphrase(&self.keychain_id)
+        SecretRef::passphrase(self.secret_id.as_str())
     }
 }
 
@@ -239,9 +245,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_login_reads_its_endpoints_password() {
+    fn a_new_login_has_no_saved_password_until_given_one() {
         let login = HostLogin::new("10.0.0.1", 22, "root", LoginMethod::Password);
-        assert_eq!(login.password, SecretRef::password("root", "10.0.0.1", 22));
+        assert_eq!(login.password, None);
+        assert_eq!(
+            login.clone().with_password(SecretRef::password(7)).password,
+            Some(SecretRef::password(7))
+        );
         assert_eq!(login.endpoint(), "root@10.0.0.1:22");
         assert_eq!(login.route, LoginRoute::Direct);
         assert_eq!(login.key, None);

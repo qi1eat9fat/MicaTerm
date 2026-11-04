@@ -1,5 +1,6 @@
-//! 私钥登录：私钥是保险库里的一条秘密，经 `SecretSource` 读进内存再解析，
-//! 不再按文件路径读。对着进程内的 russh 测试服务器真的登录一次。
+//! 对着进程内的 russh 测试服务器真的登录：
+//! - 密码：主机自己的密码按主机 id 存在保险库里，没保存的登录现场询问；
+//! - 私钥：私钥是保险库里的一条秘密，经 `SecretSource` 读进内存再解析，不再按文件路径读。
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -10,7 +11,7 @@ use russh::keys::{Algorithm, PrivateKey};
 use tokio::sync::{mpsc, watch};
 use zeroize::Zeroizing;
 
-use crate::testing::{TEST_USER, TestServer};
+use crate::testing::{TEST_PASSWORD, TEST_USER, TestServer};
 use crate::{
     AuthError, AuthenticationRequest, ConnectionPromptKind, ConnectionPromptReply,
     ConnectionSecret, HostLogin, LoginMethod, PrivateKeySource, SavedKey, SecretRef, SecretSource,
@@ -81,12 +82,12 @@ fn key_login(port: u16, key: &SavedKey) -> HostLogin {
     login
 }
 
-/// 登录一次：信任主机密钥，问口令时答 `passphrase`（没有就取消）。
+/// 登录一次：信任主机密钥，问密码或口令时答 `answer`（没有就取消）。
 /// 返回结果和登录过程中问过的认证问题。
 async fn connect(
     login: &HostLogin,
     secrets: Arc<dyn SecretSource>,
-    passphrase: Option<&str>,
+    answer: Option<&str>,
 ) -> (Result<()>, Vec<AuthenticationRequest>) {
     let directory = tempfile::tempdir().unwrap();
     let connector =
@@ -100,7 +101,7 @@ async fn connect(
     let answerer = {
         // 弱引用：连接用完后 broker 就该没了，好让提问的通道关上。
         let broker = Arc::downgrade(&broker);
-        let passphrase = passphrase.map(str::to_string);
+        let answer = answer.map(str::to_string);
         tokio::spawn(async move {
             let mut requests = Vec::new();
             while let Some(prompt) = asked.recv().await {
@@ -108,7 +109,7 @@ async fn connect(
                     ConnectionPromptKind::UnknownHost(_) => ConnectionPromptReply::TrustAndSave,
                     ConnectionPromptKind::Authentication(question) => {
                         requests.push(question.request().clone());
-                        match &passphrase {
+                        match &answer {
                             Some(answer) => {
                                 ConnectionPromptReply::Answers(vec![ConnectionSecret::new(
                                     answer.clone(),
@@ -133,6 +134,61 @@ async fn connect(
     // 连接用完即弃：提问的发送端随 broker 一起没了，回答的任务就结束。
     let requests = answerer.await.unwrap();
     (result, requests)
+}
+
+fn password_login(port: u16) -> HostLogin {
+    HostLogin::new("127.0.0.1", port, TEST_USER, LoginMethod::Password)
+}
+
+#[tokio::test]
+async fn a_hosts_saved_password_logs_in_without_asking() {
+    let server = TestServer::start(std::env::temp_dir()).await.unwrap();
+    let login = password_login(server.port).with_password(SecretRef::password(7));
+    let vault = Vault::with(&[(SecretRef::password(7), TEST_PASSWORD)]);
+
+    let (result, asked) = connect(&login, vault, None).await;
+
+    result.unwrap();
+    assert!(asked.is_empty(), "{asked:?}");
+}
+
+/// 另一台主机（比如副本）的密码不算这台的：按主机 id 存，同一个 `user@host:port` 也不共用。
+#[tokio::test]
+async fn another_hosts_password_is_not_this_ones() {
+    let server = TestServer::start(std::env::temp_dir()).await.unwrap();
+    let login = password_login(server.port).with_password(SecretRef::password(8));
+    let vault = Vault::with(&[(SecretRef::password(7), TEST_PASSWORD)]);
+
+    let (result, asked) = connect(&login, vault, Some(TEST_PASSWORD)).await;
+
+    result.unwrap();
+    assert_eq!(
+        asked,
+        [AuthenticationRequest::Password {
+            saved_rejected: false
+        }]
+    );
+}
+
+/// 没保存的登录（快速连接）没有密码条目，直接问。
+#[tokio::test]
+async fn a_login_with_nothing_saved_asks_for_the_password() {
+    let server = TestServer::start(std::env::temp_dir()).await.unwrap();
+
+    let (result, asked) = connect(
+        &password_login(server.port),
+        Vault::with(&[]),
+        Some(TEST_PASSWORD),
+    )
+    .await;
+
+    result.unwrap();
+    assert_eq!(
+        asked,
+        [AuthenticationRequest::Password {
+            saved_rejected: false
+        }]
+    );
 }
 
 #[tokio::test]

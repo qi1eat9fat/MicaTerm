@@ -18,10 +18,10 @@
 
 mod connection;
 mod error;
-#[cfg(test)]
-mod key_login_tests;
 mod latency;
 mod login;
+#[cfg(test)]
+mod login_tests;
 mod probe;
 mod prompt;
 mod proxy;
