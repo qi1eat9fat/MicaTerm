@@ -8,7 +8,7 @@
 
 use std::ops::{Deref, DerefMut};
 
-use gpui_kit::{Context, EventEmitter, SharedString, Task};
+use gpui_kit::{AppContext as _, Context, EventEmitter, SharedString, Task};
 use zeroize::Zeroizing;
 
 use qishell_hosts::{
@@ -161,7 +161,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use gpui_kit::{AppContext as _, TestAppContext};
+    use gpui_kit::TestAppContext;
     use qishell_hosts::secrets::InMemorySecretStore;
     use qishell_hosts::{AuthKind, CredentialKind, HostDatabase, SecretStore as _};
 

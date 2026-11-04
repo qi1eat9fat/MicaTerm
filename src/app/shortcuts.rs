@@ -87,6 +87,13 @@ pub const WINDOW_KEYS: &[Shortcut] = &[
         action: || Box::new(Quit),
         context: None,
     },
+    // 聚焦主机搜索（工单 11）。
+    Shortcut {
+        keys: "ctrl-shift-h",
+        mac: "cmd-shift-h",
+        action: || Box::new(FocusHostSearch),
+        context: None,
+    },
 ];
 
 /// 标签的快捷键（工单 02、04）。

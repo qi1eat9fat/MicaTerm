@@ -53,7 +53,7 @@ impl HostMark {
     }
 
     /// 直径为 `size` 的圆形徽章。
-    pub fn render(&self, id: impl Into<ElementId>, size: Pixels) -> impl IntoElement + use<> {
+    pub fn render(&self, id: ElementId, size: Pixels) -> impl IntoElement + use<> {
         let own: Hsla = rgb(mark_color(&self.address)).into();
         let white: Hsla = rgb(MARK_INK).into();
         let (background, ink) = match self.os.and_then(|os| os.brand_color().zip(os.brand_foreground())) {

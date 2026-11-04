@@ -1,6 +1,5 @@
 //! 主机对话框的「备注」组：写点什么，悬停主机时显示。
 
-use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::*;
 
@@ -37,12 +36,12 @@ impl NotesSection {
         form_group(
             t!("host.dialog.notes"),
             [div()
+                .id(FIELD_NOTES)
                 .mb(px(10.))
                 .child(
                     Textarea::new(&self.notes)
-                        .id(FIELD_NOTES)
                         .aria_label(t!("host.dialog.notes"))
-                        .small(),
+                        .text_size(px(13.)),
                 )
                 .into_any_element()],
             tokens,

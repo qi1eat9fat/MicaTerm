@@ -19,7 +19,7 @@ use std::collections::HashSet;
 use gpui_kit::base::POPUP_PRIORITY;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{Icon, IconName};
+use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -481,7 +481,7 @@ impl HostList {
                         cx.notify();
                     }))
             })
-            .child(mark.render(("host-badge", id.0 as usize), BADGE))
+            .child(mark.render(("host-badge", id.0 as usize).into(), BADGE))
             .child(
                 div()
                     .flex()
