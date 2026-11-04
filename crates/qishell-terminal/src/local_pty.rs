@@ -267,9 +267,141 @@ fn working_directory(pid: u32) -> Option<PathBuf> {
     (!path.is_empty()).then(|| PathBuf::from(std::ffi::OsStr::from_bytes(path.to_bytes())))
 }
 
-/// Windows has no way here to read another process's folder: its terminals
-/// open in the home folder again. 工单 05 参考 gorex 的模型读 PEB 补上。
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// 进程 `pid` 的当前目录：Windows 没有现成的接口，读它自己内存里 PEB 的
+/// `ProcessParameters.CurrentDirectory.DosPath`（工单 05，参考 gorex 的模型重写：
+/// `internal/rex/proc_windows.go` 的 `processDir`）。
+///
+/// 只读 64 位进程（偏移按 x64 的布局）；32 位进程（Wow64）的参数在别处，跳过。
+/// 打不开（提权的进程）、读不了就是 `None`，卡片退回启动时的目录。
+#[cfg(all(windows, target_pointer_width = "64"))]
+fn working_directory(pid: u32) -> Option<PathBuf> {
+    use std::ffi::{OsString, c_void};
+    use std::os::windows::ffi::OsStringExt as _;
+
+    use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+    use windows_sys::Win32::System::Threading::{
+        IsWow64Process, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+    };
+
+    /// x64 上 `PEB.ProcessParameters` 的偏移。
+    const PROCESS_PARAMETERS: usize = 0x20;
+    /// x64 上 `RTL_USER_PROCESS_PARAMETERS.CurrentDirectory`（开头就是 `DosPath`）的偏移。
+    const CURRENT_DIRECTORY: usize = 0x38;
+
+    /// `PROCESS_BASIC_INFORMATION`：地址都是对方进程里的，当数字看。
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicInformation {
+        exit_status: usize,
+        peb_base_address: usize,
+        affinity_mask: usize,
+        base_priority: usize,
+        unique_process_id: usize,
+        inherited_from_unique_process_id: usize,
+    }
+
+    /// 对方进程里的 `UNICODE_STRING`：`buffer` 是对方的地址。
+    #[repr(C)]
+    #[derive(Default)]
+    struct UnicodeString {
+        length: u16,
+        maximum_length: u16,
+        buffer: usize,
+    }
+
+    /// 用完关掉的进程句柄。
+    struct Process(HANDLE);
+
+    impl Drop for Process {
+        fn drop(&mut self) {
+            // SAFETY: 句柄是 OpenProcess 打开的，只关这一次。
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    impl Process {
+        /// 从对方进程的 `address` 读 `size` 字节到 `buffer`，读全了才算。
+        fn read(&self, address: usize, buffer: *mut c_void, size: usize) -> bool {
+            let mut read = 0;
+            // SAFETY: `buffer` 指向调用方至少 `size` 字节的可写内存。
+            let ok = unsafe {
+                ReadProcessMemory(self.0, address as *const c_void, buffer, size, &mut read)
+            };
+            ok != 0 && read == size
+        }
+    }
+
+    // SAFETY: 只读权限打开，失败返回空句柄。
+    let handle =
+        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+    let process = Process(handle);
+
+    let mut wow64 = 0;
+    // SAFETY: 句柄有效，`wow64` 是可写的 BOOL。
+    if unsafe { IsWow64Process(process.0, &mut wow64) } == 0 || wow64 != 0 {
+        return None;
+    }
+
+    let mut info = BasicInformation::default();
+    // SAFETY: `info` 的布局和大小与 PROCESS_BASIC_INFORMATION 一致。
+    let status = unsafe {
+        NtQueryInformationProcess(
+            process.0,
+            ProcessBasicInformation,
+            (&mut info as *mut BasicInformation).cast(),
+            size_of::<BasicInformation>() as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    if status < 0 || info.peb_base_address == 0 {
+        return None;
+    }
+
+    let mut parameters = 0_usize;
+    if !process.read(
+        info.peb_base_address + PROCESS_PARAMETERS,
+        (&mut parameters as *mut usize).cast(),
+        size_of::<usize>(),
+    ) || parameters == 0
+    {
+        return None;
+    }
+    let mut directory = UnicodeString::default();
+    if !process.read(
+        parameters + CURRENT_DIRECTORY,
+        (&mut directory as *mut UnicodeString).cast(),
+        size_of::<UnicodeString>(),
+    ) || directory.length == 0
+        || directory.buffer == 0
+    {
+        return None;
+    }
+    let mut text = vec![0_u16; usize::from(directory.length) / 2];
+    if !process.read(
+        directory.buffer,
+        text.as_mut_ptr().cast(),
+        text.len() * size_of::<u16>(),
+    ) {
+        return None;
+    }
+    // 当前目录总以 `\` 结尾；`C:\` 这样的根目录留着它。
+    if text.len() > 3 && text.last() == Some(&u16::from(b'\\')) {
+        text.pop();
+    }
+    Some(PathBuf::from(OsString::from_wide(&text)))
+}
+
+/// 别的系统上读不到别的进程的目录：卡片退回启动时的目录。
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "macos",
+    all(windows, target_pointer_width = "64")
+)))]
 fn working_directory(_: u32) -> Option<PathBuf> {
     None
 }
@@ -620,6 +752,83 @@ mod windows_tests {
         commands.send(TerminalTransportCommand::Shutdown).unwrap();
         worker.join().unwrap().unwrap();
         assert!(started.elapsed() < Duration::from_secs(20));
+    }
+
+    /// 别的进程的当前目录读的是它自己 PEB 里的 `CurrentDirectory`（工单 05：在同一个目录分屏）。
+    #[test]
+    fn the_folder_of_another_process_is_read_from_its_memory() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "ping -n 30 127.0.0.1 >nul"])
+            .current_dir(folder.path())
+            .spawn()
+            .unwrap();
+        let read = working_directory(child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(
+            read.as_deref().map(comparable),
+            Some(comparable(folder.path()))
+        );
+        // 自己的也读得到；不存在的进程读不到。
+        assert_eq!(
+            working_directory(std::process::id())
+                .as_deref()
+                .map(comparable),
+            Some(comparable(&std::env::current_dir().unwrap()))
+        );
+        assert_eq!(working_directory(u32::MAX - 3), None);
+    }
+
+    /// 比较路径时不管大小写和末尾的 `\`：Windows 的路径本来就不分大小写。
+    fn comparable(path: &std::path::Path) -> String {
+        path.display()
+            .to_string()
+            .trim_end_matches('\\')
+            .to_lowercase()
+    }
+
+    /// shell 换了目录，传输就告诉卡片：Windows 上和 Linux、macOS 一样发 `WorkingDirectory`。
+    #[test]
+    fn the_shells_folder_is_told_as_it_moves() {
+        let start = tempfile::tempdir().unwrap();
+        let next = tempfile::tempdir().unwrap();
+        let script = format!(
+            "echo a& ping -n 2 127.0.0.1 >nul& cd /d {}& echo b& ping -n 2 127.0.0.1 >nul",
+            next.path().display()
+        );
+        let launch = LocalLaunch {
+            directory: Some(start.path().to_path_buf()),
+            ..LocalLaunch::new(LocalShell::new(&format!("cmd.exe /d /c {script}")))
+        };
+        let transport = LocalPtyTransportProvider.factory_for(&launch).create();
+        let (commands, command_receiver) = mpsc::channel();
+        let (events, event_receiver) = async_channel::unbounded();
+        let worker =
+            thread::spawn(move || transport.run(TerminalSize::DEFAULT, command_receiver, events));
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut folders = Vec::new();
+        while Instant::now() < deadline {
+            match event_receiver.try_recv() {
+                Ok(TerminalTransportEvent::Output(bytes)) => {
+                    if bytes.windows(4).any(|window| window == b"\x1b[6n") {
+                        let _ =
+                            commands.send(TerminalTransportCommand::Write(b"\x1b[1;1R".to_vec()));
+                    }
+                }
+                Ok(TerminalTransportEvent::WorkingDirectory(folder)) => {
+                    folders.push(comparable(&folder))
+                }
+                Ok(TerminalTransportEvent::Exited { .. })
+                | Err(async_channel::TryRecvError::Closed) => break,
+                Ok(_) => {}
+                Err(async_channel::TryRecvError::Empty) => thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        let _ = commands.send(TerminalTransportCommand::Shutdown);
+        worker.join().unwrap().unwrap();
+        assert_eq!(folders, [comparable(start.path()), comparable(next.path())]);
     }
 
     #[test]
