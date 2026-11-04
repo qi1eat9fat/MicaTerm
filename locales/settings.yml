@@ -5,3 +5,77 @@ settings.store.unsaved:
   zh-CN: 无法保存设置，本次运行的改动不会被保存：%{error}
 settings.store.save_failed:
   zh-CN: 无法保存设置：%{error}
+settings.dialog.title:
+  zh-CN: 设置
+settings.dialog.subtitle:
+  zh-CN: 改动立即生效 · 存在数据目录的 settings.json
+settings.dialog.close:
+  zh-CN: 关闭设置
+settings.category.appearance:
+  zh-CN: 外观
+settings.category.terminal:
+  zh-CN: 终端
+settings.appearance.general:
+  zh-CN: 常规
+settings.appearance.mode:
+  zh-CN: 应用外观
+settings.appearance.mode_description:
+  zh-CN: 跟随系统时随系统的深浅色切换
+settings.appearance.system:
+  zh-CN: 跟随系统
+settings.appearance.light:
+  zh-CN: 浅色
+settings.appearance.dark:
+  zh-CN: 深色
+settings.appearance.font_size:
+  zh-CN: 界面字号
+settings.appearance.font_size_description:
+  zh-CN: 默认 %{size}；终端字号在「终端」里单独设
+settings.appearance.terminal_theme:
+  zh-CN: 终端主题
+settings.appearance.terminal_theme_description:
+  zh-CN: 左栏浅色、右栏深色，各选一套；同一行是同一主题的浅色版和深色版
+settings.appearance.theme_chosen:
+  zh-CN: "%{name}，已选"
+settings.terminal.font:
+  zh-CN: 字体
+settings.terminal.family:
+  zh-CN: 字体
+settings.terminal.family_description:
+  zh-CN: 只列出本机装了的等宽字体
+settings.terminal.size:
+  zh-CN: 字号
+settings.terminal.size_description:
+  zh-CN: "%{min}–%{max}；在终端里按 Ctrl+= / Ctrl+- / Ctrl+0 也能调"
+settings.terminal.line_height:
+  zh-CN: 行高
+settings.terminal.line_height_description:
+  zh-CN: 字号的 %{min}–%{max} 倍
+settings.terminal.interaction:
+  zh-CN: 交互
+settings.terminal.copy_on_select:
+  zh-CN: 选中即复制
+settings.terminal.copy_on_select_description:
+  zh-CN: 松开鼠标就复制到剪贴板
+settings.terminal.right_click:
+  zh-CN: 右键行为
+settings.right_click.menu:
+  zh-CN: 显示菜单
+settings.right_click.paste:
+  zh-CN: 粘贴
+settings.right_click.copy_or_paste:
+  zh-CN: 有选中文字就复制，否则粘贴
+settings.right_click.nothing:
+  zh-CN: 无动作
+settings.local_terminal.title:
+  zh-CN: 本地终端
+settings.local_terminal.shell:
+  zh-CN: Shell
+settings.local_terminal.shell_description:
+  zh-CN: 新开的本地终端运行它，可以带参数；留空则自动检测
+settings.local_terminal.automatic:
+  zh-CN: 自动检测（%{shell}）
+settings.local_terminal.automatic_unknown:
+  zh-CN: 自动检测
+settings.local_terminal.installed:
+  zh-CN: 常用 shell

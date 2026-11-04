@@ -25,15 +25,21 @@ mod terminal;
 
 pub use std::sync::Arc;
 
+pub use gpui_kit::component::ActiveTheme as _;
 pub use gpui_kit::component::{Root, WindowExt as _};
 pub use gpui_kit::test::TestWindowExt;
-pub use gpui_kit::{Action, App, AppContext as _, Entity, TestAppContext, WindowHandle, px, size};
+pub use gpui_kit::{
+    Action, App, AppContext as _, ElementId, Entity, TestAppContext, WindowHandle, px, size,
+};
 pub use qishell::app::{CloseCard, NewLocalTerminalTab, ToggleHostSidebar};
 pub use qishell::card::CardId;
+pub use qishell::settings::AppSettings;
 pub use qishell::settings::{Appearance, SettingsStore};
 pub use qishell::tabs::TabId;
+pub use qishell::theme::Tokens;
 pub use qishell::workspace::{Workspace, WorkspaceServices};
 pub use qishell_terminal::{FixedLocalTerminalTransportProvider, LocalShell, LocalShellInfo};
+pub use qishell_terminal::{RightClick, TerminalColors, TerminalFont, TerminalInteraction};
 pub use terminal::*;
 
 /// 每个夹具都先做的事：QiShell 的全局量（文案、字体、快捷键）。

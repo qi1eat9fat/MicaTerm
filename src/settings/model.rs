@@ -14,6 +14,7 @@ use gpui_kit::WindowAppearance;
 use gpui_kit::component::ThemeMode;
 use serde::{Deserialize, Serialize};
 
+use qishell_terminal::TerminalTheme;
 pub use qishell_terminal::{RightClick, TerminalCursorStyle, TerminalInteraction};
 
 /// 全部设置。
@@ -127,6 +128,29 @@ impl Default for TerminalThemeSettings {
     }
 }
 
+impl TerminalThemeSettings {
+    /// `mode` 那一栏选的主题。key 不认识（别的版本写的、手改的）或者是另一栏的主题时，
+    /// 退回这一栏的默认主题。
+    pub fn theme(&self, mode: ThemeMode) -> &'static TerminalTheme {
+        let key = match mode {
+            ThemeMode::Light => &self.light,
+            ThemeMode::Dark => &self.dark,
+        };
+        TerminalTheme::find(key)
+            .filter(|theme| theme.mode() == mode)
+            .unwrap_or_else(|| TerminalTheme::default_for(mode))
+    }
+
+    /// 选 `theme`：它属于哪一栏就换哪一栏。
+    pub fn choose(&mut self, theme: &'static TerminalTheme) {
+        let key = theme.key().to_string();
+        match theme.mode() {
+            ThemeMode::Light => self.light = key,
+            ThemeMode::Dark => self.dark = key,
+        }
+    }
+}
+
 /// 终端默认字体：随包附带的 JetBrains Mono（`assets/fonts/`）。
 pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = qishell_terminal::DEFAULT_FONT_FAMILY;
 /// 终端默认字号，单位像素（gorex 的取值）。
@@ -193,7 +217,7 @@ impl TerminalFontSettings {
     }
 }
 
-/// 终端 → 本地终端。/// 终端 → 本地终端。
+/// 终端 → 本地终端。
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocalTerminalSettings {
@@ -235,7 +259,7 @@ mod tests {
         let json = r#"{
             "appearance": "dark",
             "interface": { "font_size": 15 },
-            "terminal_theme": { "light": "tokyo-light", "dark": "rose-pine-dark" },
+            "terminal_theme": { "light": "tokyo-day", "dark": "rose-pine" },
             "terminal_font": { "family": "Cascadia Mono", "size": 13.5, "line_height": 1.2 },
             "terminal_interaction": {
                 "copy_on_select": true,
@@ -248,7 +272,7 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.appearance, Appearance::Dark);
         assert_eq!(settings.interface.font_size, 15.);
-        assert_eq!(settings.terminal_theme.dark, "rose-pine-dark");
+        assert_eq!(settings.terminal_theme.dark, "rose-pine");
         assert_eq!(settings.terminal_font.family(), "Cascadia Mono");
         assert_eq!(settings.terminal_font.line_height, 1.2);
         assert_eq!(
@@ -267,6 +291,24 @@ mod tests {
         let again: AppSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(again, settings);
+    }
+
+    #[test]
+    fn each_column_falls_back_to_its_default_theme() {
+        use gpui_kit::component::ThemeMode;
+        let mut themes = super::TerminalThemeSettings::default();
+        assert_eq!(themes.theme(ThemeMode::Light).name(), "QiShell Light");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "QiShell Dark");
+        themes.light = "solarized-light".into();
+        themes.dark = "tokyo-day".into();
+        assert_eq!(themes.theme(ThemeMode::Light).name(), "QiShell Light");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "QiShell Dark");
+
+        let rose_pine = qishell_terminal::TerminalTheme::find("rose-pine").unwrap();
+        themes.choose(rose_pine);
+        assert_eq!(themes.dark, "rose-pine");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Rosé Pine");
+        assert_eq!(themes.light, "solarized-light");
     }
 
     #[test]

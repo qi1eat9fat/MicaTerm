@@ -1,4 +1,4 @@
-// 来自 since2006/shell-rs @ b2a307a: src/terminal/theme.rs
+// 来自 since2006/shell-rs @ b2a307a: src/terminal/theme.rs（裁剪：主题换成 QiShell 的 4 对）
 
 //! 终端主题: the colors a terminal draws with — its text, background,
 //! cursor, selection and the 16 ANSI colors. The settings choose one for the
@@ -155,84 +155,55 @@ impl TerminalColors {
     }
 }
 
-/// The app's light theme around a terminal: white, `neutral-950` text, the
-/// `primary` cursor and the `selection` over white, with ANSI colors from
-/// the same Tailwind palette, dark enough to read on white.
-const SHELLRS_LIGHT: TerminalTheme = TerminalTheme {
-    key: "shellrs-light",
+// QiShell 只内置 4 对主题（spec 第 5 节）：QiShell Light / Dark（默认）、Tokyo Day / Night、
+// Catppuccin Latte / Mocha、Rosé Pine Dawn / Rosé Pine。key 写进 `settings.json`，发布后不能改。
+
+/// QiShell Light：卡片的白底和 `--term` 文字，绿、蓝、红、黄、青、紫取全部界面原型
+/// `.win.light` 的 `--ansi-*`，其余（黑、白和亮色）取 GitHub Primer 浅色的终端色，
+/// 选中底是原型的 `--sel-solid`。
+const QISHELL_LIGHT: TerminalTheme = TerminalTheme {
+    key: "qishell-light",
     name: "QiShell Light",
     mode: ThemeMode::Light,
-    foreground: 0x0a0a0a,
+    foreground: 0x1f2328,
     background: 0xffffff,
-    cursor: 0x171717,
-    selection: 0xcce2fe,
+    cursor: 0x1f2328,
+    selection: 0xdcdff8,
     ansi: [
-        0x171717, 0xdc2626, 0x15803d, 0xa16207, 0x2563eb, 0xc026d3, 0x0e7490, 0xa3a3a3, 0x737373,
-        0xef4444, 0x16a34a, 0xd97706, 0x3b82f6, 0xd946ef, 0x0891b2, 0xd4d4d4,
+        0x24292f, 0xcf222e, 0x1a7f37, 0x9a6700, 0x0969da, 0x8250df, 0x1b7c83, 0x6e7781, 0x57606a,
+        0xa40e26, 0x116329, 0x7d4e00, 0x0550ae, 0x6639ba, 0x136061, 0x8c959f,
     ],
 };
 
-/// The app's dark theme around a terminal: its charcoal background and soft
-/// text and cursor, the `selection` over the background, with ANSI colors
-/// light enough to read on it; black is the app's borders.
-const SHELLRS_DARK: TerminalTheme = TerminalTheme {
-    key: "shellrs-dark",
+/// QiShell Dark：深色卡片底 `--card` 和 `--term` 文字，六种颜色取原型 `.win.dark` 的 `--ansi-*`，
+/// 其余取 GitHub Primer 深色的终端色，选中底是原型的 `--sel-solid`。
+const QISHELL_DARK: TerminalTheme = TerminalTheme {
+    key: "qishell-dark",
     name: "QiShell Dark",
     mode: ThemeMode::Dark,
-    foreground: 0xe0e0e4,
-    background: 0x1e1e1f,
-    cursor: 0xe0e0e4,
-    selection: 0x1e2c56,
+    foreground: 0xe6e8eb,
+    background: 0x1d1f23,
+    cursor: 0xe6e8eb,
+    selection: 0x2a2c44,
     ansi: [
-        0x3b3b3d, 0xf87171, 0x4ade80, 0xfacc15, 0x60a5fa, 0xe879f9, 0x22d3ee, 0xd4d4d4, 0x737373,
-        0xfca5a5, 0x86efac, 0xfde047, 0x93c5fd, 0xf0abfc, 0x67e8f9, 0xfafafa,
+        0x484f58, 0xff7b72, 0x56d364, 0xe3b341, 0x6cb6ff, 0xd2a8ff, 0x39c5cf, 0xb1bac4, 0x6e7681,
+        0xffa198, 0x7ee787, 0xf2cc60, 0x96d0ff, 0xe2c5ff, 0x56d4dd, 0xf0f6fc,
     ],
 };
 
-/// Each column's themes in the order it lists them, its default first.
-/// The light and dark versions of one theme share a row; a theme without the
-/// other version comes after them.
-static THEMES: [TerminalTheme; 20] = [
-    SHELLRS_LIGHT,
-    SOLARIZED_LIGHT,
+/// 每一栏按列出的顺序，默认的在前；同一行是同一主题的浅色版和深色版。
+static THEMES: [TerminalTheme; 8] = [
+    QISHELL_LIGHT,
     TOKYO_DAY,
     CATPPUCCIN_LATTE,
-    FLEXOKI_LIGHT,
-    ONE_HALF_LIGHT,
-    GRUVBOX_LIGHT,
-    KANAGAWA_LOTUS,
     ROSE_PINE_DAWN,
-    EVERFOREST_LIGHT,
-    SHELLRS_DARK,
-    SOLARIZED_DARK,
+    QISHELL_DARK,
     TOKYO_NIGHT,
     CATPPUCCIN_MOCHA,
-    FLEXOKI_DARK,
-    ONE_HALF_DARK,
-    GRUVBOX_DARK,
-    KANAGAWA_WAVE,
-    DRACULA,
-    NORD,
+    ROSE_PINE,
 ];
 
-// The rest, each as its own project's terminal port has it.
-
-/// https://raw.githubusercontent.com/altercation/solarized/master/README.md (MIT).
-/// The palette table of the README, laid out as the official iTerm2 files
-/// lay it out.
-const SOLARIZED_LIGHT: TerminalTheme = TerminalTheme {
-    key: "solarized-light",
-    name: "Solarized Light",
-    mode: ThemeMode::Light,
-    foreground: 0x657b83,
-    background: 0xfdf6e3,
-    cursor: 0x657b83,
-    selection: 0xeee8d5,
-    ansi: [
-        0x073642, 0xdc322f, 0x859900, 0xb58900, 0x268bd2, 0xd33682, 0x2aa198, 0xeee8d5, 0x002b36,
-        0xcb4b16, 0x586e75, 0x657b83, 0x839496, 0x6c71c4, 0x93a1a1, 0xfdf6e3,
-    ],
-};
+// 其余各取自己项目的终端配色。
 
 /// https://raw.githubusercontent.com/folke/tokyonight.nvim/main/extras/ghostty/tokyonight_day (Apache-2.0).
 /// The project calls it Tokyo Night Day.
@@ -265,69 +236,6 @@ const CATPPUCCIN_LATTE: TerminalTheme = TerminalTheme {
     ],
 };
 
-/// https://raw.githubusercontent.com/kepano/flexoki/main/iterm2/flexoki_light.itermcolors (MIT).
-/// The selection is the kitty port's: this file selects by inverting.
-const FLEXOKI_LIGHT: TerminalTheme = TerminalTheme {
-    key: "flexoki-light",
-    name: "Flexoki Light",
-    mode: ThemeMode::Light,
-    foreground: 0x100f0f,
-    background: 0xfffcf0,
-    cursor: 0x100f0f,
-    selection: 0xcecdc3,
-    ansi: [
-        0x100f0f, 0xaf3029, 0x66800b, 0xad8301, 0x205ea6, 0xa02f6f, 0x24837b, 0x6f6e69, 0xb7b5ac,
-        0xd14d41, 0x879a39, 0xd0a215, 0x4385be, 0xce5d97, 0x3aa99f, 0xcecdc3,
-    ],
-};
-
-/// https://raw.githubusercontent.com/sonph/onehalf/master/iterm/OneHalfLight.itermcolors (MIT).
-const ONE_HALF_LIGHT: TerminalTheme = TerminalTheme {
-    key: "one-half-light",
-    name: "One Half Light",
-    mode: ThemeMode::Light,
-    foreground: 0x383a42,
-    background: 0xfafafa,
-    cursor: 0xbfceff,
-    selection: 0xbfceff,
-    ansi: [
-        0x383a42, 0xe45649, 0x50a14f, 0xc18401, 0x0184bc, 0xa626a4, 0x0997b3, 0xfafafa, 0x4f525e,
-        0xe06c75, 0x98c379, 0xe5c07b, 0x61afef, 0xc678dd, 0x56b6c2, 0xffffff,
-    ],
-};
-
-/// https://raw.githubusercontent.com/morhetz/gruvbox-contrib/master/termite/gruvbox-light (MIT).
-/// No cursor there: it is the text. The selection is `bg3`, what gruvbox.vim
-/// selects with when not inverting.
-const GRUVBOX_LIGHT: TerminalTheme = TerminalTheme {
-    key: "gruvbox-light",
-    name: "Gruvbox Light",
-    mode: ThemeMode::Light,
-    foreground: 0x3c3836,
-    background: 0xfbf1c7,
-    cursor: 0x3c3836,
-    selection: 0xbdae93,
-    ansi: [
-        0xfbf1c7, 0xcc241d, 0x98971a, 0xd79921, 0x458588, 0xb16286, 0x689d6a, 0x7c6f64, 0x928374,
-        0x9d0006, 0x79740e, 0xb57614, 0x076678, 0x8f3f71, 0x427b58, 0x3c3836,
-    ],
-};
-
-/// https://raw.githubusercontent.com/rebelot/kanagawa.nvim/master/extras/ghostty/kanagawa-lotus (MIT).
-const KANAGAWA_LOTUS: TerminalTheme = TerminalTheme {
-    key: "kanagawa-lotus",
-    name: "Kanagawa Lotus",
-    mode: ThemeMode::Light,
-    foreground: 0x545464,
-    background: 0xf2ecbc,
-    cursor: 0x43436c,
-    selection: 0xc9cbd1,
-    ansi: [
-        0x1f1f28, 0xc84053, 0x6f894e, 0x77713f, 0x4d699b, 0xb35b79, 0x597b75, 0x545464, 0x8a8980,
-        0xd7474b, 0x6e915f, 0x836f4a, 0x6693bf, 0x624c83, 0x5e857a, 0x43436c,
-    ],
-};
-
 /// https://raw.githubusercontent.com/rose-pine/ghostty/main/dist/rose-pine-dawn (MIT).
 const ROSE_PINE_DAWN: TerminalTheme = TerminalTheme {
     key: "rose-pine-dawn",
@@ -340,42 +248,6 @@ const ROSE_PINE_DAWN: TerminalTheme = TerminalTheme {
     ansi: [
         0xf2e9e1, 0xb4637a, 0x286983, 0xea9d34, 0x56949f, 0x907aa9, 0xd7827e, 0x575279, 0x9893a5,
         0xb4637a, 0x286983, 0xea9d34, 0x56949f, 0x907aa9, 0xd7827e, 0x575279,
-    ],
-};
-
-/// https://raw.githubusercontent.com/sainnhe/everforest/master/colors/everforest.vim
-/// and autoload/everforest.vim (MIT): the medium light palette, the 16
-/// colors as the color scheme gives them to Vim's terminal, `bg_visual` for
-/// the selection. It sets no cursor color by default: the cursor is the
-/// text.
-const EVERFOREST_LIGHT: TerminalTheme = TerminalTheme {
-    key: "everforest-light",
-    name: "Everforest Light",
-    mode: ThemeMode::Light,
-    foreground: 0x5c6a72,
-    background: 0xfdf6e3,
-    cursor: 0x5c6a72,
-    selection: 0xeaedc8,
-    ansi: [
-        0x5c6a72, 0xf85552, 0x8da101, 0xdfa000, 0x3a94c5, 0xdf69ba, 0x35a77c, 0xe6e2cc, 0x5c6a72,
-        0xf85552, 0x8da101, 0xdfa000, 0x3a94c5, 0xdf69ba, 0x35a77c, 0xe6e2cc,
-    ],
-};
-
-/// https://raw.githubusercontent.com/altercation/solarized/master/README.md (MIT).
-/// The palette table of the README, laid out as the official iTerm2 files
-/// lay it out.
-const SOLARIZED_DARK: TerminalTheme = TerminalTheme {
-    key: "solarized-dark",
-    name: "Solarized Dark",
-    mode: ThemeMode::Dark,
-    foreground: 0x839496,
-    background: 0x002b36,
-    cursor: 0x839496,
-    selection: 0x073642,
-    ansi: [
-        0x073642, 0xdc322f, 0x859900, 0xb58900, 0x268bd2, 0xd33682, 0x2aa198, 0xeee8d5, 0x002b36,
-        0xcb4b16, 0x586e75, 0x657b83, 0x839496, 0x6c71c4, 0x93a1a1, 0xfdf6e3,
     ],
 };
 
@@ -409,98 +281,18 @@ const CATPPUCCIN_MOCHA: TerminalTheme = TerminalTheme {
     ],
 };
 
-/// https://raw.githubusercontent.com/kepano/flexoki/main/iterm2/flexoki_dark.itermcolors (MIT).
-/// The selection is the kitty port's: this file selects by inverting.
-const FLEXOKI_DARK: TerminalTheme = TerminalTheme {
-    key: "flexoki-dark",
-    name: "Flexoki Dark",
+/// https://raw.githubusercontent.com/rose-pine/ghostty/main/dist/rose-pine (MIT).
+const ROSE_PINE: TerminalTheme = TerminalTheme {
+    key: "rose-pine",
+    name: "Rosé Pine",
     mode: ThemeMode::Dark,
-    foreground: 0xcecdc3,
-    background: 0x100f0f,
-    cursor: 0xcecdc3,
-    selection: 0x403e3c,
+    foreground: 0xe0def4,
+    background: 0x191724,
+    cursor: 0xe0def4,
+    selection: 0x403d52,
     ansi: [
-        0x100f0f, 0xd14d41, 0x879a39, 0xd0a215, 0x4385be, 0xce5d97, 0x3aa99f, 0x878580, 0x575653,
-        0xaf3029, 0x66800b, 0xad8301, 0x205ea6, 0xa02f6f, 0x24837b, 0xcecdc3,
-    ],
-};
-
-/// https://raw.githubusercontent.com/sonph/onehalf/master/iterm/OneHalfDark.itermcolors (MIT).
-/// Bright black is Windows Terminal's `#5a6374`: here it is the
-/// background, which hides text in it.
-const ONE_HALF_DARK: TerminalTheme = TerminalTheme {
-    key: "one-half-dark",
-    name: "One Half Dark",
-    mode: ThemeMode::Dark,
-    foreground: 0xdcdfe4,
-    background: 0x282c34,
-    cursor: 0xa3b3cc,
-    selection: 0x474e5d,
-    ansi: [
-        0x282c34, 0xe06c75, 0x98c379, 0xe5c07b, 0x61afef, 0xc678dd, 0x56b6c2, 0xdcdfe4, 0x5a6374,
-        0xe06c75, 0x98c379, 0xe5c07b, 0x61afef, 0xc678dd, 0x56b6c2, 0xdcdfe4,
-    ],
-};
-
-/// https://raw.githubusercontent.com/morhetz/gruvbox-contrib/master/termite/gruvbox-dark (MIT).
-/// No cursor there: it is the text. The selection is `bg3`, what gruvbox.vim
-/// selects with when not inverting.
-const GRUVBOX_DARK: TerminalTheme = TerminalTheme {
-    key: "gruvbox-dark",
-    name: "Gruvbox Dark",
-    mode: ThemeMode::Dark,
-    foreground: 0xebdbb2,
-    background: 0x282828,
-    cursor: 0xebdbb2,
-    selection: 0x665c54,
-    ansi: [
-        0x282828, 0xcc241d, 0x98971a, 0xd79921, 0x458588, 0xb16286, 0x689d6a, 0xa89984, 0x928374,
-        0xfb4934, 0xb8bb26, 0xfabd2f, 0x83a598, 0xd3869b, 0x8ec07c, 0xebdbb2,
-    ],
-};
-
-/// https://raw.githubusercontent.com/rebelot/kanagawa.nvim/master/extras/ghostty/kanagawa-wave (MIT).
-const KANAGAWA_WAVE: TerminalTheme = TerminalTheme {
-    key: "kanagawa-wave",
-    name: "Kanagawa Wave",
-    mode: ThemeMode::Dark,
-    foreground: 0xdcd7ba,
-    background: 0x1f1f28,
-    cursor: 0xc8c093,
-    selection: 0x2d4f67,
-    ansi: [
-        0x16161d, 0xc34043, 0x76946a, 0xc0a36e, 0x7e9cd8, 0x957fb8, 0x6a9589, 0xc8c093, 0x727169,
-        0xe82424, 0x98bb6c, 0xe6c384, 0x7fb4ca, 0x938aa9, 0x7aa89f, 0xdcd7ba,
-    ],
-};
-
-/// https://raw.githubusercontent.com/dracula/windows-terminal/master/dracula.json (MIT).
-const DRACULA: TerminalTheme = TerminalTheme {
-    key: "dracula",
-    name: "Dracula",
-    mode: ThemeMode::Dark,
-    foreground: 0xf8f8f2,
-    background: 0x282a36,
-    cursor: 0xf8f8f2,
-    selection: 0x44475a,
-    ansi: [
-        0x21222c, 0xff5555, 0x50fa7b, 0xf1fa8c, 0xbd93f9, 0xff79c6, 0x8be9fd, 0xf8f8f2, 0x6272a4,
-        0xff6e6e, 0x69ff94, 0xffffa5, 0xd6acff, 0xff92df, 0xa4ffff, 0xffffff,
-    ],
-};
-
-/// https://raw.githubusercontent.com/nordtheme/alacritty/main/src/nord.yaml (MIT).
-const NORD: TerminalTheme = TerminalTheme {
-    key: "nord",
-    name: "Nord",
-    mode: ThemeMode::Dark,
-    foreground: 0xd8dee9,
-    background: 0x2e3440,
-    cursor: 0xd8dee9,
-    selection: 0x4c566a,
-    ansi: [
-        0x3b4252, 0xbf616a, 0xa3be8c, 0xebcb8b, 0x81a1c1, 0xb48ead, 0x88c0d0, 0xe5e9f0, 0x4c566a,
-        0xbf616a, 0xa3be8c, 0xebcb8b, 0x81a1c1, 0xb48ead, 0x8fbcbb, 0xeceff4,
+        0x26233a, 0xeb6f92, 0x31748f, 0xf6c177, 0x9ccfd8, 0xc4a7e7, 0xebbcba, 0xe0def4, 0x6e6a86,
+        0xeb6f92, 0x31748f, 0xf6c177, 0x9ccfd8, 0xc4a7e7, 0xebbcba, 0xe0def4,
     ],
 };
 
@@ -529,6 +321,61 @@ mod tests {
     fn contrast(a: u32, b: u32) -> f32 {
         let (a, b) = (luminance(a), luminance(b));
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// spec 第 5 节：只内置 4 对，浅色栏和深色栏按行配对，QiShell 在前（默认）。
+    #[test]
+    fn four_pairs_are_built_in_with_qishell_first() {
+        let names = |mode| {
+            TerminalTheme::for_mode(mode)
+                .map(|theme| (theme.key, theme.name))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(ThemeMode::Light),
+            [
+                ("qishell-light", "QiShell Light"),
+                ("tokyo-day", "Tokyo Day"),
+                ("catppuccin-latte", "Catppuccin Latte"),
+                ("rose-pine-dawn", "Rosé Pine Dawn"),
+            ]
+        );
+        assert_eq!(
+            names(ThemeMode::Dark),
+            [
+                ("qishell-dark", "QiShell Dark"),
+                ("tokyo-night", "Tokyo Night"),
+                ("catppuccin-mocha", "Catppuccin Mocha"),
+                ("rose-pine", "Rosé Pine"),
+            ]
+        );
+        assert_eq!(TerminalTheme::all().len(), 8);
+        assert_eq!(
+            TerminalTheme::default_for(ThemeMode::Light).key,
+            "qishell-light"
+        );
+        assert_eq!(
+            TerminalTheme::default_for(ThemeMode::Dark).key,
+            "qishell-dark"
+        );
+    }
+
+    /// QiShell 这一对的底色和文字是原型的卡片底和 `--term`。
+    #[test]
+    fn the_qishell_pair_takes_the_prototype_tokens() {
+        let light = TerminalTheme::find("qishell-light").unwrap();
+        assert_eq!((light.background, light.foreground), (0xffffff, 0x1f2328));
+        // --ansi-r、--ansi-g、--ansi-y、--ansi-b、--ansi-m、--ansi-c
+        assert_eq!(
+            light.ansi[1..=6],
+            [0xcf222e, 0x1a7f37, 0x9a6700, 0x0969da, 0x8250df, 0x1b7c83]
+        );
+        let dark = TerminalTheme::find("qishell-dark").unwrap();
+        assert_eq!((dark.background, dark.foreground), (0x1d1f23, 0xe6e8eb));
+        assert_eq!(
+            dark.ansi[1..=6],
+            [0xff7b72, 0x56d364, 0xe3b341, 0x6cb6ff, 0xd2a8ff, 0x39c5cf]
+        );
     }
 
     #[test]
@@ -612,7 +459,7 @@ mod tests {
         let dark = TerminalTheme::default_for(ThemeMode::Dark);
         assert_eq!(
             dark.query_color(NamedColor::Background as usize),
-            rgb(0x1e1e1f)
+            rgb(0x1d1f23)
         );
     }
 }
