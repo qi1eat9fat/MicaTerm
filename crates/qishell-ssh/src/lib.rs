@@ -37,7 +37,9 @@ pub use latency::{LATENCY_INTERVAL, Latency, LatencyLevel, round_trip};
 pub use login::{
     DEFAULT_KEY_FILES, HostLogin, JumpLogin, LoginMethod, LoginRoute, ProxyKind, ProxyLogin,
 };
-pub use probe::{HOST_OS_KEYS, HostOsProbe, PROBE_COMMAND, ProbeOutcome, WINDOWS_PROBE_COMMAND};
+pub use probe::{
+    HOST_OS_KEYS, HostOsProbe, PROBE_COMMAND, ProbeOutcome, ProbedHost, WINDOWS_PROBE_COMMAND,
+};
 pub use prompt::{
     AuthenticationPrompt, AuthenticationRequest, ConnectionPrompt, ConnectionPromptField,
     ConnectionPromptKind, ConnectionPromptReply, ConnectionSecret, HostKeyChangedPrompt,

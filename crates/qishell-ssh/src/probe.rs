@@ -1,4 +1,5 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/probe.rs
+// 改造：POSIX 探测多取 `uname -n`，答案带上主机名（`ProbedHost`），给远程卡片核对目录报告。
 //! Work out which operating system is on the far end.
 //!
 //! Runs once per successful connection on its own exec channel, so the user's
@@ -31,10 +32,11 @@ pub const HOST_OS_KEYS: [&str; 20] = [
     "netbsd",
 ];
 
-/// One question for POSIX hosts: the kernel name, then whatever
-/// `/etc/os-release` says. stderr is dropped because macOS legitimately has no
-/// such file, and because a Windows shell will fail both halves.
-pub const PROBE_COMMAND: &str = "uname -s; cat /etc/os-release 2>/dev/null";
+/// One question for POSIX hosts: the kernel name, the host's name, then
+/// whatever `/etc/os-release` says. stderr is dropped because macOS
+/// legitimately has no such file, and because a Windows shell will fail
+/// every part.
+pub const PROBE_COMMAND: &str = "uname -s; uname -n; cat /etc/os-release 2>/dev/null";
 
 /// The follow-up when the POSIX answer is unrecognized. Windows OpenSSH wraps
 /// exec commands in `cmd.exe /c "..."`: spelling out the executable extension
@@ -59,6 +61,19 @@ pub fn parse_probe(output: &str) -> Option<&'static str> {
         "Linux" => Some(distribution(output).unwrap_or("linux")),
         _ => None,
     }
+}
+
+/// The host's name in the POSIX probe: the line after the kernel's, as
+/// `uname -n` prints it. `None` when that line is missing or is already
+/// `/etc/os-release`'s, which a host name never looks like.
+fn parse_hostname(output: &str) -> Option<String> {
+    let mut lines = output
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| line.is_empty());
+    lines.next()?;
+    let hostname = lines.next()?;
+    (!hostname.is_empty() && !hostname.contains('=')).then(|| hostname.to_string())
 }
 
 /// Read the Windows follow-up.
@@ -149,10 +164,19 @@ enum Stage {
     Done,
 }
 
+/// What a probe found out about the host.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProbedHost {
+    /// One of [`HOST_OS_KEYS`].
+    pub os: &'static str,
+    /// What `uname -n` says, to check the host names in directory reports
+    /// against. `None` on Windows, which is not asked.
+    pub hostname: Option<String>,
+}
+
 /// What to do once a probe channel closes.
 pub enum ProbeOutcome {
-    /// One of [`HOST_OS_KEYS`].
-    Detected(&'static str),
+    Detected(ProbedHost),
     /// The POSIX probe said nothing, which is what a Windows shell looks like.
     AskWindows,
     GaveUp,
@@ -194,11 +218,14 @@ impl HostOsProbe {
         let output = String::from_utf8_lossy(&self.output);
         let outcome = match self.stage {
             Stage::Posix => match parse_probe(&output) {
-                Some(os) => ProbeOutcome::Detected(os),
+                Some(os) => ProbeOutcome::Detected(ProbedHost {
+                    os,
+                    hostname: parse_hostname(&output),
+                }),
                 None => ProbeOutcome::AskWindows,
             },
             Stage::Windows => match parse_windows_probe(&output) {
-                Some(os) => ProbeOutcome::Detected(os),
+                Some(os) => ProbeOutcome::Detected(ProbedHost { os, hostname: None }),
                 None => ProbeOutcome::GaveUp,
             },
             Stage::Done => ProbeOutcome::GaveUp,
@@ -339,11 +366,52 @@ mod tests {
     }
 
     #[test]
+    fn a_posix_host_also_says_its_hostname() {
+        let mut probe = HostOsProbe::new();
+        probe.push(b"Linux\nweb-01.example.com\nID=debian\n");
+        let ProbeOutcome::Detected(host) = probe.finish() else {
+            panic!("a Linux host is detected");
+        };
+        assert_eq!(host.os, "debian");
+        assert_eq!(host.hostname.as_deref(), Some("web-01.example.com"));
+    }
+
+    #[test]
+    fn windows_says_no_hostname() {
+        let mut probe = HostOsProbe::new();
+        assert!(matches!(probe.finish(), ProbeOutcome::AskWindows));
+        probe.push(b"Microsoft Windows [Version 10.0.19045.4291]\n");
+        let ProbeOutcome::Detected(host) = probe.finish() else {
+            panic!("Windows is detected");
+        };
+        assert_eq!((host.os, host.hostname), ("windows", None));
+    }
+
+    /// 真的跑一遍探测命令：第二行就是 `uname -n` 的输出。
+    #[cfg(unix)]
+    #[test]
+    fn the_probe_command_reports_this_machines_hostname() {
+        let run = |command: &str| {
+            let output = std::process::Command::new("sh")
+                .args(["-c", command])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        let mut probe = HostOsProbe::new();
+        probe.push(run(super::PROBE_COMMAND).as_bytes());
+        let ProbeOutcome::Detected(host) = probe.finish() else {
+            panic!("this machine is detected");
+        };
+        assert_eq!(host.hostname.as_deref(), Some(run("uname -n").trim()));
+    }
+
+    #[test]
     fn a_posix_host_answers_in_one_step() {
         let mut probe = HostOsProbe::new();
         assert_eq!(probe.command(), Some(super::PROBE_COMMAND));
-        probe.push(b"Linux\nID=debian\n");
-        assert!(matches!(probe.finish(), ProbeOutcome::Detected("debian")));
+        probe.push(b"Linux\nweb-01\nID=debian\n");
+        assert!(matches!(probe.finish(), ProbeOutcome::Detected(host) if host.os == "debian"));
         assert_eq!(probe.command(), None);
     }
 
@@ -354,7 +422,7 @@ mod tests {
         assert_eq!(probe.command(), Some(super::WINDOWS_PROBE_COMMAND));
 
         probe.push(b"Microsoft Windows [Version 10.0.19045.4291]\n");
-        assert!(matches!(probe.finish(), ProbeOutcome::Detected("windows")));
+        assert!(matches!(probe.finish(), ProbeOutcome::Detected(host) if host.os == "windows"));
         assert_eq!(probe.command(), None);
     }
 
