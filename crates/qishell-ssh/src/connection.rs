@@ -1,3 +1,5 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/connection.rs
+// 裁剪：去掉 NAT64（只给 Apple 手机端用）和远程端口转发（`ForwardedTcpip`、`connect_forwarding`）。
 //! SSH connection and authentication shared by terminals and SFTP.
 use super::error::{
     AgentProblem, AgentUnreachable, AuthError, ConnectError, ForwardProblem, KnownHostsError,
@@ -30,7 +32,7 @@ use std::{
     time::Duration,
 };
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{oneshot, watch};
 use zeroize::Zeroizing;
 
 use super::proxy::{ProxyAuth, handshake};
@@ -90,8 +92,6 @@ pub struct SshConnector {
     agent: AgentLocation,
     /// Where a login without a password looks for [`DEFAULT_KEY_FILES`].
     key_dir: Option<PathBuf>,
-    /// See [`Self::with_nat64`].
-    nat64: bool,
 }
 impl SshConnector {
     /// Trusts the host keys in the file at `path`, reads saved secrets from
@@ -104,7 +104,6 @@ impl SshConnector {
             secrets,
             agent: AgentLocation::System,
             key_dir: dirs::home_dir().map(|home| home.join(".ssh")),
-            nat64: false,
         }
     }
 
@@ -121,14 +120,6 @@ impl SshConnector {
         self
     }
 
-    /// Connect to IPv4 addresses as the system's resolver gives them, as
-    /// iOS asks of apps: on an IPv6-only network with NAT64, that is the
-    /// IPv6 address that reaches them, where the address as written does
-    /// not. Only Apple's systems do this; elsewhere it changes nothing.
-    pub fn with_nat64(mut self, nat64: bool) -> Self {
-        self.nat64 = nat64;
-        self
-    }
     /// Must run on a worker: keychain and private-key reads are blocking.
     pub async fn connect(
         &self,
@@ -136,23 +127,6 @@ impl SshConnector {
         broker: Arc<SshPrompts>,
     ) -> Result<(client::Handle<SshClientHandler>, String)> {
         self.connect_with(config, broker, &self.secrets).await
-    }
-
-    /// Same as [`Self::connect`], for a connection that carries port
-    /// forwards. The receiver yields every channel the server opens for a
-    /// remote forward, and ends when the connection does: the handler that
-    /// feeds it lives exactly as long as the connection, so this is how an
-    /// idle forward learns that its connection is gone.
-    pub async fn connect_forwarding(
-        &self,
-        config: &SshConnectionConfig,
-        broker: Arc<SshPrompts>,
-    ) -> Result<(SshHandle, String, mpsc::UnboundedReceiver<ForwardedTcpip>)> {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        let (handle, fingerprint) = self
-            .connect_inner(config, broker, &self.secrets, Some(sender))
-            .await?;
-        Ok((handle, fingerprint, receiver))
     }
 
     /// The keychain this connector reads saved secrets from.
@@ -167,22 +141,11 @@ impl SshConnector {
         broker: Arc<SshPrompts>,
         secrets: &SharedSecretSource,
     ) -> Result<(client::Handle<SshClientHandler>, String)> {
-        self.connect_inner(config, broker, secrets, None).await
-    }
-
-    async fn connect_inner(
-        &self,
-        config: &SshConnectionConfig,
-        broker: Arc<SshPrompts>,
-        secrets: &SharedSecretSource,
-        forwarded: Option<mpsc::UnboundedSender<ForwardedTcpip>>,
-    ) -> Result<(client::Handle<SshClientHandler>, String)> {
         let login = &config.login;
         let tunnel = self
             .open_route(&login.route, &login.host, login.port, &broker, secrets)
             .await?;
-        self.log_in(tunnel, login, None, &broker, secrets, forwarded)
-            .await
+        self.log_in(tunnel, login, None, &broker, secrets).await
     }
 
     /// A stream to `host:port` by `route`: a socket, through the proxy, or a
@@ -190,7 +153,7 @@ impl SshConnector {
     /// `CONNECT_TIMEOUT`, not counting time spent answering, or when
     /// `broker` is shut down; the jump hosts log in with their own logins and
     /// ask through `broker`, naming the jump host. What an SSH login starts
-    /// from, and all a Telnet connection is.
+    /// from.
     pub async fn open_route(
         &self,
         route: &LoginRoute,
@@ -200,9 +163,9 @@ impl SshConnector {
         secrets: &SharedSecretSource,
     ) -> Result<Tunnel> {
         Ok(match route {
-            LoginRoute::Direct => Box::new(step(broker, tcp(host, port, self.nat64)).await?),
+            LoginRoute::Direct => Box::new(step(broker, tcp(host, port)).await?),
             LoginRoute::Proxy(proxy) => {
-                let proxied = through_proxy(proxy, (host, port), secrets, self.nat64);
+                let proxied = through_proxy(proxy, (host, port), secrets);
                 Box::new(step(broker, proxied).await?)
             }
             LoginRoute::Jump(hops) => {
@@ -221,7 +184,6 @@ impl SshConnector {
         jump_host: Option<&str>,
         broker: &Arc<SshPrompts>,
         secrets: &SharedSecretSource,
-        forwarded: Option<mpsc::UnboundedSender<ForwardedTcpip>>,
     ) -> Result<(SshHandle, String)> {
         let fingerprint = Arc::new(Mutex::new(String::new()));
         let handler = SshClientHandler {
@@ -232,7 +194,6 @@ impl SshConnector {
             known_hosts_lock: self.known_hosts_lock.clone(),
             broker: broker.clone(),
             fingerprint: fingerprint.clone(),
-            forwarded,
         };
         let connect = async {
             client::connect_stream(ssh_config(), tunnel, handler)
@@ -319,10 +280,10 @@ impl SshConnector {
     ) -> Result<Tunnel> {
         let tunnel = match tunnel {
             Some(tunnel) => tunnel,
-            None => Box::new(step(broker, tcp(&hop.host, hop.port, self.nat64)).await?),
+            None => Box::new(step(broker, tcp(&hop.host, hop.port)).await?),
         };
         let (handle, _) = self
-            .log_in(tunnel, hop, Some(name), broker, secrets, None)
+            .log_in(tunnel, hop, Some(name), broker, secrets)
             .await?;
         let (next_host, next_port) = next;
         let open = async {
@@ -444,8 +405,8 @@ async fn step<T>(broker: &SshPrompts, future: impl Future<Output = Result<T>>) -
 
 /// A socket to `host:port`, failing the way russh's own connect does: a
 /// name that does not resolve then counts as the network failing.
-async fn tcp(host: &str, port: u16, nat64: bool) -> Result<TcpStream> {
-    let socket = connect_socket(host, port, nat64)
+async fn tcp(host: &str, port: u16) -> Result<TcpStream> {
+    let socket = TcpStream::connect((host, port))
         .await
         .map_err(russh::Error::IO)
         .wrap_err(ConnectError::Unreachable {
@@ -457,27 +418,13 @@ async fn tcp(host: &str, port: u16, nat64: bool) -> Result<TcpStream> {
     Ok(socket)
 }
 
-/// A socket to `host:port`, which `nat64` resolves an IPv4 address for:
-/// see [`SshConnector::with_nat64`].
-async fn connect_socket(host: &str, port: u16, nat64: bool) -> std::io::Result<TcpStream> {
-    #[cfg(target_vendor = "apple")]
-    if nat64 && let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
-        let addresses = super::nat64::addresses(ip, port).await;
-        return TcpStream::connect(&addresses[..]).await;
-    }
-    #[cfg(not(target_vendor = "apple"))]
-    let _ = nat64;
-    TcpStream::connect((host, port)).await
-}
-
 /// A stream to `target` through `proxy`.
 async fn through_proxy(
     proxy: &ProxyLogin,
     (host, port): (&str, u16),
     secrets: &SharedSecretSource,
-    nat64: bool,
 ) -> Result<TcpStream> {
-    let mut socket = connect_socket(&proxy.host, proxy.port, nat64)
+    let mut socket = TcpStream::connect((proxy.host.as_str(), proxy.port))
         .await
         .map_err(|error| {
             wrap(
@@ -674,20 +621,6 @@ pub(super) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
 }
 
-/// A connection the server opened back to this client for a remote forward
-/// (`ssh -R`): someone connected to the port the server listens on for us.
-#[non_exhaustive]
-pub struct ForwardedTcpip {
-    pub channel: russh::Channel<client::Msg>,
-    /// Accepts or refuses the channel. Dropping it refuses.
-    pub reply: client::ChannelOpenHandle,
-    /// The address and port on the server that was connected to.
-    pub connected_address: String,
-    pub connected_port: u32,
-    pub originator_address: String,
-    pub originator_port: u32,
-}
-
 pub struct SshClientHandler {
     host: String,
     port: u16,
@@ -697,9 +630,6 @@ pub struct SshClientHandler {
     known_hosts_lock: Arc<Mutex<()>>,
     broker: Arc<SshPrompts>,
     fingerprint: Arc<Mutex<String>>,
-    /// Where channels for a remote forward go. Only a forwarding connection
-    /// has one; every other connection refuses such channels.
-    forwarded: Option<mpsc::UnboundedSender<ForwardedTcpip>>,
 }
 
 impl client::Handler for SshClientHandler {
@@ -771,43 +701,6 @@ impl client::Handler for SshClientHandler {
         learn_known_hosts_path(&self.host, self.port, &key, &self.known_hosts_path)
             .map_err(|_| write_failed())?;
         Ok(true)
-    }
-
-    /// The server only opens these after a `tcpip-forward` request, which
-    /// nothing but a forwarding connection sends. One that arrives anyway is
-    /// refused rather than accepted and left dangling.
-    #[allow(clippy::too_many_arguments)]
-    async fn server_channel_open_forwarded_tcpip(
-        &mut self,
-        channel: russh::Channel<client::Msg>,
-        connected_address: &str,
-        connected_port: u32,
-        originator_address: &str,
-        originator_port: u32,
-        reply: client::ChannelOpenHandle,
-        _: &mut client::Session,
-    ) -> Result<(), Self::Error> {
-        match &self.forwarded {
-            // The forward decides: it accepts once it has reached its target.
-            // Should it be gone already, the undelivered `reply` is dropped
-            // with the message, which refuses the channel.
-            Some(forwarded) => {
-                let _ = forwarded.send(ForwardedTcpip {
-                    channel,
-                    reply,
-                    connected_address: connected_address.to_string(),
-                    connected_port,
-                    originator_address: originator_address.to_string(),
-                    originator_port,
-                });
-            }
-            None => {
-                reply
-                    .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
-                    .await
-            }
-        }
-        Ok(())
     }
 }
 

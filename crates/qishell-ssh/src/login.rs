@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/login.rs
 //! How a connection logs in to a host, with every secret named by where it
 //! is kept rather than held. The app builds one from what it saved and
 //! hands it to a worker, which never reads the app's own records.

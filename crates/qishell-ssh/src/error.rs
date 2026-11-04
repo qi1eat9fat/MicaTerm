@@ -1,3 +1,5 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/error.rs
+// 裁剪：去掉外部 CLI 的说法，品牌字样改为 QiShell。
 //! Why connecting, logging in or a channel failed: values the app turns
 //! into its own words. The `Display` texts here are English for logs, never
 //! shown as they are.
@@ -128,7 +130,7 @@ impl fmt::Display for ConnectError {
 
 impl Error for ConnectError {}
 
-/// What went wrong with the trust file, ShellRS's own `known_hosts`.
+/// What went wrong with the trust file, QiShell's own `known_hosts`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KnownHostsError {
     ReadFailed {
@@ -436,8 +438,7 @@ impl fmt::Display for RouteFailure {
 impl Error for RouteFailure {}
 
 /// A credential authentication needed and could not ask for, because the
-/// connection runs without anyone to answer (a connection test, or a command
-/// from the external CLI).
+/// connection runs without anyone to answer (a connection test).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MissingCredential {
     /// `rejected` when a password was tried and the server refused it.

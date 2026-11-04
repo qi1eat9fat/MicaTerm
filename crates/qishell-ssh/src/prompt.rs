@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/prompt.rs
 //! The questions a connection asks before it can go on, and their answers.
 //! They carry what the question is about, never its wording: each app words
 //! them in its own language. Secrets are never serialized or printed.

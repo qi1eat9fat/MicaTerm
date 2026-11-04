@@ -1,3 +1,5 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/secret.rs
+// 裁剪：去掉同步用的秘密（`SyncKeyring`、`SyncLogin`）。
 //! Which secret a connection needs, and where it reads the saved ones.
 //! Each app keeps its secrets in its own platform's keychain; the
 //! connection only ever asks for one by its [`SecretRef`].
@@ -39,13 +41,6 @@ pub enum SecretRef {
     /// connection), by that temporary host's id. Only ever held in memory,
     /// never in a keychain.
     Temporary { host: u64 },
-    /// The sync keyring (`shellrs_sync::Keyring`), one per device: with it,
-    /// sync does not ask for the sync password each time.
-    SyncKeyring,
-    /// The login secret of the server sync goes through (a WebDAV password,
-    /// an S3 secret key), one per device: a device syncs to one place at a
-    /// time.
-    SyncLogin,
 }
 
 impl SecretRef {
@@ -91,8 +86,6 @@ impl SecretRef {
             Self::Credential { keychain_id } => format!("credential:{keychain_id}"),
             Self::Proxy { user, host, port } => format!("proxy:{user}@{host}:{port}"),
             Self::Temporary { host } => format!("temporary:{host}"),
-            Self::SyncKeyring => "sync:keyring".into(),
-            Self::SyncLogin => "sync:login".into(),
         }
     }
 }
@@ -157,8 +150,6 @@ mod tests {
     #[test]
     fn other_accounts_are_fixed() {
         assert_eq!(SecretRef::temporary(7).account(), "temporary:7");
-        assert_eq!(SecretRef::SyncKeyring.account(), "sync:keyring");
-        assert_eq!(SecretRef::SyncLogin.account(), "sync:login");
     }
 
     #[test]
@@ -169,8 +160,6 @@ mod tests {
             SecretRef::credential("root@10.0.1.12:22"),
             SecretRef::proxy("root", "10.0.1.12", 22),
             SecretRef::temporary(22),
-            SecretRef::SyncKeyring,
-            SecretRef::SyncLogin,
         ]
         .map(|secret| secret.account());
         for (ix, account) in accounts.iter().enumerate() {

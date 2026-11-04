@@ -1,6 +1,8 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/client.rs
+// 裁剪：去掉 `on_channel` 和 `TerminalNotConnected`（终端连接上的 SFTP 通道）。
+
 use super::{
-    DirectoryEntry, DirectoryListing, EntryKind, FileMetadata, RemotePath, SftpChannelOpener,
-    SftpError,
+    DirectoryEntry, DirectoryListing, EntryKind, FileMetadata, RemotePath, SftpError,
 };
 use crate::{Latency, SshConnectionConfig, SshConnector, SshHandle, SshPrompts};
 use anyhow::{Result, anyhow, bail};
@@ -79,18 +81,6 @@ impl SftpClient {
             channel.request_subsystem(true, "sftp").await?;
             Self::initialize(channel.into_stream(), Some(ssh), fingerprint).await
         })
-        .await
-        .map_err(|_| anyhow!(SftpError::StartTimeout))?
-    }
-    /// Start SFTP on a channel `opener` opens on a connection someone else
-    /// holds, such as beside a remote terminal's shell: no login of its own,
-    /// and no round trips to measure, since the connection is not its own.
-    pub async fn on_channel(opener: &dyn SftpChannelOpener) -> Result<Self> {
-        let channel = opener.open().await?;
-        tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            Self::initialize(channel.stream, None, channel.fingerprint),
-        )
         .await
         .map_err(|_| anyhow!(SftpError::StartTimeout))?
     }
@@ -429,27 +419,10 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for WatchedStream<S> {
     }
 }
 
-/// The terminal a channel rides on has no connection to open it on: not
-/// up yet, gone, or between reconnects. Retried like a dropped network,
-/// since the terminal may well be back by the next attempt.
-#[derive(Debug)]
-pub struct TerminalNotConnected;
-
-impl std::fmt::Display for TerminalNotConnected {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("the terminal isn't connected")
-    }
-}
-
-impl std::error::Error for TerminalNotConnected {}
-
 /// Whether `error` is the connection failing under the SFTP session, which
 /// a transfer reconnects for, as opposed to the server refusing a request.
 pub fn is_network_error(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
-        if cause.is::<TerminalNotConnected>() {
-            return true;
-        }
         if cause.downcast_ref::<russh::Error>().is_some_and(|e| {
             matches!(
                 e,
@@ -558,7 +531,7 @@ mod longname_tests {
 
 #[cfg(test)]
 mod network_error_tests {
-    use super::{Error, TerminalNotConnected, is_network_error};
+    use super::{Error, is_network_error};
 
     #[test]
     fn a_closed_session_is_a_lost_connection() {
@@ -567,14 +540,5 @@ mod network_error_tests {
         assert!(is_network_error(&closed));
         let other = anyhow::Error::new(Error::UnexpectedBehavior("bad packet".into()));
         assert!(!is_network_error(&other));
-    }
-
-    /// 文件 waits for its terminal to come back, but a server without SFTP
-    /// is not asked again and again.
-    #[test]
-    fn a_terminal_without_a_connection_is_retried_and_a_refusal_is_not() {
-        let gone = anyhow::Error::new(TerminalNotConnected).context("无法读取目录");
-        assert!(is_network_error(&gone));
-        assert!(!is_network_error(&anyhow::anyhow!("服务器没有开启 SFTP")));
     }
 }

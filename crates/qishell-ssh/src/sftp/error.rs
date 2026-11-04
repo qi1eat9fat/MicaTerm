@@ -1,3 +1,5 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/error.rs
+// 裁剪：去掉只给 CLI 同步用的 `NotAFolder`、`SyncToRoot`。
 //! Why browsing or a transfer failed, and what a transfer asks or notes:
 //! values the app turns into its own words. The `Display` texts here are
 //! English for logs, never shown as they are.
@@ -97,10 +99,6 @@ pub enum SftpError {
     RemoteFolderMissing {
         path: String,
     },
-    NotAFolder {
-        path: String,
-    },
-    SyncToRoot,
     /// A dropped batch waits `seconds` before try `attempt` of 3.
     ReconnectIn {
         seconds: u64,
@@ -134,8 +132,6 @@ impl fmt::Display for SftpError {
                 write!(f, "local folder {} doesn't exist", path.display())
             }
             Self::RemoteFolderMissing { path } => write!(f, "remote folder {path} doesn't exist"),
-            Self::NotAFolder { path } => write!(f, "remote path {path} isn't a folder"),
-            Self::SyncToRoot => f.write_str("can't sync to the root folder"),
             Self::ReconnectIn { seconds, attempt } => {
                 write!(f, "reconnecting in {seconds} s ({attempt}/3)")
             }

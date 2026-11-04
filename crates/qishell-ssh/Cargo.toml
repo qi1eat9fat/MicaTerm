@@ -1,41 +1,39 @@
 [package]
-name = "shellrs-ssh"
+name = "qishell-ssh"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "ShellRS SSH core: logins, host keys, channels and the SFTP transfer engine"
-license = "MIT"
-repository = "https://github.com/since2006/shell-rs"
+description = "QiShell 的 SSH 核心：登录、主机密钥、通道和 SFTP 传输引擎"
+# 拷自 since2006/shell-rs @ b2a307a 的 crates/shellrs-ssh（MIT），见 ADR 0002；
+# 原 MIT 许可和版权声明保留在 LICENSE 里。
+license = "GPL-3.0-only"
 
 [dependencies]
 anyhow = "1"
 async-channel = "2"
-# HTTP proxies' Basic authentication.
+# HTTP 代理的 Basic 认证。
 base64 = "0.22"
-# Where the default private keys are looked for, unless told otherwise.
+# 「无密码」登录去 `~/.ssh` 里找默认私钥。
 dirs = "6"
-# Canonical local paths without the `\\?\` prefix std adds on Windows.
+# 规范化本地路径，去掉 Windows 上 std 加的 `\\?\` 前缀。
 dunce = "1"
 futures = "0.3"
 russh = "0.63"
 russh-sftp = "=3.0.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Resume records are named by a digest of what they resume; the names are
-# kept across versions, so the digest stays this one.
+# 续传记录以所续内容的摘要命名；名字跨版本沿用，所以摘要算法不能换。
 sha2 = "0.10"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
 zeroize = "1"
 
 [features]
-# An SSH server in the process for the tests of what builds on this crate
-# (`testing`): the mobile bindings take it as a dev-dependency.
+# 进程内的 SSH 测试服务器（`testing` 模块），给依赖本 crate 的测试用。
 testing = ["tokio/process"]
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
-# Plain `fsync(2)` for resume records: std's `sync_all` is the much slower
-# `F_FULLFSYNC` there.
+# 续传记录用普通的 `fsync(2)`：std 的 `sync_all` 在那里是慢得多的 `F_FULLFSYNC`。
 libc = "0.2"
 
 [dev-dependencies]

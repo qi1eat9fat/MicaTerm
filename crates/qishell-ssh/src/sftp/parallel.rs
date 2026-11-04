@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/parallel.rs
 //! Several items of a batch at once, as WinSCP's parallel transfers take the
 //! files of a batch one by one from a shared list. WinSCP opens more
 //! connections for it; here the items share the batch's one SFTP session,

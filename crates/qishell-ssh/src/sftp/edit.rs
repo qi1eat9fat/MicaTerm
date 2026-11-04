@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/edit.rs
 //! Whole text files for the editor: read into memory, written back in place.
 //!
 //! Unlike transfers there is no `.filepart` and no rename: a save truncates

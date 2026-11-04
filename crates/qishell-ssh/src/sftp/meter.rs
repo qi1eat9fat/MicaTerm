@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/meter.rs
 //! A batch's progress, kept the same way by uploads and downloads: what the
 //! transfer queue shows, and the clock and byte counts behind it.
 

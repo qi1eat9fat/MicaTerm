@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/probe.rs
 //! Work out which operating system is on the far end.
 //!
 //! Runs once per successful connection on its own exec channel, so the user's

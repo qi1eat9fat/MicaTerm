@@ -1,7 +1,10 @@
-//! A real SSH server in the test's own process, for the tests of what is
-//! built on this crate (the mobile bindings): a password login, a shell
-//! that echoes what is typed, commands, and SFTP through this machine's
-//! OpenSSH `sftp-server`. Only with the `testing` feature.
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/testing.rs
+// 裁剪：本 crate 自己的测试也用它（`cfg(test)`）。
+//! A real SSH server in the test's own process, for this crate's tests and
+//! those of what is built on it: a password login, a shell that echoes what
+//! is typed, commands, and SFTP through this machine's OpenSSH
+//! `sftp-server` (none on Windows). Only in tests or with the `testing`
+//! feature.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/proxy.rs
 //! The handshake that turns a connection to an HTTP or SOCKS5 proxy into a
 //! stream to the host behind it.
 //!

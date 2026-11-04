@@ -1,3 +1,6 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/journal.rs
+// 裁剪：远程备份文件的前缀 `.shellrs-` 改为 `.qishell-`。
+
 use super::{EntryKind, FileMetadata, JournalError, RemotePath};
 use crate::WrapErr as _;
 use anyhow::{Result, bail};
@@ -68,7 +71,7 @@ impl ResumeRecord {
             source_metadata: None,
             link_target: None,
             temporary,
-            backup: parent.join(&format!(".shellrs-{id}.backup"))?,
+            backup: parent.join(&format!(".qishell-{id}.backup"))?,
             target,
             original,
             phase: PublishPhase::Writing,
@@ -108,7 +111,7 @@ impl ResumeRecord {
 /// Whether `path` is a backup name this module makes up, beside `target`.
 fn managed_backup_path(path: &RemotePath, target: &RemotePath) -> bool {
     let name = path.as_str().rsplit('/').next().unwrap_or_default();
-    name.strip_prefix(".shellrs-")
+    name.strip_prefix(".qishell-")
         .and_then(|value| value.strip_suffix(".backup"))
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .is_some()

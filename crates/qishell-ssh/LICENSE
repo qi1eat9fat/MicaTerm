@@ -1,3 +1,11 @@
+qishell-ssh 随 QiShell 整体以 GPL-3.0-only 发布（见 docs/adr/0002-gpl-and-copy-from-shellrs.md）。
+
+本 crate 拷自 since2006/shell-rs（https://github.com/since2006/shell-rs）的
+crates/shellrs-ssh，上游 commit b2a307a77909a6599f6b53d82d42c8200b4026b8，
+之后经过裁剪和改造。上游代码以 MIT 许可发布，其许可和版权声明原样保留如下。
+
+--------------------------------------------------------------------------------
+
 MIT License
 
 Copyright (c) 2026 Xuz

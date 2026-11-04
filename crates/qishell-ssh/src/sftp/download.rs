@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/download.rs
 //! Downloading remote files and trees, the mirror of `upload`: each file is
 //! written to `<target>.filepart` next to its target and renamed over it
 //! once complete. An interrupted file resumes from the partial file's length,

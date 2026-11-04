@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/operations.rs
 //! One-shot remote file operations: delete, rename, create, change
 //! permissions. Trees are walked with an explicit stack and symbolic links
 //! are never followed.

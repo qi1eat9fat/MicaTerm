@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/latency.rs
 //! The round trip of a live SSH connection, as the terminal and SFTP tabs
 //! show it beside their buttons.
 

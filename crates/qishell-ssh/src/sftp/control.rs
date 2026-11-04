@@ -1,3 +1,5 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/control.rs
+
 use super::{
     EngineEvent, EventSink, Reason, TransferAnswer, TransferChoice, TransferQuestion,
     TransferQuestionKind,

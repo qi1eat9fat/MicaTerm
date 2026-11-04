@@ -1,5 +1,7 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/engine.rs
+// 裁剪：去掉 `SftpRoute`：SFTP 标签总是自己登录一条连接（单栏「文件」借终端连接的做法不要）。
 //! What an SFTP worker is told and what it says: the commands it serves,
-//! the events it sends, and where its channel comes from. Every failure in
+//! and the events it sends. Every failure in
 //! an event is a [`Reason`], for whoever shows it to word.
 
 use super::{
@@ -7,9 +9,8 @@ use super::{
     TransferAnswer, TransferProgress, TransferQuestion, UploadRequest,
     edit::{ReadFailure, SaveFailure},
 };
-use crate::{ConnectionPrompt, ConnectionPromptReply, HostLogin, Latency, SftpChannel};
+use crate::{ConnectionPrompt, ConnectionPromptReply, Latency};
 use anyhow::Result;
-use futures::future::BoxFuture;
 use std::sync::Arc;
 
 /// A one-shot change to remote files. None of them follows symbolic links:
@@ -189,36 +190,3 @@ impl std::fmt::Display for EventsClosed {
 }
 
 impl std::error::Error for EventsClosed {}
-
-/// Where a worker's SFTP channel comes from.
-#[derive(Clone)]
-pub enum SftpRoute {
-    /// A connection of its own, logged in as `login` says.
-    Login(HostLogin),
-    /// A channel on a connection something else holds, such as a remote
-    /// terminal's: no login and no questions; it is up when that connection
-    /// is. `endpoint`, `user@host:port`, is what resumable transfers are
-    /// recorded by.
-    Channel {
-        endpoint: String,
-        opener: Arc<dyn SftpChannelOpener>,
-    },
-}
-
-impl SftpRoute {
-    /// `user@host:port`, which resumable transfers are recorded by.
-    pub fn endpoint(&self) -> String {
-        match self {
-            SftpRoute::Login(login) => login.endpoint(),
-            SftpRoute::Channel { endpoint, .. } => endpoint.clone(),
-        }
-    }
-}
-
-/// Opens SFTP channels on a connection something else holds.
-pub trait SftpChannelOpener: Send + Sync + 'static {
-    /// A channel with the SFTP subsystem started. Fails with
-    /// [`TerminalNotConnected`](super::TerminalNotConnected) while there is
-    /// no connection to open it on, which is retried like a dropped one.
-    fn open(&self) -> BoxFuture<'static, Result<SftpChannel>>;
-}

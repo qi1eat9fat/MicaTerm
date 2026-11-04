@@ -1,3 +1,4 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/speed.rs
 //! How long a batch has spent transferring, and how fast it is going now.
 //! Waiting on a question, reconnecting and being stopped count for neither:
 //! the time is the batch's working time, and the speed is the recent one
