@@ -27,7 +27,10 @@ impl Workspace {
         self.next_card_id += 1;
         let provider = self.services.local_terminals.clone();
         let target = self.focus_handle.clone();
-        cx.new(|cx| TerminalCard::local(id, launch, provider, target, window, cx))
+        let card = cx.new(|cx| TerminalCard::local(id, launch, provider, target, window, cx));
+        // 终端的通知和响铃（工单 03）。
+        self.watch_notices(&card, window, cx);
+        card
     }
 
     /// 关掉一张卡片和它的 shell。02 一个标签只有一张卡片，所以连标签一起关；

@@ -182,3 +182,23 @@ pub fn fake_local_terminals_with(
 pub fn fake_local_terminals() -> Arc<FixedLocalTerminalTransportProvider> {
     fake_local_terminals_with(Arc::new(FakeTerminalFactory::default()))
 }
+
+/// 工单 03（终端交互）用到的查询。
+impl FakeTerminalFactory {
+    /// 终端最后一次告诉假 shell 的尺寸：有了它，终端就已经排好版。
+    pub fn last_size(&self) -> Option<TerminalSize> {
+        self.resizes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .last()
+            .copied()
+    }
+
+    /// 忘掉已经写进来的东西，下一次只看新写的。
+    pub fn clear_writes(&self) {
+        self.writes
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+    }
+}

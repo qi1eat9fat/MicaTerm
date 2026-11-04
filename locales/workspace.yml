@@ -45,3 +45,9 @@ workspace.start.new_host_hint:
   zh-CN: 保存一台 SSH 主机
 workspace.start.quick_connect:
   zh-CN: 快速连接
+
+# 终端的通知和响铃（工单 03）：标题以卡片名称开头
+workspace.notice.titled:
+  zh-CN: "%{card}：%{title}"
+workspace.notice.bell:
+  zh-CN: "%{card}：响铃"
