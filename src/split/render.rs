@@ -1,10 +1,10 @@
 //! 照着分屏树画：每个分支嵌套一层 `h_resizable` / `v_resizable`，叶子由调用方画。
 //!
-//! 树是唯一的事实来源，gpui 的分屏面板（`ResizableState`）按像素记尺寸，只是树的镜像：
+//! 树是唯一的事实来源，gpui 的 resizable 组件（`ResizableState`）按像素记尺寸，只是树的镜像：
 //! - 每条分隔线按 `NodeId` 留一个 `ResizableState`，跟着树增删；
 //! - 树的比例变了（键盘推分隔线、双击复位、拖到界外），调 `show_ratio` 把像素推过去；
-//! - 拖完间隙，面板在松开鼠标时派发 `ResizeDivider`，窗口壳把比例写回树；
-//! - 面板默认的最小尺寸是 100px，和 0.08 的下限对不上：按上一帧量到的容器尺寸
+//! - 拖完间隙，resizable 组件在松开鼠标时派发 `ResizeDivider`，窗口壳把比例写回树；
+//! - resizable 组件默认的最小尺寸是 100px，和 0.08 的下限对不上：按上一帧量到的容器尺寸
 //!   把两边限制在 0.08–0.92 之间，拖的时候就停在界限上。
 //!
 //! 间隙：两边各留半个 `GAP`，库自己的拖动柄（宽 9）正好压在间隙上；柄里画的是
@@ -26,40 +26,40 @@ use crate::app::{ResetDivider, ResizeDivider};
 use crate::card::CardId;
 use crate::theme::GAP;
 
-/// 一条分隔线在 gpui 里的镜像。
-struct Panels {
+/// 一条分隔线在 gpui 里的镜像：它那个 resizable 组件的状态，和量到的容器长度。
+struct DividerMirror {
     state: Entity<ResizableState>,
     /// 上一帧量到的容器沿分屏方向的长度：按它换算 0.08–0.92 的像素界限。
     extent: Rc<Cell<Pixels>>,
 }
 
-/// 一棵分屏树全部分隔线的分屏面板。
+/// 一棵分屏树全部分隔线在 gpui 里的镜像，按分隔线的 `NodeId` 存。
 #[derive(Default)]
-pub struct SplitPanels {
-    panels: HashMap<NodeId, Panels>,
+pub struct DividerMirrors {
+    mirrors: HashMap<NodeId, DividerMirror>,
 }
 
-impl SplitPanels {
-    /// 树里每条分隔线都有面板，删掉的分隔线的面板丢掉。分屏、关卡片以后调。
+impl DividerMirrors {
+    /// 树里每条分隔线都有镜像，删掉的分隔线的镜像丢掉。分屏、关卡片以后调。
     pub fn sync(&mut self, tree: &SplitTree, cx: &mut App) {
         let mut nodes = Vec::new();
         collect_dividers(tree.root(), &mut nodes);
-        self.panels.retain(|node, _| nodes.contains(node));
+        self.mirrors.retain(|node, _| nodes.contains(node));
         for node in nodes {
-            self.panels.entry(node).or_insert_with(|| Panels {
+            self.mirrors.entry(node).or_insert_with(|| DividerMirror {
                 state: cx.new(|_| ResizableState::default()),
                 extent: Rc::new(Cell::new(px(0.))),
             });
         }
     }
 
-    /// 把树里分隔线 `node` 的比例推给它的面板：键盘推分隔线、双击复位、拖到界外以后调。
+    /// 把树里分隔线 `node` 的比例推给它的 resizable 组件：键盘推分隔线、双击复位、拖到界外以后调。
     /// 还没量过尺寸（这一帧刚分出来）时什么都不做，第一帧本来就是一半。
     pub fn show_ratio(&self, node: NodeId, ratio: f32, window: &mut Window, cx: &mut App) {
-        let Some(panels) = self.panels.get(&node) else {
+        let Some(mirror) = self.mirrors.get(&node) else {
             return;
         };
-        panels.state.update(cx, |state, cx| {
+        mirror.state.update(cx, |state, cx| {
             let total: f32 = state.sizes().iter().map(|size| f32::from(*size)).sum();
             if state.sizes().len() != 2 || total <= 0. {
                 return;
@@ -71,7 +71,7 @@ impl SplitPanels {
         });
     }
 
-    /// 画树：放大时只画放大的那张，否则一层层嵌套分屏面板。`card` 画一张卡片。
+    /// 画树：放大时只画放大的那张，否则一层层嵌套 resizable 组件。`card` 画一张卡片。
     pub fn render(&self, tree: &SplitTree, card: &dyn Fn(CardId) -> AnyElement) -> AnyElement {
         match tree.zoomed() {
             Some(zoomed) => card(zoomed),
@@ -90,8 +90,8 @@ impl SplitPanels {
                 ..
             } => (id, axis, first, second),
         };
-        let Some(panels) = self.panels.get(id) else {
-            // 还没同步面板（不该发生）：照样画出两边，只是不能拖。
+        let Some(mirror) = self.mirrors.get(id) else {
+            // 还没同步镜像（不该发生）：照样画出两边，只是不能拖。
             return div()
                 .flex()
                 .size_full()
@@ -101,7 +101,7 @@ impl SplitPanels {
         };
         let node = *id;
         let axis = *axis;
-        let extent = panels.extent.get();
+        let extent = mirror.extent.get();
         // 两边都限制在 0.08–0.92；还没量过尺寸时不限（默认的 100px 下限也不要）。
         let range = if extent > px(0.) {
             extent * MIN_RATIO..extent * MAX_RATIO
@@ -114,7 +114,7 @@ impl SplitPanels {
             Axis::Vertical => v_resizable(("split", node.0 as usize)),
         };
         let group = group
-            .with_state(&panels.state)
+            .with_state(&mirror.state)
             .with_handle_appearance(divider_appearance(node))
             .on_resize(move |state, window, cx| {
                 let sizes = state.read(cx).sizes();
@@ -125,7 +125,7 @@ impl SplitPanels {
                 }
             })
             .child(
-                // 两边一开始都从 0 起按 flex 平分；量过以后由面板按像素摆。
+                // 两边一开始都从 0 起按 flex 平分；量过以后由 resizable 组件按像素摆。
                 resizable_panel()
                     .size(px(0.))
                     .size_range(range.clone())
@@ -156,7 +156,7 @@ impl SplitPanels {
                         .child(self.render_node(second, card)),
                 ),
             );
-        let extent = panels.extent.clone();
+        let extent = mirror.extent.clone();
         div()
             .relative()
             .flex()

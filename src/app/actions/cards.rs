@@ -55,7 +55,7 @@ pub struct MoveDivider(pub Direction);
 #[action(namespace = qishell, no_json)]
 pub struct ResetDivider(pub NodeId);
 
-/// 拖完间隙：这条分隔线的比例变成 `ratio`（限制在 0.08–0.92）。由分屏面板在松开鼠标时派发。
+/// 拖完间隙：这条分隔线的比例变成 `ratio`（限制在 0.08–0.92）。由 resizable 组件在松开鼠标时派发。
 #[derive(Action, Clone, Copy, Debug, PartialEq)]
 #[action(namespace = qishell, no_json)]
 pub struct ResizeDivider {
