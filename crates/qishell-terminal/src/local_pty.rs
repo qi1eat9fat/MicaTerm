@@ -229,6 +229,11 @@ impl TerminalTransport for LocalPtyTransport {
             }
         };
 
+        // shell 退出了，它跑的程序也就不在了：上次说的是某个程序（轮询没赶上它结束）时
+        // 补说一句回到了 shell，卡片的图块才复位。
+        if matches!(program, Some(Some(_))) {
+            send_event(&events, TerminalTransportEvent::ForegroundProgram(None));
+        }
         drop(writer);
         drop(pair.master);
         let _ = reader_thread.join();
@@ -899,6 +904,46 @@ mod windows_tests {
             programs.windows(2).all(|pair| pair[0] != pair[1]),
             "{programs:?}"
         );
+    }
+
+    /// shell 跟着它的程序一起退出（`cmd /c ping`）：轮询没赶上看到 shell 回到前台，
+    /// 退出前也补说一句前台回到了 shell，图块才复位（工单 06）。
+    #[test]
+    fn the_foreground_program_is_cleared_when_the_shell_exits_with_it() {
+        let _forks = crate::testing::no_forks();
+        let transport = cmd_transport("ping -n 3 127.0.0.1 >nul");
+        let (commands, command_receiver) = mpsc::channel();
+        let (events, event_receiver) = async_channel::unbounded();
+        let worker =
+            thread::spawn(move || transport.run(TerminalSize::DEFAULT, command_receiver, events));
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut programs = Vec::new();
+        let mut exited = false;
+        while Instant::now() < deadline {
+            match event_receiver.try_recv() {
+                Ok(TerminalTransportEvent::Output(bytes)) => {
+                    if bytes.windows(4).any(|window| window == b"\x1b[6n") {
+                        let _ =
+                            commands.send(TerminalTransportCommand::Write(b"\x1b[1;1R".to_vec()));
+                    }
+                }
+                Ok(TerminalTransportEvent::ForegroundProgram(program)) => {
+                    programs.push(program.map(|name| name.to_lowercase()))
+                }
+                Ok(TerminalTransportEvent::Exited { .. }) => {
+                    exited = true;
+                    break;
+                }
+                Err(async_channel::TryRecvError::Closed) => break,
+                Ok(_) => {}
+                Err(async_channel::TryRecvError::Empty) => thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        worker.join().unwrap().unwrap();
+        assert!(exited);
+        assert!(programs.contains(&Some("ping".into())), "{programs:?}");
+        assert_eq!(programs.last(), Some(&None), "{programs:?}");
     }
 
     #[test]
