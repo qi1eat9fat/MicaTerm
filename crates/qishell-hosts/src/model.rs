@@ -2,8 +2,7 @@
 // 裁剪：去掉分组（`GroupId`、`HostGroup`、`GroupDraft`、分组路径）、协议字段（Telnet、串口）、
 // `Host.public_id` 和「复制 ID」、右侧栏工具字段、SFTP 书签、同步用的 `edited_ms`；
 // 主机列表平铺，只按 `sort_order` 排。`PublicId` 改名 `SecretId`，只剩凭据在保险库里的条目名用它。
-// `ProxyKind` 上游在 ssh crate 里，qishell-ssh 和本 crate 并行拷入，先在这里放一份（来自
-// crates/shellrs-ssh/src/login.rs）。
+// `ProxyKind` 和上游一样用 qishell-ssh 的。
 
 use gpui_shared_string::SharedString;
 use rand::{Rng as _, distr::Alphanumeric};
@@ -172,35 +171,9 @@ impl ProxySettings {
     }
 }
 
-/// The kind of proxy a host connects through.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ProxyKind {
-    /// An HTTP proxy, which the connection asks to `CONNECT` to the host.
-    #[default]
-    Http,
-    Socks5,
-}
-
-impl ProxyKind {
-    /// Every kind, in the order a form lists them.
-    pub const ALL: [ProxyKind; 2] = [ProxyKind::Http, ProxyKind::Socks5];
-
-    /// The stored spelling.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ProxyKind::Http => "http",
-            ProxyKind::Socks5 => "socks5",
-        }
-    }
-
-    pub fn from_stored(value: &str) -> Option<Self> {
-        match value {
-            "http" => Some(ProxyKind::Http),
-            "socks5" => Some(ProxyKind::Socks5),
-            _ => None,
-        }
-    }
-}
+/// The kind of proxy a host connects through: the SSH core's, whose stored
+/// spelling the database keeps.
+pub use qishell_ssh::ProxyKind;
 
 /// The operating system running on a host, as reported by the host's own
 /// shell after it connects.

@@ -4,6 +4,8 @@
 
 use std::time::Duration;
 
+use qishell_terminal::TerminalLifecycle;
+
 use crate::support::*;
 
 /// 用假本地终端打开窗口壳（窗口激活着），开一个终端标签，等假 shell 跑起来。
@@ -20,15 +22,24 @@ fn open_tab(
         open_workspace_with(cx, settings_store(), services_with_terminals(provider));
     in_frame(cx, handle, |window, _| window.activate_window());
     dispatch(cx, handle, NewLocalTerminalTab);
-    // 卡片的 shell 名（pwsh）在后台查到；假 shell 打出提示符才算跑起来了，这之前打的字会丢
-    // （测试并行跑、机器忙时，查到 shell 名可能比假 shell 起来得早）。
+    // 卡片的 shell 名（pwsh）在后台查到。终端要到 `Running` 才收键盘输入，之前打的字丢掉；
+    // 屏幕上出现提示符还不算：解析线程把输出直接画进终端，而 `Started` 要等 UI 线程下一次
+    // （每 16ms）收事件才把终端改成 `Running`，测试并行跑、机器忙时两者之间会隔一轮。
     assert!(wait_until(cx, handle, |cx| card_tile(cx, &workspace, 1)
         == Some("pwsh".into())
-        && cx.update(|cx| workspace
-            .read(cx)
-            .card_screen_text(CardId(1), cx)
-            .is_some_and(|text| text.contains("会议纪要")))));
+        && cx.update(|cx| running(&workspace, cx)
+            && workspace
+                .read(cx)
+                .card_screen_text(CardId(1), cx)
+                .is_some_and(|text| text.contains("会议纪要")))));
     (handle, workspace, factory)
+}
+
+/// 第一张卡片的终端收不收键盘输入了。
+fn running(workspace: &Entity<Workspace>, cx: &App) -> bool {
+    workspace.read(cx).card(CardId(1), cx).is_some_and(|card| {
+        card.read(cx).terminal().read(cx).lifecycle(cx) == TerminalLifecycle::Running
+    })
 }
 
 /// 按真实时间等 `done` 成立，最多两秒：假 shell 跑在自己的线程上。
