@@ -1,6 +1,7 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/secret.rs
 // 裁剪：去掉同步用的秘密（`SyncKeyring`、`SyncLogin`）。
-// 改造：私钥进保险库：加 `PrivateKey`，口令从按文件路径存改成按凭据的 `keychain_id` 存。
+// 改造：私钥进保险库：加 `PrivateKey`，口令从按文件路径存改成按凭据的 `keychain_id` 存；
+// 加 `HostPassword`：主机自己的密码按主机 id 存（2026-11-04 用户决定，工单 10/11）。
 //! Which secret a connection needs, and where it reads the saved ones.
 //! Each app keeps its secrets in its own platform's keychain; the
 //! connection only ever asks for one by its [`SecretRef`].
@@ -27,6 +28,10 @@ pub enum SecretRef {
         host: String,
         port: u16,
     },
+    /// A saved host's own login password, by the host's id: QiShell keeps
+    /// one per host, so a copy of a host does not bring its password along
+    /// (hosts share a password through a password credential instead).
+    HostPassword { host: u64 },
     /// A key credential's private key, the key file's text (OpenSSH, PEM or
     /// PuTTY), by the credential's `keychain_id`.
     PrivateKey { keychain_id: String },
@@ -55,6 +60,10 @@ impl SecretRef {
             host: host.into(),
             port,
         }
+    }
+
+    pub fn host_password(host: u64) -> Self {
+        Self::HostPassword { host }
     }
 
     pub fn private_key(keychain_id: impl Into<String>) -> Self {
@@ -93,6 +102,7 @@ impl SecretRef {
     pub fn account(&self) -> String {
         match self {
             Self::Password { user, host, port } => format!("password:{user}@{host}:{port}"),
+            Self::HostPassword { host } => format!("host-password:{host}"),
             Self::PrivateKey { keychain_id } => format!("private-key:{keychain_id}"),
             Self::Passphrase { keychain_id } => format!("passphrase:{keychain_id}"),
             Self::Credential { keychain_id } => format!("credential:{keychain_id}"),
@@ -155,6 +165,13 @@ mod tests {
         assert_eq!(secret.account(), "password:root@10.0.1.12:22");
     }
 
+    /// 主机自己的密码按主机 id 存：同一端点的两台主机（比如副本）各有各的。
+    #[test]
+    fn host_password_accounts_name_the_host() {
+        assert_eq!(SecretRef::host_password(42).account(), "host-password:42");
+        assert_ne!(SecretRef::host_password(42), SecretRef::host_password(43));
+    }
+
     #[test]
     fn private_key_and_passphrase_accounts_name_the_keychain_id() {
         assert_eq!(
@@ -188,6 +205,7 @@ mod tests {
     fn accounts_of_different_kinds_never_collide() {
         let accounts = [
             SecretRef::password("root", "10.0.1.12", 22),
+            SecretRef::host_password(22),
             SecretRef::private_key("root@10.0.1.12:22"),
             SecretRef::passphrase("root@10.0.1.12:22"),
             SecretRef::credential("root@10.0.1.12:22"),
