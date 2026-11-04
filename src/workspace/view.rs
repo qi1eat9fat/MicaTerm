@@ -18,7 +18,7 @@ use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
 use crate::card::{CardId, TerminalCard};
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply_terminal};
-use crate::tabs::{TabId, TabList, TabSnapshot, TerminalTab};
+use crate::tabs::{TabId, TabList, TabRail, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
 
 /// 窗口壳用到的外部服务。生产代码用 `WorkspaceServices::new()` 建真实的，
@@ -55,6 +55,8 @@ pub struct Workspace {
     pub(super) tabs: TabList<TerminalTab>,
     /// 下一张卡片的 id：从 1 起，不复用。
     pub(super) next_card_id: u64,
+    /// 标签轨道的滚动位置。
+    pub(super) tab_rail: TabRail,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -103,6 +105,7 @@ impl Workspace {
             host_sidebar_open: true,
             tabs: TabList::default(),
             next_card_id: 1,
+            tab_rail: TabRail::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -194,7 +197,8 @@ impl Render for Workspace {
             .min_w_0()
             .child(render_title_bar(
                 self.host_sidebar_open,
-                self.tab_snapshots(cx),
+                self.tab_rail
+                    .render(self.tab_snapshots(cx), &target, &tokens),
                 &target,
                 &tokens,
                 window,
