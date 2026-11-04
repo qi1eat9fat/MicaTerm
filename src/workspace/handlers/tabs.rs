@@ -1,4 +1,4 @@
-//! 标签的处理器：新建（02），切换、三种关闭（04）。
+//! 标签的处理器：新建（02），切换、三种关闭（04），关闭在前的整个标签（macOS 的 ⇧⌘W）。
 
 use gpui_kit::*;
 use qishell_terminal::{LocalLaunch, LocalShell};
@@ -6,8 +6,8 @@ use qishell_terminal::{LocalLaunch, LocalShell};
 use gpui_kit::component::menu::PopupMenu;
 
 use crate::app::{
-    ActivateTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NewLocalTerminalTab, NextTab,
-    OpenTabMenu, PreviousTab, SwitchToTab,
+    ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NewLocalTerminalTab,
+    NextTab, OpenTabMenu, PreviousTab, SwitchToTab,
 };
 use crate::tabs::{TabId, TerminalTab, build_tab_menu};
 use crate::workspace::Workspace;
@@ -22,6 +22,7 @@ pub(in crate::workspace) fn bind_tabs_actions(
         .on_action(cx.listener(Workspace::on_switch_to_tab))
         .on_action(cx.listener(Workspace::on_activate_tab))
         .on_action(cx.listener(Workspace::on_close_tab))
+        .on_action(cx.listener(Workspace::on_close_active_tab))
         .on_action(cx.listener(Workspace::on_close_other_tabs))
         .on_action(cx.listener(Workspace::on_close_tabs_to_right))
         .on_action(cx.listener(Workspace::on_open_tab_menu))
@@ -90,6 +91,17 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.close_tab(id, window, cx);
+    }
+
+    fn on_close_active_tab(
+        &mut self,
+        _: &CloseActiveTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(id) = self.tabs.active() {
+            self.close_tab(id, window, cx);
+        }
     }
 
     /// 只留下 `id`，它到前面来。

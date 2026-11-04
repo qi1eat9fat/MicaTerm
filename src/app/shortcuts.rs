@@ -200,6 +200,13 @@ pub const CARD_KEYS: &[Shortcut] = &[
         action: || Box::new(CloseFocusedCard),
         context: None,
     },
+    // 关闭整个标签：Windows 和 Linux 没有快捷键（用标签上的 × 或右键菜单），只给 macOS 绑。
+    Shortcut {
+        keys: "",
+        mac: "cmd-shift-w",
+        action: || Box::new(CloseActiveTab),
+        context: None,
+    },
     Shortcut {
         keys: "ctrl-shift-enter",
         mac: "cmd-shift-enter",
@@ -394,7 +401,7 @@ mod tests {
 
     use gpui_kit::Keystroke;
 
-    use super::all;
+    use super::{CARD_KEYS, all};
 
     #[test]
     fn every_key_parses() {
@@ -418,6 +425,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// 关闭整个标签只有 macOS 有快捷键 ⇧⌘W；Windows 和 Linux 用标签上的 × 或右键菜单（spec §8）。
+    #[test]
+    fn cmd_shift_w_closes_the_whole_tab_on_macos_only() {
+        let close_tab = CARD_KEYS
+            .iter()
+            .find(|shortcut| shortcut.mac == "cmd-shift-w")
+            .expect("⇧⌘W is bound");
+        assert_eq!((close_tab.action)().name(), "qishell::CloseActiveTab");
+        assert_eq!(close_tab.keys, "");
+        assert_eq!(close_tab.context, None);
     }
 
     /// 只按 Ctrl 加字母的组合全部留给终端里的 shell。
