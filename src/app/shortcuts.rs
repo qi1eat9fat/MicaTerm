@@ -12,7 +12,9 @@
 
 use std::rc::Rc;
 
-use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate};
+use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate, NoAction};
+
+use qishell_terminal::actions::*;
 
 use super::actions::*;
 
@@ -97,8 +99,81 @@ pub const TAB_KEYS: &[Shortcut] = &[Shortcut {
 /// 卡片的快捷键（工单 05 填写）。
 pub const CARD_KEYS: &[Shortcut] = &[];
 
-/// 终端的快捷键（工单 03 填写）。
-pub const TERMINAL_KEYS: &[Shortcut] = &[];
+/// 只在终端里生效。
+const IN_TERMINAL: Option<&str> = Some(qishell_terminal::TERMINAL_KEY_CONTEXT);
+/// 在终端里和它的查找条里都生效：查找条和终端是兄弟节点，不在同一条键上下文路径上。
+const IN_TERMINAL_OR_FIND: Option<&str> = Some("Terminal || TerminalFind");
+
+/// 终端的快捷键（工单 03）。转发给焦点卡片的终端，见 `workspace/handlers/terminal.rs`。
+/// 字号的 Ctrl+= / Ctrl+- / Ctrl+0 是 Ctrl 加符号，本来就是终端的功能，只绑在终端里。
+pub const TERMINAL_KEYS: &[Shortcut] = &[
+    Shortcut {
+        keys: "ctrl-shift-c",
+        mac: "cmd-c",
+        action: || Box::new(CopyTerminal),
+        context: IN_TERMINAL,
+    },
+    Shortcut {
+        keys: "ctrl-shift-v",
+        mac: "cmd-v",
+        action: || Box::new(PasteTerminal),
+        context: IN_TERMINAL,
+    },
+    Shortcut {
+        keys: "ctrl-shift-a",
+        mac: "cmd-a",
+        action: || Box::new(SelectAllTerminal),
+        context: IN_TERMINAL,
+    },
+    Shortcut {
+        keys: "ctrl-shift-k",
+        mac: "cmd-k",
+        action: || Box::new(ClearTerminal),
+        context: IN_TERMINAL,
+    },
+    Shortcut {
+        keys: "ctrl-shift-f",
+        mac: "cmd-f",
+        action: || Box::new(FindInTerminal),
+        context: IN_TERMINAL_OR_FIND,
+    },
+    Shortcut {
+        keys: "f3",
+        mac: "cmd-g",
+        action: || Box::new(FindNextInTerminal),
+        context: IN_TERMINAL_OR_FIND,
+    },
+    Shortcut {
+        keys: "shift-f3",
+        mac: "cmd-shift-g",
+        action: || Box::new(FindPreviousInTerminal),
+        context: IN_TERMINAL_OR_FIND,
+    },
+    Shortcut {
+        keys: "escape",
+        mac: "escape",
+        action: || Box::new(DismissTerminalFind),
+        context: Some(qishell_terminal::TERMINAL_FIND_KEY_CONTEXT),
+    },
+    Shortcut {
+        keys: "ctrl-=",
+        mac: "cmd-=",
+        action: || Box::new(ZoomTerminalIn),
+        context: IN_TERMINAL_OR_FIND,
+    },
+    Shortcut {
+        keys: "ctrl--",
+        mac: "cmd--",
+        action: || Box::new(ZoomTerminalOut),
+        context: IN_TERMINAL_OR_FIND,
+    },
+    Shortcut {
+        keys: "ctrl-0",
+        mac: "cmd-0",
+        action: || Box::new(ZoomTerminalReset),
+        context: IN_TERMINAL_OR_FIND,
+    },
+];
 
 /// 全部快捷键。全局的在前、带上下文的在后：同一个键在上下文里后写的胜出。
 pub fn all() -> impl Iterator<Item = &'static Shortcut> {
@@ -137,6 +212,23 @@ pub fn bind(cx: &mut App) {
     cx.bind_keys(bindings);
     // 终端里的 Tab 和 Shift+Tab 发给 shell，不让焦点跳走（终端 crate 自带的绑定）。
     cx.bind_keys(qishell_terminal::terminal_key_bindings());
+    cx.bind_keys(shell_keys_in_terminal());
+}
+
+/// 在终端里，只按 Ctrl 加字母全部留给 shell（Ctrl+C 中断、tmux 的 Ctrl+B、readline 的 Ctrl+W）。
+/// 按键先过绑定、再到终端，而 gpui-kit 的根节点把 Ctrl+C 绑成了复制：界面里有选中文字时，
+/// 它就会吞掉中断。终端上下文里的 `NoAction` 比外层的绑定优先，把这些键让回给终端。
+// 参考 since2006/shell-rs @ b2a307a: src/app/shortcuts.rs 的 `shell_keys_in_terminal`
+fn shell_keys_in_terminal() -> Vec<KeyBinding> {
+    ('a'..='z')
+        .map(|letter| {
+            KeyBinding::new(
+                &format!("ctrl-{letter}"),
+                NoAction {},
+                Some(qishell_terminal::TERMINAL_KEY_CONTEXT),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -161,10 +253,14 @@ mod tests {
     #[test]
     fn no_key_is_bound_twice_in_one_context() {
         let mut seen = HashSet::new();
+        // 两个平台各自不重复：Esc 在两边是同一个键。
         for shortcut in all() {
-            for keys in [shortcut.keys, shortcut.mac] {
+            for (platform, keys) in [("other", shortcut.keys), ("mac", shortcut.mac)] {
                 if !keys.is_empty() {
-                    assert!(seen.insert((keys, shortcut.context)), "{keys} twice");
+                    assert!(
+                        seen.insert((platform, keys, shortcut.context)),
+                        "{keys} twice"
+                    );
                 }
             }
         }
