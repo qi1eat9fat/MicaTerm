@@ -1,12 +1,13 @@
 //! 本地终端的前台程序：shell 现在在跑什么（工单 06）。
 //!
-//! - Windows：从 shell 起，取它最新启动的子进程；是 `cmd.exe`（跑批处理的）就再往下找一层；
+//! - Windows：从 shell 起，取它最新启动的控制台子进程（窗口程序不在终端里跑，不算）；
+//!   是 `cmd.exe`（跑批处理的）就再往下找一层；
 //! - macOS、Linux：PTY 的前台进程组（`tcgetpgrp`，portable-pty 的 `process_group_leader`）。
 //!
 //! 拿到进程以后按 `program_name` 起名：去掉 `.exe`，解释器跑的脚本用脚本名（`node …/bin/codex.js` 是 `codex`）。
 //! shell 自己在前台（在提示符下）时是 `None`。
 // 参考 gorex 的模型重写：internal/rex/proc.go、proc_windows.go、proc_linux.go、
-// pty_windows.go 的 `foreground`。
+// pty_windows.go 的 `foreground`。gorex 不过滤窗口程序，这里按 PE 头的子系统加了一道。
 
 use std::path::Path;
 
@@ -187,7 +188,9 @@ pub(crate) fn split_command_line(line: &str) -> Vec<String> {
 #[cfg(windows)]
 mod windows {
     use std::collections::HashMap;
-    use std::ffi::c_void;
+    use std::ffi::{OsString, c_void};
+    use std::os::windows::ffi::OsStringExt as _;
+    use std::path::{Path, PathBuf};
 
     use windows_sys::Wdk::System::Threading::{
         NtQueryInformationProcess, ProcessCommandLineInformation,
@@ -198,7 +201,8 @@ mod windows {
         TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
     };
 
     use super::{INTERPRETERS, program_name, split_command_line};
@@ -276,18 +280,82 @@ mod windows {
         Some(u64::from(created.dwHighDateTime) << 32 | u64::from(created.dwLowDateTime))
     }
 
+    /// 程序文件是不是控制台程序：读 PE 头里的子系统（3 是控制台，2 是窗口程序）。
+    /// 读不了、不是 PE 文件是 `None`。
+    pub(super) fn console_image(path: &Path) -> Option<bool> {
+        use std::io::{Read as _, Seek as _, SeekFrom};
+
+        const SUBSYSTEM_WINDOWS_CUI: u16 = 3;
+        let mut file = std::fs::File::open(path).ok()?;
+        let mut dos = [0_u8; 64];
+        file.read_exact(&mut dos).ok()?;
+        if &dos[..2] != b"MZ" {
+            return None;
+        }
+        let pe = u32::from_le_bytes(dos[60..64].try_into().ok()?);
+        // 签名 4 字节、COFF 头 20 字节，可选头里第 68 字节起是子系统（PE32 和 PE32+ 一样）。
+        let mut header = [0_u8; 4 + 20 + 70];
+        file.seek(SeekFrom::Start(u64::from(pe))).ok()?;
+        file.read_exact(&mut header).ok()?;
+        if &header[..4] != b"PE  " {
+            return None;
+        }
+        let subsystem = u16::from_le_bytes([header[4 + 20 + 68], header[4 + 20 + 69]]);
+        Some(subsystem == SUBSYSTEM_WINDOWS_CUI)
+    }
+
+    /// 进程 `pid` 是不是控制台程序。看不出来（打不开进程、读不了文件）时当它是：宁可多认一个前台程序。
+    fn in_console(pid: u32) -> bool {
+        image_path(pid)
+            .and_then(|path| console_image(&path))
+            .unwrap_or(true)
+    }
+
+    /// 进程 `pid` 的程序文件的完整路径。
+    fn image_path(pid: u32) -> Option<PathBuf> {
+        // SAFETY: 只读权限打开，失败返回空句柄。
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if handle.is_null() {
+            return None;
+        }
+        let handle = Handle(handle);
+        let mut buffer = vec![0_u16; 32 * 1024];
+        let mut length = buffer.len() as u32;
+        // SAFETY: `buffer` 可写，`length` 是它的长度（以 u16 计）。
+        if unsafe {
+            QueryFullProcessImageNameW(
+                handle.0,
+                PROCESS_NAME_WIN32,
+                buffer.as_mut_ptr(),
+                &mut length,
+            )
+        } == 0
+        {
+            return None;
+        }
+        Some(PathBuf::from(OsString::from_wide(
+            &buffer[..length as usize],
+        )))
+    }
+
     impl Processes {
-        /// `parent` 最新启动的子进程。比 `parent` 启动得早的不算：它只是占了
-        /// `parent` 以前那个同号进程的子进程位置。
+        /// `parent` 最新启动的控制台子进程。比 `parent` 启动得早的不算：它只是占了
+        /// `parent` 以前那个同号进程的子进程位置。窗口程序（shell 起的记事本、`code .`）
+        /// 不在终端里跑，也不算，不然它不退出，卡片就一直以为前台是它。
         fn newest_child(&self, parent: u32) -> Option<u32> {
             let born = started(parent)?;
-            self.children
+            let mut children: Vec<_> = self
+                .children
                 .get(&parent)?
                 .iter()
                 .filter_map(|child| Some((*child, started(*child)?)))
                 .filter(|(_, at)| *at >= born)
-                .max_by_key(|(_, at)| *at)
+                .collect();
+            children.sort_by_key(|(_, at)| std::cmp::Reverse(*at));
+            children
+                .into_iter()
                 .map(|(child, _)| child)
+                .find(|child| in_console(*child))
         }
     }
 
@@ -375,7 +443,58 @@ mod windows {
 
     #[cfg(test)]
     mod tests {
-        use super::foreground;
+        use super::{console_image, foreground, processes};
+
+        /// 控制台程序在终端里跑；窗口程序（记事本）不在。
+        #[test]
+        fn a_console_program_is_told_from_a_window_program() {
+            let system =
+                std::path::PathBuf::from(std::env::var("SystemRoot").unwrap()).join("System32");
+            assert_eq!(console_image(&system.join("cmd.exe")), Some(true));
+            assert_eq!(console_image(&system.join("PING.EXE")), Some(true));
+            assert_eq!(console_image(&system.join("notepad.exe")), Some(false));
+            assert_eq!(console_image(&system.join("wscript.exe")), Some(false));
+            assert_eq!(console_image(&system.join("no-such-program.exe")), None);
+        }
+
+        /// shell 起了个不退出的窗口程序（记事本、`code .`）：它不在终端里，前台还是 shell。
+        #[test]
+        fn a_window_program_the_shell_started_is_not_its_foreground() {
+            let _forks = crate::testing::no_forks();
+            let folder = tempfile::tempdir().unwrap();
+            let script = folder.path().join("sleep.vbs");
+            std::fs::write(&script, "WScript.Sleep 30000\r\n").unwrap();
+            // cmd /c 跑窗口程序时等它结束：这段时间里 wscript 是 cmd 最新的子进程。
+            let mut shell = std::process::Command::new("cmd.exe")
+                .args(["/d", "/c", "wscript.exe", "//B", "//Nologo"])
+                .arg(&script)
+                .spawn()
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut started = false;
+            while std::time::Instant::now() < deadline && !started {
+                started = processes().is_some_and(|processes| {
+                    processes.children.get(&shell.id()).is_some_and(|children| {
+                        children.iter().any(|child| {
+                            processes
+                                .names
+                                .get(child)
+                                .is_some_and(|name| name.eq_ignore_ascii_case("wscript.exe"))
+                        })
+                    })
+                });
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let seen = foreground(shell.id());
+            // 先关掉 wscript（cmd 的子进程），再关 cmd。
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &shell.id().to_string()])
+                .output();
+            let _ = shell.kill();
+            let _ = shell.wait();
+            assert!(started, "wscript 没起来");
+            assert_eq!(seen, None);
+        }
 
         /// cmd.exe 跑着 ping：前台程序是 ping（跳过 cmd.exe 那一层是 shell 起批处理的情形，
         /// 这里 cmd.exe 本身就是被查的 shell）。

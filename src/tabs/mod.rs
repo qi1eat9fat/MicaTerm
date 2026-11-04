@@ -16,9 +16,11 @@ use gpui_kit::{
     Window, div,
 };
 
+use qishell_terminal::TerminalView;
+
 use crate::card::{CardId, MAX_STACKED_TILES, StatusDot, TerminalCard};
 use crate::programs::Program;
-use crate::split::{Axis, Closed, Direction, NodeId, SplitPanels, SplitTree};
+use crate::split::{Axis, Closed, Direction, DividerMirrors, NodeId, SplitTree};
 
 /// 一个终端标签：一棵卡片分屏树。
 pub struct TerminalTab {
@@ -26,8 +28,8 @@ pub struct TerminalTab {
     tree: SplitTree,
     /// 树里每张卡片的实体，和窗口壳对它的订阅（名称、目录变了标签重画，聚焦了记进树），跟着卡片走。
     cards: HashMap<CardId, (Entity<TerminalCard>, Vec<Subscription>)>,
-    /// 每条分隔线在 gpui 里的分屏面板。
-    panels: SplitPanels,
+    /// 每条分隔线在 gpui 里的镜像（resizable 组件的状态）。
+    dividers: DividerMirrors,
 }
 
 impl TerminalTab {
@@ -37,7 +39,7 @@ impl TerminalTab {
         Self {
             tree: SplitTree::new(id),
             cards: HashMap::from([(id, (card, subscriptions))]),
-            panels: SplitPanels::default(),
+            dividers: DividerMirrors::default(),
         }
     }
 
@@ -50,6 +52,11 @@ impl TerminalTab {
     pub fn focused_card(&self) -> &Entity<TerminalCard> {
         self.card(self.tree.focused())
             .expect("the focused card belongs to the tab")
+    }
+
+    /// 焦点卡片里的终端：终端动作（复制、粘贴、查找……）的对象。
+    pub fn focused_terminal(&self, cx: &App) -> Entity<TerminalView> {
+        self.focused_card().read(cx).terminal().clone()
     }
 
     pub fn contains(&self, card: CardId, _cx: &App) -> bool {
@@ -82,7 +89,7 @@ impl TerminalTab {
         self.cards.get(&card).map(|(entity, _)| entity)
     }
 
-    /// 分屏树：只读，改它一律经下面的方法（同时更新卡片和分屏面板）。
+    /// 分屏树：只读，改它一律经下面的方法（同时更新卡片和分隔线的镜像）。
     pub fn tree(&self) -> &SplitTree {
         &self.tree
     }
@@ -98,7 +105,7 @@ impl TerminalTab {
         let id = card.read(cx).id();
         self.cards.insert(id, (card, subscriptions));
         let node = self.tree.split(axis, id);
-        self.panels.sync(&self.tree, cx);
+        self.dividers.sync(&self.tree, cx);
         self.sync_cards(cx);
         node
     }
@@ -115,7 +122,7 @@ impl TerminalTab {
             return (closed, None);
         }
         let entity = self.cards.remove(&card).map(|(entity, _)| entity);
-        self.panels.sync(&self.tree, cx);
+        self.dividers.sync(&self.tree, cx);
         self.sync_cards(cx);
         (closed, entity)
     }
@@ -130,6 +137,16 @@ impl TerminalTab {
             self.sync_cards(cx);
         }
         focused
+    }
+
+    /// 让 `card` 看得见并成为焦点卡片（点了它的通知）：放大的是别的卡片时先还原。
+    /// 不在这个标签里返回 `false`。
+    pub fn reveal_card(&mut self, card: CardId, cx: &mut App) -> bool {
+        let revealed = self.tree.reveal(card);
+        if revealed {
+            self.sync_cards(cx);
+        }
+        revealed
     }
 
     /// 焦点移到那一边紧挨着的卡片，返回它；那边没有卡片或正放大着返回 `None`。
@@ -166,7 +183,7 @@ impl TerminalTab {
         }
     }
 
-    /// 拖完间隙：比例写回树（限制在 0.08–0.92），拖到界外的再推回面板。
+    /// 拖完间隙：比例写回树（限制在 0.08–0.92），拖到界外的再推回 resizable 组件。
     pub fn resize_divider(&mut self, node: NodeId, ratio: f32, window: &mut Window, cx: &mut App) {
         if self.tree.set_ratio(node, ratio) {
             self.show_ratio(node, window, cx);
@@ -175,7 +192,7 @@ impl TerminalTab {
 
     fn show_ratio(&self, node: NodeId, window: &mut Window, cx: &mut App) {
         if let Some(ratio) = self.tree.ratio(node) {
-            self.panels.show_ratio(node, ratio, window, cx);
+            self.dividers.show_ratio(node, ratio, window, cx);
         }
     }
 
@@ -189,7 +206,7 @@ impl TerminalTab {
         }
     }
 
-    /// 标签区里画的内容：照着分屏树嵌套分屏面板。
+    /// 标签区里画的内容：照着分屏树嵌套 resizable 组件。
     pub fn content(&self) -> AnyElement {
         let card = |id: CardId| match self.card(id) {
             Some(card) => card.clone().into_any_element(),
@@ -200,7 +217,7 @@ impl TerminalTab {
             .flex_1()
             .min_w_0()
             .min_h_0()
-            .child(self.panels.render(&self.tree, &card))
+            .child(self.dividers.render(&self.tree, &card))
             .into_any_element()
     }
 }

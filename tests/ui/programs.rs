@@ -20,9 +20,14 @@ fn open_tab(
         open_workspace_with(cx, settings_store(), services_with_terminals(provider));
     in_frame(cx, handle, |window, _| window.activate_window());
     dispatch(cx, handle, NewLocalTerminalTab);
-    // 卡片的 shell 名（pwsh）在后台查到。
+    // 卡片的 shell 名（pwsh）在后台查到；假 shell 打出提示符才算跑起来了，这之前打的字会丢
+    // （测试并行跑、机器忙时，查到 shell 名可能比假 shell 起来得早）。
     assert!(wait_until(cx, handle, |cx| card_tile(cx, &workspace, 1)
-        == Some("pwsh".into())));
+        == Some("pwsh".into())
+        && cx.update(|cx| workspace
+            .read(cx)
+            .card_screen_text(CardId(1), cx)
+            .is_some_and(|text| text.contains("会议纪要")))));
     (handle, workspace, factory)
 }
 
@@ -244,6 +249,42 @@ fn a_card_hidden_by_zoom_is_out_of_sight(cx: &mut TestAppContext) {
     );
 
     dispatch(cx, handle, ToggleZoomCard);
+    assert_eq!(card_dot(cx, &workspace, 1), Some(StatusDot::None));
+}
+
+/// 点通知回到一张被放大藏起来的卡片：先还原放大，焦点给它，橙点也熄了——
+/// 焦点卡片、画出来的卡片和橙点说的是同一件事。
+#[gpui_kit::test]
+fn a_notice_of_a_card_hidden_by_zoom_brings_it_back_into_sight(cx: &mut TestAppContext) {
+    let (handle, workspace, factory) = open_tab(cx);
+    dispatch(cx, handle, SplitRight);
+    dispatch(cx, handle, ToggleZoomCard);
+    cx.update(|cx| assert_eq!(workspace.read(cx).zoomed_card(), Some(CardId(2))));
+    VisualTestContext::from_window(handle.into(), cx).deactivate_window();
+
+    factory.print(1, "y/N?");
+    assert!(wait_until(cx, handle, |cx| !cx
+        .shown_system_notifications()
+        .is_empty()));
+    assert_eq!(card_dot(cx, &workspace, 1), Some(StatusDot::Attention));
+
+    let tag = cx.shown_system_notifications()[0].tag.clone();
+    cx.simulate_system_notification_response(gpui_kit::SystemNotificationResponse {
+        tag,
+        action_id: None,
+    });
+    cx.run_until_parked();
+    in_frame(cx, handle, |_, _| {});
+
+    cx.update(|cx| {
+        let workspace = workspace.read(cx);
+        assert_eq!(workspace.zoomed_card(), None);
+        assert_eq!(workspace.focused_card(cx), Some(CardId(1)));
+    });
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find(("terminal", 1usize)).focused(), Some(true));
+        assert!(window.find(("card", 1usize)).visible());
+    });
     assert_eq!(card_dot(cx, &workspace, 1), Some(StatusDot::None));
 }
 

@@ -33,23 +33,28 @@ pub(in crate::workspace) fn bind_terminal_actions(
 }
 
 impl Workspace {
-    /// 终端动作的对象：在前那个标签的焦点卡片里的终端。焦点在查找条里时也是它
-    /// （查找条是终端的兄弟节点，不在终端的焦点里）。没有标签时是 `None`。
-    pub(in crate::workspace) fn active_terminal(&self, cx: &App) -> Option<Entity<TerminalView>> {
-        let tab = self.tabs.active_content()?;
-        Some(tab.focused_card().read(cx).terminal().clone())
+    /// 在终端动作的对象上做 `action`：对象是在前那个标签的焦点卡片里的终端，焦点在查找条里时也是它
+    /// （查找条是终端的兄弟节点，不在终端的焦点里）。没有标签时什么都不做。
+    fn with_active_terminal(
+        &self,
+        cx: &mut Context<Self>,
+        action: impl FnOnce(&mut TerminalView, &mut Context<TerminalView>),
+    ) {
+        if let Some(terminal) = self
+            .tabs
+            .active_content()
+            .map(|tab| tab.focused_terminal(cx))
+        {
+            terminal.update(cx, action);
+        }
     }
 
     fn on_copy_terminal(&mut self, _: &CopyTerminal, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(terminal) = self.active_terminal(cx) {
-            terminal.update(cx, |terminal, cx| terminal.copy_selection(cx));
-        }
+        self.with_active_terminal(cx, |terminal, cx| terminal.copy_selection(cx));
     }
 
     fn on_paste_terminal(&mut self, _: &PasteTerminal, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(terminal) = self.active_terminal(cx) {
-            terminal.update(cx, |terminal, cx| terminal.paste_clipboard(cx));
-        }
+        self.with_active_terminal(cx, |terminal, cx| terminal.paste_clipboard(cx));
     }
 
     fn on_select_all_terminal(
@@ -58,9 +63,7 @@ impl Workspace {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(terminal) = self.active_terminal(cx) {
-            terminal.update(cx, |terminal, cx| terminal.select_all(cx));
-        }
+        self.with_active_terminal(cx, |terminal, cx| terminal.select_all(cx));
     }
 
     fn on_find_in_terminal(
@@ -69,9 +72,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(terminal) = self.active_terminal(cx) {
-            terminal.update(cx, |terminal, cx| terminal.open_find(window, cx));
-        }
+        self.with_active_terminal(cx, |terminal, cx| terminal.open_find(window, cx));
     }
 
     fn on_find_next_in_terminal(
@@ -80,11 +81,9 @@ impl Workspace {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(terminal) = self.active_terminal(cx) {
-            terminal.update(cx, |terminal, cx| {
-                terminal.step_find(SearchDirection::Down, cx)
-            });
-        }
+        self.with_active_terminal(cx, |terminal, cx| {
+            terminal.step_find(SearchDirection::Down, cx)
+        });
     }
 
     fn on_find_previous_in_terminal(
@@ -93,11 +92,9 @@ impl Workspace {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(terminal) = self.active_terminal(cx) {
-            terminal.update(cx, |terminal, cx| {
-                terminal.step_find(SearchDirection::Up, cx)
-            });
-        }
+        self.with_active_terminal(cx, |terminal, cx| {
+            terminal.step_find(SearchDirection::Up, cx)
+        });
     }
 
     fn on_dismiss_terminal_find(
@@ -106,15 +103,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(terminal) = self.active_terminal(cx) {
-            terminal.update(cx, |terminal, cx| terminal.dismiss_find(window, cx));
-        }
+        self.with_active_terminal(cx, |terminal, cx| terminal.dismiss_find(window, cx));
     }
 
     fn on_clear_terminal(&mut self, _: &ClearTerminal, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(terminal) = self.active_terminal(cx) {
-            terminal.update(cx, |terminal, cx| terminal.clear(cx));
-        }
+        self.with_active_terminal(cx, |terminal, cx| terminal.clear(cx));
     }
 
     /// 终端字号经设置改：设置把它收进范围、存进文件，下次启动还是这个字号。

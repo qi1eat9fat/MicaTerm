@@ -31,7 +31,7 @@ fn open_tab(
     (handle, workspace, factory, provider)
 }
 
-/// 画几帧，让分屏面板量好尺寸、按树摆好。
+/// 画几帧，让分隔线的 resizable 组件量好尺寸、按树摆好。
 fn settle(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     for _ in 0..3 {
         in_frame(cx, handle, |_, _| {});
@@ -415,6 +415,38 @@ fn splitting_a_local_card_opens_the_new_one_in_the_same_folder(cx: &mut TestAppC
         launches[1].directory.as_deref(),
         Some(std::path::Path::new(folder))
     );
+}
+
+/// 窄卡片的状态栏放不下时截断，不溢出：每一段都留在状态栏里，状态栏留在卡片里。
+#[gpui_kit::test]
+fn a_narrow_card_truncates_its_status_bar(cx: &mut TestAppContext) {
+    let (handle, _, _, _) = open_tab(cx, FakeTerminalFactory::default());
+    // 每次分的都是右半边的新卡片：第 5 张只有标签宽度的 1/16。
+    for _ in 0..4 {
+        dispatch(cx, handle, SplitRight);
+        settle(cx, handle);
+    }
+
+    in_frame(cx, handle, |window, _| {
+        let card = window.find(("card", 5usize)).bounds();
+        let bar = window.find(("card-status", 5usize)).bounds();
+        assert!(card.size.width < px(120.), "{card:?}");
+        assert!(
+            bar.left() >= card.left() && bar.right() <= card.right(),
+            "{bar:?} {card:?}"
+        );
+        for part in [
+            "card-status-state",
+            "card-status-detail",
+            "card-status-terminal",
+        ] {
+            let bounds = window.find((part, 5usize)).bounds();
+            assert!(
+                bounds.left() >= bar.left() && bounds.right() <= bar.right() + px(0.5),
+                "{part} {bounds:?} 出了状态栏 {bar:?}"
+            );
+        }
+    });
 }
 
 /// 等卡片知道 shell 在 `folder` 里，最多两秒（传输跑在自己的线程上）。

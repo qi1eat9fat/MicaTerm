@@ -4,7 +4,9 @@
 //! 每个标签里只有一张卡片（分屏是工单 05），所以第 n 个新开的标签里是第 n 张卡片。
 
 use gpui_kit::{ScrollDelta, point};
-use qishell::app::{ActivateTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NextTab, SwitchToTab};
+use qishell::app::{
+    ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NextTab, SwitchToTab,
+};
 
 use crate::support::*;
 
@@ -212,6 +214,26 @@ fn the_menu_closes_the_tab(cx: &mut TestAppContext) {
     assert_in_front(cx, handle, 2);
     in_frame(cx, handle, |window, _| {
         assert!(window.try_find("popup-menu").is_none())
+    });
+}
+
+/// 关闭整个标签（macOS 的 ⇧⌘W）：在前的标签和它的全部卡片一起关，左边的到前面来。
+#[gpui_kit::test]
+fn closing_the_active_tab_closes_all_its_cards(cx: &mut TestAppContext) {
+    let (handle, workspace, factory) = open_tabs(cx, 2);
+    dispatch(cx, handle, SplitRight);
+    cx.update(|cx| assert_eq!(workspace.read(cx).tab_cards(TabId(2)).len(), 2));
+
+    dispatch(cx, handle, CloseActiveTab);
+
+    assert_eq!(factory.wait_for_shutdowns(2), 2);
+    assert_eq!(tab_ids(cx, &workspace), [TabId(1)]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(1)));
+    cx.update(|cx| {
+        let workspace = workspace.read(cx);
+        for card in [2, 3] {
+            assert!(workspace.card(CardId(card), cx).is_none(), "card {card}");
+        }
     });
 }
 

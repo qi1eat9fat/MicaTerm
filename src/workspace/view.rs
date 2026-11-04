@@ -3,9 +3,6 @@
 //! 唯一的 UI 级 seam 是注入式构造 `Workspace::new_with_services`：生产代码传真实服务，
 //! 无头 UI 测试传假实现（`tests/ui/support/mod.rs` 的 `fake_services`）。
 
-use std::collections::HashMap;
-use std::time::Instant;
-
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -15,6 +12,7 @@ use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportPr
 
 use super::handlers;
 use super::host_sidebar::render_host_sidebar;
+use super::notices::NoticeTimes;
 use super::right_sidebar::render_right_sidebar;
 use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
@@ -60,7 +58,7 @@ pub struct Workspace {
     /// 下一张卡片的 id：从 1 起，不复用。
     pub(super) next_card_id: u64,
     /// 每张卡片每类通知上一次发出的时间，用来限频（`notices`）。
-    pub(super) notice_times: HashMap<String, Instant>,
+    pub(super) notice_times: NoticeTimes,
     /// 标签轨道的滚动位置。
     pub(super) tab_rail: TabRail,
     /// 窗口在不在前：不在前时哪张卡片用户都看不到（橙点，`notices`）。
@@ -127,7 +125,7 @@ impl Workspace {
             host_sidebar_open: true,
             tabs: TabList::default(),
             next_card_id: 1,
-            notice_times: HashMap::new(),
+            notice_times: NoticeTimes::default(),
             tab_rail: TabRail::default(),
             window_active: window.is_window_active(),
             _subscriptions: subscriptions,
@@ -232,6 +230,11 @@ impl Workspace {
     /// 标签上的状态点。
     pub fn tab_dot(&self, tab: TabId, cx: &App) -> Option<StatusDot> {
         self.tabs.get(tab).map(|tab| tab.dot(cx))
+    }
+
+    /// 还留着通知限频记录的卡片，从小到大，测试用：关掉的卡片不该在里面。
+    pub fn notified_cards(&self) -> Vec<CardId> {
+        self.notice_times.cards()
     }
 
     /// 标签轨道要画的快照：渲染函数不读实体。

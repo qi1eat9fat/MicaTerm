@@ -702,3 +702,28 @@ fn a_bell_notice_is_titled_as_a_bell(cx: &mut TestAppContext) {
     assert_eq!(shown[0].title.as_ref(), "pwsh：响铃");
     assert_eq!(shown[0].body.as_ref(), "继续吗 y/N?");
 }
+
+/// 卡片关了，它的通知限频记录跟着丢掉：关卡片和关整个标签都一样。
+#[gpui_kit::test]
+fn closing_a_card_forgets_when_it_last_notified(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_running(cx, FakeTerminalFactory::default());
+    activate_window(cx, handle);
+    dispatch(cx, handle, qishell::app::SplitRight);
+    assert!(wait_until(cx, handle, |cx| cx.update(|cx| running(
+        &workspace,
+        CardId(2),
+        cx
+    ))));
+    dispatch(cx, handle, NewLocalTerminalTab);
+    for card in [1, 2] {
+        print_into(cx, &workspace, CardId(card), "\x1b]9;完成\x07");
+    }
+    assert!(wait_until(cx, handle, |cx| cx.update(|cx| {
+        workspace.read(cx).notified_cards() == [CardId(1), CardId(2)]
+    })));
+
+    dispatch(cx, handle, CloseCard(CardId(2)));
+    cx.update(|cx| assert_eq!(workspace.read(cx).notified_cards(), [CardId(1)]));
+    dispatch(cx, handle, qishell::app::CloseTab(TabId(1)));
+    cx.update(|cx| assert!(workspace.read(cx).notified_cards().is_empty()));
+}

@@ -366,7 +366,8 @@ const PALETTE: [u32; 8] = [
     0x6d5bd0, 0x2f80ed, 0x0f9d8a, 0xd9822b, 0xc2417d, 0x3a7d44, 0x8a5a44, 0x4e5d94,
 ];
 
-/// 命令名 `name` 怎么显示。`name` 可以带路径、`.exe`、登录 shell 的前导 `-`，查表不分大小写。
+/// 命令名 `name` 怎么显示。`name` 可以带路径、`.exe`、登录 shell 的前导 `-`，不分大小写：
+/// 查表、取色、显示名都用小写的名字（Windows 上 `PING.EXE` 和 `ping` 是同一个程序）。
 pub fn program_of(name: &str) -> Program {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let base = base.trim_start_matches('-');
@@ -390,12 +391,12 @@ pub fn program_of(name: &str) -> Program {
         };
     }
     if SHELLS.contains(&key.as_str()) {
-        return shell_program(base);
+        return shell_program(&key);
     }
     Program {
-        name: base.to_string(),
+        tile_bg: hash_color(&key),
+        name: key,
         glyph: TERMINAL_GLYPH,
-        tile_bg: hash_color(base),
         tile_fg: 0xffffff,
         border: false,
         shell: false,
@@ -478,5 +479,15 @@ mod tests {
         assert_eq!(program_of("my-tool").tile_bg, 0xc2417d);
         assert_eq!(program_of("a").tile_bg, 0xc2417d);
         assert_eq!(program_of("ping").tile_bg, 0x2f80ed);
+    }
+
+    /// 表里没有的命令也不分大小写：Windows 上 `PING.EXE` 和 `ping` 是同一个程序，同色同名。
+    #[test]
+    fn an_unknown_command_looks_the_same_in_any_case() {
+        assert_eq!(program_of("PING.EXE"), program_of("ping"));
+        assert_eq!(program_of(r"C:\Windows\System32\PING.EXE").name, "ping");
+        assert_eq!(program_of("My-Tool").tile_bg, 0xc2417d);
+        // shell 的名字也规范成小写。
+        assert_eq!(program_of("PWSH.EXE").name, "pwsh");
     }
 }

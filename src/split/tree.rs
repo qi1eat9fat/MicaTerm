@@ -342,6 +342,19 @@ impl SplitTree {
         true
     }
 
+    /// 让 `card` 看得见并成为焦点卡片（点了它的通知）：放大的是别的卡片时先还原。
+    /// 树里没有它时不动，返回 `false`。
+    pub fn reveal(&mut self, card: CardId) -> bool {
+        if !self.contains(card) {
+            return false;
+        }
+        if self.zoomed.is_some_and(|zoomed| zoomed != card) {
+            self.zoomed = None;
+        }
+        self.set_focused(card);
+        true
+    }
+
     /// 树里有没有 `card`。
     pub fn contains(&self, card: CardId) -> bool {
         self.cards().contains(&card)
@@ -689,6 +702,24 @@ mod tests {
         tree.close(A);
 
         assert_eq!(tree.zoomed(), Some(C));
+    }
+
+    /// 让一张被放大藏起来的卡片看得见：还原放大，焦点给它；放大的就是它时还放大着。
+    #[test]
+    fn revealing_a_card_hidden_by_zoom_ends_the_zoom() {
+        let mut tree = SplitTree::new(A);
+        tree.split(Axis::Horizontal, B);
+        tree.toggle_zoom();
+
+        assert!(tree.reveal(B));
+        assert_eq!(tree.zoomed(), Some(B));
+
+        assert!(tree.reveal(A));
+        assert_eq!(tree.zoomed(), None);
+        assert_eq!(tree.focused(), A);
+
+        assert!(!tree.reveal(C));
+        assert_eq!(tree.focused(), A);
     }
 
     /// A 在左，右边 B 在上、C 在下。

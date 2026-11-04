@@ -13,6 +13,8 @@ gpui_kit::actions!(
         NextTab,
         /// 上一个标签（Ctrl+Shift+Tab、Ctrl+PageUp），过了第一个回到最后一个。
         PreviousTab,
+        /// 关闭在前的标签和它的全部卡片（macOS 的 ⇧⌘W；Windows 和 Linux 没有快捷键）。
+        CloseActiveTab,
     ]
 );
 

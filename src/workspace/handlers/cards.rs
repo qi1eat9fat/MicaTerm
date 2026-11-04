@@ -124,7 +124,7 @@ impl Workspace {
         match tab.close_card(card, cx) {
             (Closed::LastCard, _) => self.close_tab(id, window, cx),
             (Closed::Merged, Some(entity)) => {
-                entity.update(cx, |card, cx| card.close(cx));
+                self.retire_card(&entity, cx);
                 if self.tabs.active() == Some(id) {
                     self.focus_active_card(window, cx);
                 }
@@ -132,6 +132,17 @@ impl Workspace {
             }
             _ => {}
         }
+    }
+
+    /// 卡片离开了窗口壳（关卡片、关标签）：关掉它的 shell，丢掉它的通知限频记录。
+    pub(in crate::workspace) fn retire_card(
+        &mut self,
+        card: &Entity<TerminalCard>,
+        cx: &mut Context<Self>,
+    ) {
+        let id = card.read(cx).id();
+        self.notice_times.forget(id);
+        card.update(cx, |card, cx| card.close(cx));
     }
 
     fn on_split_right(&mut self, _: &SplitRight, window: &mut Window, cx: &mut Context<Self>) {
