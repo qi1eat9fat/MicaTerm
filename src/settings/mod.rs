@@ -15,7 +15,6 @@ mod terminal_themes;
 
 pub use apply::{apply, apply_terminal, terminal_font};
 pub use dialog::{SETTINGS_DIALOG_KEY_CONTEXT, SettingsDialog, open_settings_dialog};
-pub use terminal_themes::theme_card_id;
 pub use model::{
     AppSettings, Appearance, DEFAULT_DARK_THEME, DEFAULT_INTERFACE_FONT_SIZE, DEFAULT_LIGHT_THEME,
     DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT,
@@ -24,3 +23,4 @@ pub use model::{
     TerminalFontSettings, TerminalInteraction, TerminalThemeSettings,
 };
 pub use store::{SettingsProblem, SettingsStore, SettingsStoreEvent};
+pub use terminal_themes::theme_card_id;

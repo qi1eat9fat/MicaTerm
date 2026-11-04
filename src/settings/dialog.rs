@@ -32,7 +32,8 @@ struct Category {
 }
 
 /// 画一类设置的页面。
-type Page = fn(&SettingsDialog, &Tokens, &mut Window, &mut Context<SettingsDialog>) -> Vec<AnyElement>;
+type Page =
+    fn(&SettingsDialog, &Tokens, &mut Window, &mut Context<SettingsDialog>) -> Vec<AnyElement>;
 
 /// 左栏的分类，按显示的顺序。之后的工单按 spec 依次加「SFTP」「安全」「应用」。
 const CATEGORIES: &[Category] = &[
@@ -204,7 +205,11 @@ fn header(tokens: &Tokens) -> impl IntoElement {
 }
 
 /// 左栏：分类，选中的那一项浮起来。
-fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsDialog>) -> impl IntoElement {
+fn navigation(
+    selected: usize,
+    tokens: &Tokens,
+    cx: &mut Context<SettingsDialog>,
+) -> impl IntoElement {
     let on = tokens.tab_active;
     let shadow = tokens.shadow;
     let hover = tokens.hover;
@@ -254,7 +259,7 @@ fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsDialog>
                     }
                 })
                 .on_click(cx.listener(move |this, _, _, cx| this.show_category(index, cx)))
-                .child(Icon::new(category.icon.clone()).size(px(15.)))
+                .child(Icon::new(category.icon).size(px(15.)))
                 .child(title)
         }))
 }

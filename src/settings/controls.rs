@@ -132,13 +132,16 @@ pub fn segmented(
                 .cursor_pointer()
                 .map(|button| {
                     if chosen {
-                        button.bg(on).text_color(tokens.text).shadow(vec![BoxShadow {
-                            color: shadow,
-                            offset: point(px(0.), px(1.)),
-                            blur_radius: px(4.),
-                            spread_radius: px(0.),
-                            inset: false,
-                        }])
+                        button
+                            .bg(on)
+                            .text_color(tokens.text)
+                            .shadow(vec![BoxShadow {
+                                color: shadow,
+                                offset: point(px(0.), px(1.)),
+                                blur_radius: px(4.),
+                                spread_radius: px(0.),
+                                inset: false,
+                            }])
                     } else {
                         let text = tokens.text;
                         button

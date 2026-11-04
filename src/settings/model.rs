@@ -14,8 +14,8 @@ use gpui_kit::WindowAppearance;
 use gpui_kit::component::ThemeMode;
 use serde::{Deserialize, Serialize};
 
-pub use qishell_terminal::{RightClick, TerminalCursorStyle, TerminalInteraction};
 use qishell_terminal::TerminalTheme;
+pub use qishell_terminal::{RightClick, TerminalCursorStyle, TerminalInteraction};
 
 /// 全部设置。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

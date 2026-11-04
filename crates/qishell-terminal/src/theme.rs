@@ -296,7 +296,6 @@ const ROSE_PINE: TerminalTheme = TerminalTheme {
     ],
 };
 
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -355,7 +354,10 @@ mod tests {
             TerminalTheme::default_for(ThemeMode::Light).key,
             "qishell-light"
         );
-        assert_eq!(TerminalTheme::default_for(ThemeMode::Dark).key, "qishell-dark");
+        assert_eq!(
+            TerminalTheme::default_for(ThemeMode::Dark).key,
+            "qishell-dark"
+        );
     }
 
     /// QiShell 这一对的底色和文字是原型的卡片底和 `--term`。

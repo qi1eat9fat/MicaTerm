@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use gpui_kit::component::{
     Sizable as _,
-    input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
+    input::{InputEvent, InputState, NumberInput},
     switch::Switch,
 };
 use gpui_kit::*;
@@ -55,7 +55,9 @@ pub(super) fn appearance(
                 .position(|appearance| *appearance == settings.appearance)
                 .unwrap_or_default(),
             Rc::new(move |index, _, cx| {
-                write(&store, cx, |settings| settings.appearance = APPEARANCES[index])
+                write(&store, cx, |settings| {
+                    settings.appearance = APPEARANCES[index]
+                })
             }),
             tokens,
         )
@@ -145,7 +147,10 @@ const PREVIEW_LINES: &[&str] = &[
 const RIGHT_CLICKS: [(RightClick, &str); 4] = [
     (RightClick::Menu, "settings.right_click.menu"),
     (RightClick::Paste, "settings.right_click.paste"),
-    (RightClick::CopyOrPaste, "settings.right_click.copy_or_paste"),
+    (
+        RightClick::CopyOrPaste,
+        "settings.right_click.copy_or_paste",
+    ),
     (RightClick::Nothing, "settings.right_click.nothing"),
 ];
 
@@ -160,15 +165,16 @@ pub(super) fn terminal(
     let settings = store.read(cx).settings();
 
     // 默认字体随包附带，总在最前；其余是本机装了的等宽字体。
-    let families: Vec<SharedString> = std::iter::once(SharedString::from(DEFAULT_TERMINAL_FONT_FAMILY))
-        .chain(
-            dialog
-                .font_families
-                .iter()
-                .filter(|family| family.as_ref() != DEFAULT_TERMINAL_FONT_FAMILY)
-                .cloned(),
-        )
-        .collect();
+    let families: Vec<SharedString> =
+        std::iter::once(SharedString::from(DEFAULT_TERMINAL_FONT_FAMILY))
+            .chain(
+                dialog
+                    .font_families
+                    .iter()
+                    .filter(|family| family.as_ref() != DEFAULT_TERMINAL_FONT_FAMILY)
+                    .cloned(),
+            )
+            .collect();
     let family = settings.terminal_font.family().to_string();
     let family_field = {
         let store = store.clone();
@@ -224,12 +230,8 @@ pub(super) fn terminal(
         )
     };
 
-    let range = |range: &RangeInclusive<f32>| {
-        (
-            number_text(*range.start()),
-            number_text(*range.end()),
-        )
-    };
+    let range =
+        |range: &RangeInclusive<f32>| (number_text(*range.start()), number_text(*range.end()));
     let (size_min, size_max) = range(&TERMINAL_FONT_SIZE_RANGE);
     let (line_min, line_max) = range(&TERMINAL_LINE_HEIGHT_RANGE);
 
@@ -293,7 +295,12 @@ pub(super) fn terminal(
                     copy_on_select,
                     tokens,
                 ),
-                row(t!("settings.terminal.right_click"), None, right_click, tokens),
+                row(
+                    t!("settings.terminal.right_click"),
+                    None,
+                    right_click,
+                    tokens,
+                ),
             ],
             tokens,
         )
@@ -322,7 +329,7 @@ fn number_input(id: &'static str, state: &Entity<InputState>) -> impl IntoElemen
 }
 
 /// 一个数字设置的输入框，和它的订阅：输入的数在范围内就写进设置（打字打到一半的不写），
-/// 按 ±（或 ↑↓）按 `step` 加减；失焦或回车时显示回设置里的值；设置在别处变了也跟着显示。
+/// 点 ± 按 `step` 加减；失焦或回车时显示回设置里的值；设置在别处变了也跟着显示。
 struct NumberField {
     read: fn(&AppSettings) -> f32,
     write: fn(&mut AppSettings, f32),
@@ -344,7 +351,14 @@ impl NumberField {
             step,
         } = self;
         let value = read(&store.read(cx).settings());
-        let input = cx.new(|cx| InputState::new(window, cx).default_value(number_text(value)));
+        // ± 和 ↑↓ 由输入框自己按 `step` 加减、收进范围，再发 `Change`，和打字走同一条路。
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(number_text(value))
+                .step(f64::from(step))
+                .min(f64::from(*range.start()))
+                .max(f64::from(*range.end()))
+        });
         let set = {
             let store = store.clone();
             move |value: f32, cx: &mut App| {
@@ -365,8 +379,6 @@ impl NumberField {
         };
         let subscriptions = vec![
             cx.subscribe_in(&input, window, {
-                let range = range.clone();
-                let set = set.clone();
                 move |_, input, event: &InputEvent, window, cx| match event {
                     InputEvent::Change => {
                         if let Ok(value) = input.read(cx).value().trim().parse::<f32>()
@@ -379,20 +391,6 @@ impl NumberField {
                         show_stored(input, window, cx)
                     }
                     InputEvent::Focus => {}
-                }
-            }),
-            cx.subscribe_in(&input, window, {
-                let store = store.clone();
-                move |_, input, event: &NumberInputEvent, window, cx| {
-                    let NumberInputEvent::Step(action) = event;
-                    let current = read(&store.read(cx).settings());
-                    let next = match action {
-                        StepAction::Increment => current + step,
-                        StepAction::Decrement => current - step,
-                    };
-                    let next = next.clamp(*range.start(), *range.end());
-                    input.update(cx, |input, cx| input.set_value(number_text(next), window, cx));
-                    set(next, cx);
                 }
             }),
             // 设置在别处变了（比如在终端里按 Ctrl+=）：没在输入时显示新值。
@@ -455,7 +453,7 @@ mod tests {
         assert_eq!(number_text(14.), "14");
         assert_eq!(number_text(11.6), "11.6");
         assert_eq!(number_text(1.45), "1.45");
-        assert_eq!(number_text(1.4500001), "1.45");
+        assert_eq!(number_text(1.45 + 0.05), "1.5");
     }
 
     #[test]
