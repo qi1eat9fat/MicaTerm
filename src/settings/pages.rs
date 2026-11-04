@@ -351,7 +351,7 @@ impl NumberField {
             step,
         } = self;
         let value = read(&store.read(cx).settings());
-        // ± 和 ↑↓ 由输入框自己按 `step` 加减、收进范围，再发 `Change`，和打字走同一条路。
+        // ± 由输入框自己按 `step` 加减、收进范围，再发 `Change`，和打字走同一条路。
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .default_value(number_text(value))
