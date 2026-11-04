@@ -16,6 +16,8 @@ use gpui_kit::{
     Window, div,
 };
 
+use qishell_terminal::TerminalView;
+
 use crate::card::{CardId, MAX_STACKED_TILES, StatusDot, TerminalCard};
 use crate::programs::Program;
 use crate::split::{Axis, Closed, Direction, NodeId, SplitPanels, SplitTree};
@@ -50,6 +52,11 @@ impl TerminalTab {
     pub fn focused_card(&self) -> &Entity<TerminalCard> {
         self.card(self.tree.focused())
             .expect("the focused card belongs to the tab")
+    }
+
+    /// 焦点卡片里的终端：终端动作（复制、粘贴、查找……）的对象。
+    pub fn focused_terminal(&self, cx: &App) -> Entity<TerminalView> {
+        self.focused_card().read(cx).terminal().clone()
     }
 
     pub fn contains(&self, card: CardId, _cx: &App) -> bool {
