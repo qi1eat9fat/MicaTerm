@@ -2,8 +2,10 @@
 //!
 //! 尺寸取 gorex 的数值（spec 第 3 节「视觉」、Rex 视觉拆解），颜色取全部界面原型。
 
+mod component;
 mod tokens;
 
+pub use component::{DARK_THEME_NAME, LIGHT_THEME_NAME, component_theme, component_theme_name};
 pub use tokens::Tokens;
 
 use gpui_kit::{Pixels, px};

@@ -44,7 +44,10 @@ impl Workspace {
         self.next_card_id += 1;
         let provider = self.services.local_terminals.clone();
         let target = self.focus_handle.clone();
-        cx.new(|cx| TerminalCard::local(id, launch, provider, target, window, cx))
+        let card = cx.new(|cx| TerminalCard::local(id, launch, provider, target, window, cx));
+        // 终端的通知和响铃（工单 03）。
+        self.watch_notices(&card, window, cx);
+        card
     }
 
     /// 窗口壳对一张卡片的订阅，交给标签跟着卡片走：名称、目录变了标签重画；

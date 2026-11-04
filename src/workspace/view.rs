@@ -3,6 +3,9 @@
 //! 唯一的 UI 级 seam 是注入式构造 `Workspace::new_with_services`：生产代码传真实服务，
 //! 无头 UI 测试传假实现（`tests/ui/support/mod.rs` 的 `fake_services`）。
 
+use std::collections::HashMap;
+use std::time::Instant;
+
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -17,9 +20,9 @@ use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
 use crate::card::{CardId, TerminalCard};
-use crate::settings::{SettingsStore, SettingsStoreEvent, apply_terminal};
+use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
 use crate::split::NodeId;
-use crate::tabs::{TabId, TabList, TabSnapshot, TerminalTab};
+use crate::tabs::{TabId, TabList, TabRail, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
 
 /// 窗口壳用到的外部服务。生产代码用 `WorkspaceServices::new()` 建真实的，
@@ -56,6 +59,10 @@ pub struct Workspace {
     pub(super) tabs: TabList<TerminalTab>,
     /// 下一张卡片的 id：从 1 起，不复用。
     pub(super) next_card_id: u64,
+    /// 每张卡片每类通知上一次发出的时间，用来限频（`notices`）。
+    pub(super) notice_times: HashMap<String, Instant>,
+    /// 标签轨道的滚动位置。
+    pub(super) tab_rail: TabRail,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -87,12 +94,18 @@ impl Workspace {
                     }
                 },
             ),
-            // 终端的字体、交互跟着设置走：开着的终端立刻变。
-            cx.observe(&settings, |_, settings, cx| {
-                apply_terminal(&settings.read(cx).settings(), cx);
+            // 应用外观、界面字号、终端主题、字体和交互跟着设置走：开着的终端立刻变。
+            cx.observe_in(&settings, window, |_, settings, window, cx| {
+                apply(&settings.read(cx).settings(), window, cx);
+            }),
+            // 跟随系统时，系统换深浅色，窗口跟着换。
+            cx.observe_window_appearance(window, |this, window, cx| {
+                apply(&this.settings.read(cx).settings(), window, cx);
             }),
         ];
-        apply_terminal(&settings.read(cx).settings(), cx);
+        apply(&settings.read(cx).settings(), window, cx);
+        // 点终端的系统通知，回到那张卡片。
+        Self::listen_for_notice_clicks(window, cx);
         let start_card_focus = cx.focus_handle();
         // 启动时没有标签：开始卡片持有焦点。
         start_card_focus.focus(window, cx);
@@ -104,6 +117,8 @@ impl Workspace {
             host_sidebar_open: true,
             tabs: TabList::default(),
             next_card_id: 1,
+            notice_times: HashMap::new(),
+            tab_rail: TabRail::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -222,7 +237,8 @@ impl Render for Workspace {
             .min_w_0()
             .child(render_title_bar(
                 self.host_sidebar_open,
-                self.tab_snapshots(cx),
+                self.tab_rail
+                    .render(self.tab_snapshots(cx), &target, &tokens),
                 &target,
                 &tokens,
                 window,
