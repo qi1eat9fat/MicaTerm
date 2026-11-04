@@ -2,6 +2,7 @@
 // 来自 since2006/shell-rs @ b2a307a: tests/ui/support/terminal.rs
 // （裁剪：去掉远程、Telnet、串口、ZMODEM、侧边执行、SFTP 通道；加了 `shutdowns`）
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -36,6 +37,8 @@ pub struct FakeTerminalFactory {
     pub resizes: Arc<Mutex<Vec<TerminalSize>>>,
     /// 收到 `Shutdown` 的次数：关卡片就是关它的 shell。
     pub shutdowns: Arc<AtomicUsize>,
+    /// 每一次启动的传输往终端发事件的口子，按第几次启动（从 1 数）记（工单 06：测试替假 shell 报告前台程序）。
+    pub senders: Arc<Mutex<HashMap<usize, async_channel::Sender<TerminalTransportEvent>>>>,
 }
 
 impl FakeTerminalFactory {
@@ -107,6 +110,7 @@ impl TerminalTransportFactory for FakeTerminalFactory {
             writes: self.writes.clone(),
             resizes: self.resizes.clone(),
             shutdowns: self.shutdowns.clone(),
+            senders: self.senders.clone(),
         })
     }
 }
@@ -117,6 +121,7 @@ pub struct FakeTerminalTransport {
     pub writes: Arc<Mutex<Vec<Vec<u8>>>>,
     pub resizes: Arc<Mutex<Vec<TerminalSize>>>,
     pub shutdowns: Arc<AtomicUsize>,
+    pub senders: Arc<Mutex<HashMap<usize, async_channel::Sender<TerminalTransportEvent>>>>,
 }
 
 impl TerminalTransport for FakeTerminalTransport {
@@ -130,6 +135,11 @@ impl TerminalTransport for FakeTerminalTransport {
             anyhow::bail!("测试启动失败");
         }
         events.send_blocking(TerminalTransportEvent::Started)?;
+        // 在 `Started` 之后才交出去：测试发的事件总在启动之后到。
+        self.senders
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(self.run, events.clone());
         if let FakeBehavior::InFolder(folder) = self.behavior {
             events.send_blocking(TerminalTransportEvent::WorkingDirectory(folder.into()))?;
         }
@@ -200,5 +210,49 @@ impl FakeTerminalFactory {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clear();
+    }
+}
+
+/// 工单 06（程序图块与状态点）用到的：替假 shell 往终端发事件。
+impl FakeTerminalFactory {
+    /// 第 `run` 次启动的传输（从 1 数；一张卡片一次，按开卡片的顺序）发出 `event`。
+    /// 那次启动还没跑起来时，最多等两秒。
+    pub fn send(&self, run: usize, event: TerminalTransportEvent) {
+        let started = Instant::now();
+        loop {
+            let sender = self
+                .senders
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&run)
+                .cloned();
+            if let Some(sender) = sender {
+                sender
+                    .send_blocking(event)
+                    .expect("the fake shell is running");
+                return;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "第 {run} 次启动的假 shell 没有跑起来"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// 第 `run` 次启动的假 shell 说它的前台程序是 `program`（`None`：回到提示符）。
+    pub fn foreground(&self, run: usize, program: Option<&str>) {
+        self.send(
+            run,
+            TerminalTransportEvent::ForegroundProgram(program.map(str::to_string)),
+        );
+    }
+
+    /// 第 `run` 次启动的假 shell 打出 `text`。
+    pub fn print(&self, run: usize, text: &str) {
+        self.send(
+            run,
+            TerminalTransportEvent::Output(text.as_bytes().to_vec()),
+        );
     }
 }

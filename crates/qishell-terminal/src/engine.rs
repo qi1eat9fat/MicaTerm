@@ -241,6 +241,13 @@ impl TerminalEngine {
             TerminalUiEventKind::WorkingDirectory(folder) => {
                 return Some(TerminalEvent::WorkingDirectory(folder));
             }
+            TerminalUiEventKind::ForegroundProgram(program) => {
+                return Some(TerminalEvent::ForegroundProgram(program));
+            }
+            TerminalUiEventKind::Output => {
+                self.runtime.output_pending.store(false, Ordering::Release);
+                return Some(TerminalEvent::Output);
+            }
             TerminalUiEventKind::ClipboardStore(text) => {
                 cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text));
             }
@@ -714,6 +721,10 @@ pub enum TerminalEvent {
     /// A local shell is in another folder than the last one, as this
     /// computer tells.
     WorkingDirectory(PathBuf),
+    /// 本地 shell 的前台程序换了（工单 06）：`None` 是 shell 自己在提示符下。
+    ForegroundProgram(Option<String>),
+    /// 程序有输出（工单 06 的绿点）。一批输出只发一次，最多每 16ms 一次。
+    Output,
 }
 
 struct TerminalRuntime {
@@ -721,6 +732,8 @@ struct TerminalRuntime {
     commands: mpsc::Sender<TerminalTransportCommand>,
     size: Arc<Mutex<TerminalSize>>,
     wakeup_pending: Arc<AtomicBool>,
+    /// 已经排了一个 `Output` 给 UI 线程、还没处理：这期间的输出不再排。
+    output_pending: Arc<AtomicBool>,
 }
 
 impl TerminalRuntime {
@@ -736,12 +749,14 @@ impl TerminalRuntime {
         let (transport_events, transport_receiver) = async_channel::unbounded();
         let shared_size = Arc::new(Mutex::new(size));
         let wakeup_pending = Arc::new(AtomicBool::new(false));
+        let output_pending = Arc::new(AtomicBool::new(false));
         let proxy = TerminalEventProxy {
             generation,
             commands: commands.clone(),
             ui_events: ui_events.clone(),
             size: shared_size.clone(),
             wakeup_pending: wakeup_pending.clone(),
+            output_pending: output_pending.clone(),
             replies: Arc::default(),
             theme,
         };
@@ -785,7 +800,13 @@ impl TerminalRuntime {
                         }
                         TerminalTransportEvent::Output(bytes) => {
                             parser.output(&bytes);
+                            parser.proxy.output_seen();
                             parser.proxy.wakeup();
+                        }
+                        TerminalTransportEvent::ForegroundProgram(program) => {
+                            parser
+                                .proxy
+                                .send(TerminalUiEventKind::ForegroundProgram(program));
                         }
                         // M2 #12 接回：主机系统（`HostOsDetected`）、延迟（`Latency`）、
                         // 连接问答（`Prompt`）。
@@ -846,6 +867,7 @@ impl TerminalRuntime {
             commands,
             size: shared_size,
             wakeup_pending,
+            output_pending,
         }
     }
 
@@ -891,6 +913,7 @@ pub struct TerminalEventProxy {
     ui_events: mpsc::Sender<TerminalUiEvent>,
     size: Arc<Mutex<TerminalSize>>,
     wakeup_pending: Arc<AtomicBool>,
+    output_pending: Arc<AtomicBool>,
     /// What the output just parsed asks of the terminal, in the order it
     /// asks, until `answer`.
     replies: Arc<Mutex<Vec<Reply>>>,
@@ -997,6 +1020,13 @@ impl TerminalEventProxy {
             self.send(TerminalUiEventKind::Wakeup);
         }
     }
+
+    /// 程序有输出：告诉 UI 线程一次，等它处理了再告诉下一次。
+    fn output_seen(&self) {
+        if !self.output_pending.swap(true, Ordering::AcqRel) {
+            self.send(TerminalUiEventKind::Output);
+        }
+    }
 }
 
 struct TerminalUiEvent {
@@ -1022,6 +1052,10 @@ enum TerminalUiEventKind {
     Directory(ReportedDirectory),
     /// The folder a local shell is in, as this computer tells.
     WorkingDirectory(PathBuf),
+    /// 本地 shell 的前台程序（工单 06）。
+    ForegroundProgram(Option<String>),
+    /// 程序有输出（工单 06）。
+    Output,
     Bell,
 }
 
@@ -1262,6 +1296,7 @@ mod tests {
             ui_events,
             size: Arc::new(Mutex::new(size)),
             wakeup_pending: Arc::new(AtomicBool::new(false)),
+            output_pending: Arc::new(AtomicBool::new(false)),
             replies: Arc::default(),
             theme: Arc::new(Mutex::new(TerminalTheme::default_for(
                 gpui_kit::component::ThemeMode::Light,

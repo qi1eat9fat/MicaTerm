@@ -50,7 +50,8 @@ impl Workspace {
         card
     }
 
-    /// 窗口壳对一张卡片的订阅，交给标签跟着卡片走：名称、目录变了标签重画；
+    /// 窗口壳对一张卡片的订阅，交给标签跟着卡片走：名称、目录、图块、状态点变了标签重画；
+    /// 程序结束或响铃时用户看不到它就亮橙点；
     /// 卡片里的终端拿到焦点（点了它），它就成了标签的焦点卡片。
     pub(in crate::workspace) fn card_subscriptions(
         &mut self,
@@ -61,7 +62,10 @@ impl Workspace {
         let id = card.read(cx).id();
         let focus = card.read(cx).focus_handle();
         vec![
-            cx.subscribe(card, |_, _, _: &CardEvent, cx| cx.notify()),
+            cx.subscribe(card, |this, card, event: &CardEvent, cx| match event {
+                CardEvent::Changed => cx.notify(),
+                CardEvent::WantsAttention => this.on_card_wants_attention(&card, cx),
+            }),
             cx.on_focus_in(&focus, window, move |this, _, cx| {
                 this.on_card_focused(id, cx)
             }),

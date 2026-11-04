@@ -1,4 +1,4 @@
-//! 卡片头部（高 33）：程序图块、名称、目录；右边的按钮区只在卡片聚焦或悬停时显示。
+//! 卡片头部（高 33）：程序图块、名称、目录、状态点；右边的按钮区只在卡片聚焦或悬停时显示。
 //! 按钮依次是向右分屏、向下分屏、放大（放大着时是还原）、关闭；双击头部也是放大和还原（工单 05）。
 
 use gpui_kit::component::Icon;
@@ -7,18 +7,23 @@ use gpui_kit::*;
 
 use super::CardId;
 use super::program_tile::render_program_tile;
+use super::status_dot::{StatusDot, render_status_dot};
 use crate::app::{CatalogIcon, CloseCard, SplitCard, ZoomCard};
 use crate::i18n::t;
+use crate::programs::Program;
 use crate::split::Axis;
 use crate::theme::{CARD_HEADER_HEIGHT, ICON_BUTTON, ICON_BUTTON_RADIUS, Tokens};
 
-/// 头部跟着卡片在分屏树里的位置变的东西。
-#[derive(Clone, Copy)]
+/// 头部跟着卡片的位置和里面的程序变的东西。
 pub(super) struct HeaderState {
     /// 是所在标签的焦点卡片：按钮常显。
     pub focused: bool,
     /// 放大着：放大按钮换成还原。
     pub zoomed: bool,
+    /// 图块上的程序（工单 06）。
+    pub program: Program,
+    /// 目录后面的状态点。
+    pub dot: StatusDot,
 }
 
 pub(super) fn render_header(
@@ -52,7 +57,11 @@ pub(super) fn render_header(
         .h(CARD_HEADER_HEIGHT)
         .pl(px(12.))
         .pr(px(8.))
-        .child(render_program_tile(id.element("card-tile"), tokens))
+        .child(render_program_tile(
+            id.element("card-tile"),
+            &state.program,
+            tokens,
+        ))
         .child(
             div()
                 .flex_none()
@@ -72,6 +81,7 @@ pub(super) fn render_header(
                 .text_ellipsis()
                 .child(directory),
         )
+        .children(render_status_dot(id.element("card-dot"), state.dot, tokens))
         .child(
             div()
                 .ml_auto()

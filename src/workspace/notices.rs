@@ -1,5 +1,6 @@
 //! 终端要告诉用户的事（工单 03）：程序要的通知（OSC 9 / 777）和响铃。
 //! 窗口不在前时走系统通知；窗口在前时在窗口里提示，只是看得见的卡片响铃不提示。
+//! 工单 06 加了卡片的橙点：程序在用户看不到的地方结束或响铃时亮，看到了就熄。
 // 参考 since2006/shell-rs @ b2a307a: src/workspace/notices.rs（裁剪：去掉关键字高亮和通知开关）
 
 use std::time::{Duration, Instant};
@@ -112,11 +113,49 @@ impl Workspace {
         });
     }
 
-    /// 卡片看不看得见：在前那个标签里的卡片都看得见。
-    fn card_in_sight(&self, card: CardId, cx: &App) -> bool {
+    /// 卡片看不看得见：在前那个标签里画出来的卡片看得见；放大着时被藏起来的那几张看不见。
+    pub(super) fn card_in_sight(&self, card: CardId, _cx: &App) -> bool {
         self.tabs
             .active_content()
-            .is_some_and(|tab| tab.contains(card, cx))
+            .is_some_and(|tab| tab.shows(card))
+    }
+
+    /// 用户看不看得到这张卡片：窗口在前，卡片也看得见。
+    fn card_seen(&self, card: CardId, cx: &App) -> bool {
+        self.window_active && self.card_in_sight(card, cx)
+    }
+
+    /// 卡片的程序结束了，或者响铃了（工单 06）：用户看不到它就亮橙点，等看到了再熄。
+    pub(super) fn on_card_wants_attention(
+        &mut self,
+        card: &Entity<TerminalCard>,
+        cx: &mut Context<Self>,
+    ) {
+        let id = card.read(cx).id();
+        if !self.card_seen(id, cx) {
+            card.update(cx, |card, cx| card.set_attention(true, cx));
+        }
+    }
+
+    /// 用户看得到的卡片都熄掉橙点：窗口壳每次重画前（切标签、放大还原、关卡片……）和窗口回到前面时调用。
+    pub(super) fn see_cards(&mut self, cx: &mut Context<Self>) {
+        if !self.window_active {
+            return;
+        }
+        let Some(tab) = self.tabs.active_content() else {
+            return;
+        };
+        let seen: Vec<_> = tab
+            .cards()
+            .filter(|card| {
+                let card = card.read(cx);
+                card.wants_attention() && tab.shows(card.id())
+            })
+            .cloned()
+            .collect();
+        for card in seen {
+            card.update(cx, |card, cx| card.set_attention(false, cx));
+        }
     }
 
     /// 把卡片所在的标签放到前面，焦点给这张卡片。

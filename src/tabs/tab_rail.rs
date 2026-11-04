@@ -1,7 +1,6 @@
-//! 标签轨道（原型 `.track`）和里面的标签（`.tab`）：宽固定 180、高 28，程序图块、名称和目录。
-//! 点标签切过去；悬停时出现 ×，点了关闭整个标签；右键菜单三项；放不下时轨道横向滚动。
+//! 标签轨道（原型 `.track`）和里面的标签（`.tab`）：宽固定 180、高 28，叠放的程序图块、名称、目录和状态点。
+//! 点标签切过去；悬停时状态点让位给 ×，点了关闭整个标签；右键菜单三项；放不下时轨道横向滚动。
 //! 渲染不读实体，只拿窗口壳取好的快照；点击、菜单都经窗口壳的焦点派发 action。
-//! 工单 06 在这里加图块叠放和状态点（悬停时状态点让位给 ×）。
 // 参考 gorex 的模型重写：tabs.go 的标签外观、悬停时出现 ×。
 
 use std::cell::Cell;
@@ -16,8 +15,9 @@ use super::TabId;
 use crate::app::{
     ActivateTab, CatalogIcon, CloseOtherTabs, CloseTab, CloseTabsToRight, OpenTabMenu,
 };
-use crate::card::render_program_tile;
+use crate::card::{StatusDot, render_status_dot, render_tile_stack};
 use crate::i18n::t;
+use crate::programs::Program;
 use crate::theme::{TAB_HEIGHT, TAB_TRACK_HEIGHT, TAB_WIDTH, Tokens};
 
 /// 画一个标签要的东西。
@@ -29,6 +29,10 @@ pub struct TabSnapshot {
     /// 焦点卡片的目录。
     pub directory: SharedString,
     pub active: bool,
+    /// 叠放的程序图块：焦点卡片的在最前面，其余按分屏树的顺序，最多 3 块。
+    pub tiles: Vec<Program>,
+    /// 标签上的状态点：有卡片要注意是橙点，否则有卡片在输出是绿点。
+    pub dot: StatusDot,
 }
 
 /// 标签轨道跨帧要记住的东西：横向滚动的位置、上一次露出来的在前标签、开着的右键菜单。
@@ -230,8 +234,9 @@ fn render_tab(
             let position = event.position;
             open_menu.dispatch_action(&OpenTabMenu { tab: id, position }, window, cx);
         })
-        .child(render_program_tile(
-            ("tab-tile", id.0 as usize).into(),
+        .child(render_tile_stack(
+            ("tab-tiles", id.0 as usize).into(),
+            &tab.tiles,
             tokens,
         ))
         .child(
@@ -260,7 +265,31 @@ fn render_tab(
                         .child(tab.directory),
                 ),
         )
-        .child(render_close_button(id, target, tokens))
+        .child(
+            // 状态点和 × 占同一个位置：悬停时点让位给 ×（原型 `.tab:hover .dot`）。
+            div()
+                .relative()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(CLOSE_BUTTON)
+                .children(
+                    render_status_dot(("tab-dot", id.0 as usize).into(), tab.dot, tokens).map(
+                        |dot| {
+                            div()
+                                .absolute()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .group_hover("tab", |style| style.invisible())
+                                .child(dot)
+                        },
+                    ),
+                )
+                .child(render_close_button(id, target, tokens)),
+        )
 }
 
 /// 标签右端的 ×：只在悬停这个标签时出现，点了关闭整个标签。

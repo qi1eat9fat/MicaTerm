@@ -11,3 +11,7 @@ card.zoom:
   zh-CN: 放大卡片
 card.restore:
   zh-CN: 还原卡片
+card.dot.busy:
+  zh-CN: 有输出
+card.dot.attention:
+  zh-CN: 需要注意

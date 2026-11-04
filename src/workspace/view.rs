@@ -19,7 +19,7 @@ use super::right_sidebar::render_right_sidebar;
 use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
-use crate::card::{CardId, TerminalCard};
+use crate::card::{CardId, StatusDot, TerminalCard};
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
 use crate::split::NodeId;
 use crate::tabs::{TabId, TabList, TabRail, TabSnapshot, TerminalTab};
@@ -63,6 +63,8 @@ pub struct Workspace {
     pub(super) notice_times: HashMap<String, Instant>,
     /// 标签轨道的滚动位置。
     pub(super) tab_rail: TabRail,
+    /// 窗口在不在前：不在前时哪张卡片用户都看不到（橙点，`notices`）。
+    pub(super) window_active: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -102,6 +104,14 @@ impl Workspace {
             cx.observe_window_appearance(window, |this, window, cx| {
                 apply(&this.settings.read(cx).settings(), window, cx);
             }),
+            // 窗口回到前面：看得见的卡片熄掉橙点。
+            cx.observe_window_activation(window, |this, window, cx| {
+                this.window_active = window.is_window_active();
+                this.see_cards(cx);
+                cx.notify();
+            }),
+            // 切标签、放大还原、关卡片……窗口壳一变，就看看哪些卡片又看得见了。
+            cx.observe_self(|this, cx| this.see_cards(cx)),
         ];
         apply(&settings.read(cx).settings(), window, cx);
         // 点终端的系统通知，回到那张卡片。
@@ -119,6 +129,7 @@ impl Workspace {
             next_card_id: 1,
             notice_times: HashMap::new(),
             tab_rail: TabRail::default(),
+            window_active: window.is_window_active(),
             _subscriptions: subscriptions,
         }
     }
@@ -193,6 +204,36 @@ impl Workspace {
             .map(|entity| entity.read(cx).content_opacity(window))
     }
 
+    /// 卡片图块上的程序名（「Neovim」；shell 在提示符下是 shell 名）。
+    pub fn card_tile(&self, card: CardId, cx: &App) -> Option<String> {
+        self.card(card, cx)
+            .map(|entity| entity.read(cx).tile_program().name)
+    }
+
+    /// 标签上叠放的图块的程序名，从前到后。
+    pub fn tab_tiles(&self, tab: TabId, cx: &App) -> Vec<String> {
+        self.tabs
+            .get(tab)
+            .map(|tab| {
+                tab.tiles(cx)
+                    .into_iter()
+                    .map(|program| program.name)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// 卡片头部的状态点。
+    pub fn card_dot(&self, card: CardId, cx: &App) -> Option<StatusDot> {
+        self.card(card, cx)
+            .map(|entity| entity.read(cx).status_dot(cx))
+    }
+
+    /// 标签上的状态点。
+    pub fn tab_dot(&self, tab: TabId, cx: &App) -> Option<StatusDot> {
+        self.tabs.get(tab).map(|tab| tab.dot(cx))
+    }
+
     /// 标签轨道要画的快照：渲染函数不读实体。
     fn tab_snapshots(&self, cx: &App) -> Vec<TabSnapshot> {
         let active = self.tabs.active();
@@ -205,6 +246,8 @@ impl Workspace {
                     name: card.name(),
                     directory: card.directory_label().into(),
                     active: active == Some(id),
+                    tiles: tab.tiles(cx),
+                    dot: tab.dot(cx),
                 }
             })
             .collect()
