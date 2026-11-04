@@ -31,7 +31,7 @@ fn open_tab(
     (handle, workspace, factory, provider)
 }
 
-/// 画几帧，让分屏面板量好尺寸、按树摆好。
+/// 画几帧，让分隔线的 resizable 组件量好尺寸、按树摆好。
 fn settle(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     for _ in 0..3 {
         in_frame(cx, handle, |_, _| {});
