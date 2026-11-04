@@ -11,11 +11,13 @@
 //! - `split`：卡片分屏（05）
 //! - `programs`：程序图块与状态点（06）
 //! - `settings`：设置对话框（07）
+//! - `snippets`：命令片段（19）
 
 mod support;
 
 mod programs;
 mod settings;
+mod snippets;
 mod split;
 mod tabs;
 mod terminal_card;

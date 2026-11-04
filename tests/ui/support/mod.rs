@@ -47,6 +47,8 @@ pub use qishell::app::{CloseFocusedCard, SplitDown, SplitRight, ToggleZoomCard};
 pub use qishell::split::NodeId;
 // 程序图块与状态点（工单 06）。
 pub use qishell::card::StatusDot;
+// 主机数据（工单 09 起）：内存里的，不碰数据目录。
+pub use qishell::host::HostData;
 
 /// 每个夹具都先做的事：QiShell 的全局量（文案、字体、快捷键）。
 pub fn init_app(cx: &mut TestAppContext) {
@@ -61,14 +63,20 @@ pub fn settings_store() -> SettingsStore {
 /// 注入窗口壳的服务，全部是假实现：测试不碰真实的终端、钥匙串和网络。
 /// 后续工单每给 `WorkspaceServices` 加一项服务，就在这里填上它的假实现。
 pub fn fake_services() -> WorkspaceServices {
-    services_with_terminals(fake_local_terminals())
+    WorkspaceServices {
+        local_terminals: fake_local_terminals(),
+        hosts: HostData::empty(),
+    }
 }
 
 /// 假服务，本地终端用给定的假 provider：测试拿着它看启动了什么、关了什么。
 pub fn services_with_terminals(
     local_terminals: Arc<FixedLocalTerminalTransportProvider>,
 ) -> WorkspaceServices {
-    WorkspaceServices { local_terminals }
+    WorkspaceServices {
+        local_terminals,
+        ..fake_services()
+    }
 }
 
 /// 用内存设置和假服务打开窗口壳。
