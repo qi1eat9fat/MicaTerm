@@ -37,6 +37,12 @@ impl StatusBar {
     }
 }
 
+/// 状态栏右边的一段：卡片窄得放不下时和别的段一起缩，写不下的用「…」截断。
+fn segment(text: impl Into<SharedString>) -> Div {
+    div().min_w_0().truncate().child(text.into())
+}
+
+/// 状态栏。卡片窄得放不下时每一段都缩短、末尾写「…」，不溢出卡片。
 pub(super) fn render_status_bar(
     id: CardId,
     status: &StatusBar,
@@ -61,18 +67,35 @@ pub(super) fn render_status_bar(
         .overflow_hidden()
         .child(
             div()
+                .id(id.element("card-status-state"))
+                .test_support()
+                .min_w_0()
+                .truncate()
                 .text_color(tokens.busy)
                 .child(format!("● {}", status.state)),
         )
-        .when_some(status.detail.clone(), |bar, detail| bar.child(detail))
+        .when_some(status.detail.clone(), |bar, detail| {
+            bar.child(
+                div()
+                    .id(id.element("card-status-detail"))
+                    .test_support()
+                    .min_w_0()
+                    .truncate()
+                    .child(detail),
+            )
+        })
         .child(
             div()
+                .id(id.element("card-status-terminal"))
+                .test_support()
                 .ml_auto()
                 .flex()
+                .min_w_0()
+                .overflow_hidden()
                 .gap(px(12.))
-                .child(TERMINAL_ENCODING)
-                .child(TERM_NAME)
-                .child(status.size()),
+                .child(segment(TERMINAL_ENCODING))
+                .child(segment(TERM_NAME))
+                .child(segment(status.size())),
         )
 }
 
