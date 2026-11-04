@@ -20,9 +20,14 @@ fn open_tab(
         open_workspace_with(cx, settings_store(), services_with_terminals(provider));
     in_frame(cx, handle, |window, _| window.activate_window());
     dispatch(cx, handle, NewLocalTerminalTab);
-    // 卡片的 shell 名（pwsh）在后台查到。
+    // 卡片的 shell 名（pwsh）在后台查到；假 shell 打出提示符才算跑起来了，这之前打的字会丢
+    // （测试并行跑、机器忙时，查到 shell 名可能比假 shell 起来得早）。
     assert!(wait_until(cx, handle, |cx| card_tile(cx, &workspace, 1)
-        == Some("pwsh".into())));
+        == Some("pwsh".into())
+        && cx.update(|cx| workspace
+            .read(cx)
+            .card_screen_text(CardId(1), cx)
+            .is_some_and(|text| text.contains("会议纪要")))));
     (handle, workspace, factory)
 }
 
