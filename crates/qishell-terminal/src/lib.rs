@@ -19,6 +19,7 @@ mod directory;
 mod engine;
 mod environment;
 mod font;
+mod foreground;
 mod i18n;
 mod icons;
 mod input;
@@ -45,6 +46,7 @@ pub use font::{
     LINE_HEIGHT_RANGE, TerminalFont, TerminalFontPreview, is_font_installed,
     monospace_font_families,
 };
+pub use foreground::program_name;
 pub use icons::TerminalIcons;
 pub use input::{TerminalInput, TerminalInputEvent};
 pub use local_pty::{LocalPtyTransportProvider, TERM_NAME, TERMINAL_ENCODING};
