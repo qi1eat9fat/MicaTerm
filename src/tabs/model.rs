@@ -1,5 +1,5 @@
 //! 标签列表的纯逻辑：按顺序放标签，记着哪个在前面。不依赖 gpui。
-//! 02 只用到新建和关闭；工单 04 在这里加上一个 / 下一个 / 第 n 个、关闭其他、关闭右侧。
+//! 新建、关闭（02），上一个 / 下一个 / 第 n 个、关闭其他、关闭右侧（04）。
 
 /// 一个标签的 id：从 1 起递增，不复用。元素 id 写成 `("tab", id)`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -92,6 +92,51 @@ impl<T> TabList<T> {
         self.tabs.len()
     }
 
+    /// 把在前的标签往右（`step` 为正）或往左挪 `step` 个，过了两头绕回来；返回新的在前标签。
+    pub fn step(&mut self, step: isize) -> Option<TabId> {
+        let count = self.tabs.len() as isize;
+        let current = self.active.and_then(|id| self.index_of(id))? as isize;
+        let next = (current + step).rem_euclid(count) as usize;
+        let id = self.tabs[next].0;
+        self.active = Some(id);
+        Some(id)
+    }
+
+    /// 第 `position` 个标签，从 1 数起；9 表示最后一个（同浏览器）。超出的位置没有标签。
+    pub fn nth(&self, position: usize) -> Option<TabId> {
+        let index = if position >= 9 {
+            self.tabs.len().checked_sub(1)?
+        } else {
+            position.checked_sub(1)?
+        };
+        self.tabs.get(index).map(|(id, _)| *id)
+    }
+
+    /// `id` 以外的标签，从左到右；没有 `id` 这个标签时为空。
+    pub fn others(&self, id: TabId) -> Vec<TabId> {
+        if self.index_of(id).is_none() {
+            return Vec::new();
+        }
+        self.tabs
+            .iter()
+            .map(|(tab, _)| *tab)
+            .filter(|tab| *tab != id)
+            .collect()
+    }
+
+    /// `id` 右边的标签，从左到右。
+    pub fn right_of(&self, id: TabId) -> Vec<TabId> {
+        match self.index_of(id) {
+            Some(index) => self.tabs[index + 1..].iter().map(|(tab, _)| *tab).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// `id` 在第几个（从 0 数起）。
+    pub fn position(&self, id: TabId) -> Option<usize> {
+        self.index_of(id)
+    }
+
     fn index_of(&self, id: TabId) -> Option<usize> {
         self.tabs.iter().position(|(tab, _)| *tab == id)
     }
@@ -144,5 +189,54 @@ mod tests {
         let mut tabs = list(&["a"]);
         tabs.remove(TabId(1));
         assert_eq!(tabs.push("b"), TabId(2));
+    }
+
+    #[test]
+    fn stepping_goes_round_the_ends() {
+        let mut tabs = list(&["a", "b", "c"]);
+        assert_eq!(tabs.step(1), Some(TabId(1)));
+        assert_eq!(tabs.active(), Some(TabId(1)));
+        assert_eq!(tabs.step(-1), Some(TabId(3)));
+        assert_eq!(tabs.step(-1), Some(TabId(2)));
+        assert_eq!(tabs.step(1), Some(TabId(3)));
+    }
+
+    #[test]
+    fn stepping_without_tabs_does_nothing() {
+        let mut tabs = list(&[]);
+        assert_eq!(tabs.step(1), None);
+        assert_eq!(tabs.active(), None);
+    }
+
+    /// 从 1 数起；9 是最后一个，超出的位置没有标签。
+    #[test]
+    fn the_nth_tab_counts_from_one_and_nine_is_the_last() {
+        let tabs = list(&["a", "b", "c"]);
+        assert_eq!(tabs.nth(1), Some(TabId(1)));
+        assert_eq!(tabs.nth(3), Some(TabId(3)));
+        assert_eq!(tabs.nth(4), None);
+        assert_eq!(tabs.nth(0), None);
+        assert_eq!(tabs.nth(9), Some(TabId(3)));
+        let many = list(&["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]);
+        assert_eq!(many.nth(8), Some(TabId(8)));
+        assert_eq!(many.nth(9), Some(TabId(11)));
+        assert_eq!(list(&[]).nth(9), None);
+    }
+
+    #[test]
+    fn the_others_and_the_ones_to_the_right() {
+        let tabs = list(&["a", "b", "c", "d"]);
+        assert_eq!(tabs.others(TabId(2)), [TabId(1), TabId(3), TabId(4)]);
+        assert_eq!(tabs.right_of(TabId(2)), [TabId(3), TabId(4)]);
+        assert!(tabs.right_of(TabId(4)).is_empty());
+        assert!(tabs.right_of(TabId(9)).is_empty());
+        assert!(tabs.others(TabId(9)).is_empty());
+    }
+
+    #[test]
+    fn the_position_of_a_tab() {
+        let tabs = list(&["a", "b"]);
+        assert_eq!(tabs.position(TabId(2)), Some(1));
+        assert_eq!(tabs.position(TabId(9)), None);
     }
 }

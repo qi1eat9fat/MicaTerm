@@ -1,13 +1,13 @@
 //! 标签：标签列表的纯逻辑（`model`）、终端标签（`TerminalTab`）和标签轨道（`tab_rail`）。
 //!
-//! 02 的终端标签里只有一张卡片；工单 05 把 `TerminalTab` 换成一棵卡片分屏树，
-//! 工单 04 补全标签的切换、关闭和标签轨道的样式。
+//! 02 的终端标签里只有一张卡片；工单 05 把 `TerminalTab` 换成一棵卡片分屏树。
+//! 工单 04 补全了标签的切换、关闭（`model`）和标签轨道（`TabRail`）。
 
 mod model;
 mod tab_rail;
 
 pub use model::{TabId, TabList};
-pub use tab_rail::{TabSnapshot, render_tabs};
+pub use tab_rail::{TabRail, TabSnapshot, build_tab_menu};
 
 use gpui_kit::{
     AnyElement, App, Entity, IntoElement as _, ParentElement as _, Styled as _, Subscription, div,
