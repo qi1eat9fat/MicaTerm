@@ -25,9 +25,7 @@ mod worker;
 pub use client::is_network_error;
 pub use control::Cancelled;
 pub use edit::{EDIT_LIMIT, FileBytes, FileStamp, ReadFailure, SaveFailure, TextFile, TextFormat};
-pub use engine::{
-    Disconnect, EngineEvent, EventSink, EventsClosed, RemoteOperation, SftpCommand,
-};
+pub use engine::{Disconnect, EngineEvent, EventSink, EventsClosed, RemoteOperation, SftpCommand};
 pub use error::*;
 pub use model::*;
 pub use parallel::{DEFAULT_PARALLEL_TRANSFERS, PARALLEL_TRANSFERS_RANGE, set_parallel_transfers};

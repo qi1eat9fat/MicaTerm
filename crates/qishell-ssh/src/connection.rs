@@ -1,11 +1,15 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/connection.rs
 // 裁剪：去掉 NAT64（只给 Apple 手机端用）和远程端口转发（`ForwardedTcpip`、`connect_forwarding`）。
+// 改造：私钥从内存里的私钥数据登录：保险库里的私钥经 `SecretSource` 读进内存再解析，
+// 口令按凭据存；只有「无密码」登录试 `~/.ssh` 里的默认私钥时才读文件。
 //! SSH connection and authentication shared by terminals and SFTP.
 use super::error::{
     AgentProblem, AgentUnreachable, AuthError, ConnectError, ForwardProblem, KnownHostsError,
     MissingCredential, PasswordWanted, RouteFailure, WrapErr, find_cause, wrap,
 };
-use super::login::{DEFAULT_KEY_FILES, HostLogin, JumpLogin, LoginMethod, LoginRoute, ProxyLogin};
+use super::login::{
+    DEFAULT_KEY_FILES, HostLogin, JumpLogin, LoginMethod, LoginRoute, PrivateKeySource, ProxyLogin,
+};
 use super::prompt::{
     AuthenticationRequest, ConnectionPrompt, ConnectionPromptField, ConnectionPromptKind,
     ConnectionPromptReply, ConnectionSecret,
@@ -13,9 +17,9 @@ use super::prompt::{
 use super::session::ChannelStream;
 use anyhow::{Result, anyhow, bail};
 use russh::keys::{
-    HashAlg, PrivateKeyWithHashAlg, PublicKey,
+    HashAlg, PrivateKeyWithHashAlg, PublicKey, decode_secret_key,
     known_hosts::{known_host_keys_path, learn_known_hosts_path},
-    load_secret_key, parse_public_key_base64,
+    parse_public_key_base64,
 };
 use russh::{
     MethodKind, MethodSet,
@@ -36,7 +40,7 @@ use tokio::sync::{oneshot, watch};
 use zeroize::Zeroizing;
 
 use super::proxy::{ProxyAuth, handshake};
-use super::secret::{SecretRef, SharedSecretSource, read_secret};
+use super::secret::{SharedSecretSource, read_secret, read_secret_or_fail};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const AUTH_RETRIES: usize = 3;
@@ -846,9 +850,8 @@ async fn authenticate(
     if matches!(method, LoginMethod::NoPassword | LoginMethod::Key)
         && methods.contains(&MethodKind::PublicKey)
     {
-        let paths = key_paths(login, connector.key_dir.as_deref())?;
-        for path in paths {
-            let Some(key) = load_private_key(&path, secrets, broker).await? else {
+        for source in private_keys(login, connector.key_dir.as_deref())? {
+            let Some(key) = load_private_key(&source, secrets, broker).await? else {
                 continue;
             };
             let hash = handle
@@ -1074,12 +1077,14 @@ async fn connect_agent(location: &AgentLocation) -> Result<Agent, AgentProblem> 
     Err(AgentProblem::Unreachable(AgentUnreachable::Unsupported))
 }
 
-fn key_paths(login: &HostLogin, key_dir: Option<&Path>) -> Result<Vec<PathBuf>> {
+/// The private keys a login offers, in order: a key login's own, kept in
+/// the vault, or the [`DEFAULT_KEY_FILES`] in `key_dir`.
+fn private_keys(login: &HostLogin, key_dir: Option<&Path>) -> Result<Vec<PrivateKeySource>> {
     if login.method == LoginMethod::Key {
         return login
-            .key_path
+            .key
             .clone()
-            .map(|path| vec![path])
+            .map(|key| vec![PrivateKeySource::Saved(key)])
             .ok_or_else(|| anyhow!(AuthError::KeyNotChosen));
     }
     let Some(dir) = key_dir else {
@@ -1087,30 +1092,55 @@ fn key_paths(login: &HostLogin, key_dir: Option<&Path>) -> Result<Vec<PathBuf>> 
     };
     Ok(DEFAULT_KEY_FILES
         .into_iter()
-        .map(|name| dir.join(name))
+        .map(|name| PrivateKeySource::File(dir.join(name)))
         .collect())
 }
 
+/// The text of the private key `source`, in memory: a saved key's read from
+/// the vault, a default key's from its file. `None` for a default key file
+/// that is not there. A saved key is never asked for, so a vault that cannot
+/// give it (locked, say) fails the login with its own error.
+async fn private_key_text(
+    source: &PrivateKeySource,
+    secrets: &SharedSecretSource,
+) -> Result<Option<Zeroizing<String>>> {
+    match source {
+        PrivateKeySource::Saved(key) => read_secret_or_fail(secrets, &key.private_key())
+            .await?
+            .map(Some)
+            .ok_or_else(|| anyhow!(AuthError::KeyMissing)),
+        PrivateKeySource::File(path) => match tokio::fs::read_to_string(path).await {
+            Ok(text) => Ok(Some(Zeroizing::new(text))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) => bail!(AuthError::KeyUnreadable {
+                key: source.clone()
+            }),
+        },
+    }
+}
+
 async fn load_private_key(
-    path: &Path,
+    source: &PrivateKeySource,
     secrets: &SharedSecretSource,
     broker: Asker<'_>,
 ) -> Result<Option<russh::keys::PrivateKey>> {
-    if !path.exists() {
+    let Some(text) = private_key_text(source, secrets).await? else {
         return Ok(None);
-    }
-    match load_secret_key(path, None) {
+    };
+    match decode_secret_key(&text, None) {
         Ok(key) => return Ok(Some(key)),
         Err(russh::keys::Error::KeyIsEncrypted) => {}
         Err(_) => bail!(AuthError::KeyUnreadable {
-            path: path.to_path_buf(),
+            key: source.clone()
         }),
     }
-    // Passphrases are saved per key file, so one saved answer unlocks the same
-    // key for every host that uses it.
+    // A saved key's passphrase is saved with it, so one saved answer unlocks
+    // the key for every host that uses it. A default key's is only asked.
     let mut saved_rejected = false;
-    if let Some(saved) = read_secret(secrets, &SecretRef::passphrase(path)).await {
-        if let Ok(key) = load_secret_key(path, Some(saved.as_str())) {
+    if let PrivateKeySource::Saved(key) = source
+        && let Some(saved) = read_secret(secrets, &key.passphrase()).await
+    {
+        if let Ok(key) = decode_secret_key(&text, Some(saved.as_str())) {
             return Ok(Some(key));
         }
         saved_rejected = true;
@@ -1122,12 +1152,12 @@ async fn load_private_key(
                 rejected: saved_rejected,
             },
             AuthenticationRequest::Passphrase {
-                key_path: path.to_path_buf(),
+                key: source.clone(),
                 saved_rejected,
             },
         )
         .await?;
-        if let Ok(key) = load_secret_key(path, Some(answer.expose())) {
+        if let Ok(key) = decode_secret_key(&text, Some(answer.expose())) {
             return Ok(Some(key));
         }
     }
@@ -1337,7 +1367,8 @@ mod tests {
 
     #[test]
     fn connectors_of_one_trust_file_share_its_lock() {
-        use super::{SecretRef, SshConnector};
+        use super::SshConnector;
+        use crate::SecretRef;
         use crate::SecretSource;
         use std::sync::Arc;
         use zeroize::Zeroizing;
@@ -1363,13 +1394,33 @@ mod tests {
 
     #[test]
     fn default_keys_are_looked_for_only_where_told() {
-        use super::{DEFAULT_KEY_FILES, HostLogin, LoginMethod, key_paths};
+        use super::{DEFAULT_KEY_FILES, HostLogin, LoginMethod, PrivateKeySource, private_keys};
         use std::path::Path;
 
         let login = HostLogin::new("10.0.0.1", 22, "root", LoginMethod::NoPassword);
-        assert!(key_paths(&login, None).unwrap().is_empty());
-        let paths = key_paths(&login, Some(Path::new("/keys"))).unwrap();
-        assert_eq!(paths.len(), DEFAULT_KEY_FILES.len());
-        assert_eq!(paths[0], Path::new("/keys/id_ed25519"));
+        assert!(private_keys(&login, None).unwrap().is_empty());
+        let keys = private_keys(&login, Some(Path::new("/keys"))).unwrap();
+        assert_eq!(keys.len(), DEFAULT_KEY_FILES.len());
+        assert_eq!(
+            keys[0],
+            PrivateKeySource::File(Path::new("/keys").join("id_ed25519"))
+        );
+    }
+
+    #[test]
+    fn a_key_login_offers_only_its_saved_key() {
+        use super::{AuthError, HostLogin, LoginMethod, PrivateKeySource, private_keys};
+        use crate::SavedKey;
+        use std::path::Path;
+
+        let login = HostLogin::new("10.0.0.1", 22, "root", LoginMethod::Key);
+        let error = private_keys(&login, Some(Path::new("/keys"))).unwrap_err();
+        assert_eq!(error.downcast_ref(), Some(&AuthError::KeyNotChosen));
+        let key = SavedKey::new("deploy");
+        let login = login.with_key(key.clone());
+        assert_eq!(
+            private_keys(&login, Some(Path::new("/keys"))).unwrap(),
+            [PrivateKeySource::Saved(key)]
+        );
     }
 }

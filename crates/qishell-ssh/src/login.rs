@@ -1,4 +1,5 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/login.rs
+// 改造：私钥进保险库：`key_path` 换成 `key: Option<SavedKey>`，加 `PrivateKeySource`。
 //! How a connection logs in to a host, with every secret named by where it
 //! is kept rather than held. The app builds one from what it saved and
 //! hands it to a worker, which never reads the app's own records.
@@ -21,7 +22,7 @@ pub enum LoginMethod {
     /// Whatever needs nothing typed: the SSH agent, then the default keys in
     /// `~/.ssh`. A server that wants a password is refused, not asked.
     NoPassword,
-    /// One private key file.
+    /// One private key, kept in the vault ([`HostLogin::key`]).
     Key,
     /// Only the SSH agent's keys.
     Agent,
@@ -38,7 +39,7 @@ pub struct HostLogin {
     pub method: LoginMethod,
     /// The private key of [`LoginMethod::Key`], and `None` for every other
     /// method.
-    pub key_path: Option<PathBuf>,
+    pub key: Option<SavedKey>,
     /// The saved password the password step reads: the endpoint's own, or a
     /// password credential's. Every other login keeps the endpoint's for a
     /// server that asks for a password after the key.
@@ -70,10 +71,16 @@ impl HostLogin {
             port,
             user,
             method,
-            key_path: None,
+            key: None,
             route: LoginRoute::Direct,
             shell_only: false,
         }
+    }
+
+    /// The same login, with `key` as its private key.
+    pub fn with_key(mut self, key: SavedKey) -> Self {
+        self.key = Some(key);
+        self
     }
 
     /// The same login, reaching the host by `route`.
@@ -86,6 +93,46 @@ impl HostLogin {
     pub fn endpoint(&self) -> String {
         format!("{}@{}:{}", self.user, self.host, self.port)
     }
+}
+
+/// A private key kept in the vault, named by its credential's random
+/// `keychain_id`: the key's text and its passphrase, if it has one, are two
+/// secrets of it. The connection reads the text into memory and decodes it
+/// there; no key file is ever read for it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SavedKey {
+    keychain_id: String,
+}
+
+impl SavedKey {
+    pub fn new(keychain_id: impl Into<String>) -> Self {
+        Self {
+            keychain_id: keychain_id.into(),
+        }
+    }
+
+    pub fn keychain_id(&self) -> &str {
+        &self.keychain_id
+    }
+
+    /// Where the key's text is kept.
+    pub fn private_key(&self) -> SecretRef {
+        SecretRef::private_key(&self.keychain_id)
+    }
+
+    /// Where the key's passphrase is kept.
+    pub fn passphrase(&self) -> SecretRef {
+        SecretRef::passphrase(&self.keychain_id)
+    }
+}
+
+/// Which private key a login offers: one kept in the vault, or one of the
+/// [`DEFAULT_KEY_FILES`] a login without a password tries. Questions and
+/// errors about a key say which it was.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrivateKeySource {
+    Saved(SavedKey),
+    File(PathBuf),
 }
 
 /// How a connection reaches a host, with every jump host's login looked up.
@@ -197,7 +244,20 @@ mod tests {
         assert_eq!(login.password, SecretRef::password("root", "10.0.0.1", 22));
         assert_eq!(login.endpoint(), "root@10.0.0.1:22");
         assert_eq!(login.route, LoginRoute::Direct);
+        assert_eq!(login.key, None);
         assert!(!login.shell_only);
+    }
+
+    #[test]
+    fn a_saved_keys_secrets_are_its_credentials() {
+        let key = SavedKey::new("Jwg5rHvXCxw89paM");
+        assert_eq!(
+            key.private_key(),
+            SecretRef::private_key("Jwg5rHvXCxw89paM")
+        );
+        assert_eq!(key.passphrase(), SecretRef::passphrase("Jwg5rHvXCxw89paM"));
+        let login = HostLogin::new("10.0.0.1", 22, "root", LoginMethod::Key).with_key(key.clone());
+        assert_eq!(login.key, Some(key));
     }
 
     #[test]

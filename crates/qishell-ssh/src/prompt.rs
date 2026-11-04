@@ -1,10 +1,11 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/prompt.rs
+// 改造：问口令时说的是哪把私钥（`PrivateKeySource`），不再只是文件路径。
 //! The questions a connection asks before it can go on, and their answers.
 //! They carry what the question is about, never its wording: each app words
 //! them in its own language. Secrets are never serialized or printed.
-use std::path::PathBuf;
-
 use zeroize::Zeroizing;
+
+use super::login::PrivateKeySource;
 
 /// One field requested by an SSH keyboard-interactive challenge, in the
 /// server's own words.
@@ -133,10 +134,10 @@ pub enum AuthenticationRequest {
     /// The login password; `saved_rejected` when the server refused the
     /// saved one.
     Password { saved_rejected: bool },
-    /// The passphrase of the private key at `key_path`; `saved_rejected`
-    /// when the saved one did not unlock it.
+    /// The passphrase of the private key `key`; `saved_rejected` when the
+    /// saved one did not unlock it.
     Passphrase {
-        key_path: PathBuf,
+        key: PrivateKeySource,
         saved_rejected: bool,
     },
     /// The server's own questions. `saved_password_rejected` when they ask

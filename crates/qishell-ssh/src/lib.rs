@@ -10,9 +10,16 @@
 //! 终端连接上另开的 SFTP 通道（单栏「文件」）和同步用的秘密。
 //! 改造：私钥从内存里的私钥数据登录（经 `SecretSource` 读保险库），不再按文件路径读；
 //! 系统探测多取 `uname -n`。
+//!
+//! 本 crate 不建 tokio 运行时：russh 把一条连接的会话任务 spawn 在调用
+//! [`SshConnector::connect`] 的那个运行时上，运行时一退出连接就断。要让几张卡片
+//! 共用一条连接，调用方得在不属于任何卡片的共享运行时上连接；`SshHandle` 和通道的
+//! 方法只是往会话任务发消息，在别的运行时上也能用。
 
 mod connection;
 mod error;
+#[cfg(test)]
+mod key_login_tests;
 mod latency;
 mod login;
 mod probe;
@@ -35,7 +42,8 @@ pub use error::{
 };
 pub use latency::{LATENCY_INTERVAL, Latency, LatencyLevel, round_trip};
 pub use login::{
-    DEFAULT_KEY_FILES, HostLogin, JumpLogin, LoginMethod, LoginRoute, ProxyKind, ProxyLogin,
+    DEFAULT_KEY_FILES, HostLogin, JumpLogin, LoginMethod, LoginRoute, PrivateKeySource, ProxyKind,
+    ProxyLogin, SavedKey,
 };
 pub use probe::{
     HOST_OS_KEYS, HostOsProbe, PROBE_COMMAND, ProbeOutcome, ProbedHost, WINDOWS_PROBE_COMMAND,

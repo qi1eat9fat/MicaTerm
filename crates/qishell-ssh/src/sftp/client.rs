@@ -1,9 +1,7 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/client.rs
 // 裁剪：去掉 `on_channel` 和 `TerminalNotConnected`（终端连接上的 SFTP 通道）。
 
-use super::{
-    DirectoryEntry, DirectoryListing, EntryKind, FileMetadata, RemotePath, SftpError,
-};
+use super::{DirectoryEntry, DirectoryListing, EntryKind, FileMetadata, RemotePath, SftpError};
 use crate::{Latency, SshConnectionConfig, SshConnector, SshHandle, SshPrompts};
 use anyhow::{Result, anyhow, bail};
 use futures::StreamExt as _;

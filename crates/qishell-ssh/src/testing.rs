@@ -1,8 +1,9 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/testing.rs
 // 裁剪：本 crate 自己的测试也用它（`cfg(test)`）。
+// 改造：也接受公钥登录（`TestServer::authorize`），给私钥登录的测试用。
 //! A real SSH server in the test's own process, for this crate's tests and
-//! those of what is built on it: a password login, a shell that echoes what
-//! is typed, commands, and SFTP through this machine's OpenSSH
+//! those of what is built on it: a password login, a login with the keys it
+//! is told to accept, a shell that echoes what is typed, commands, and SFTP through this machine's OpenSSH
 //! `sftp-server` (none on Windows). Only in tests or with the `testing`
 //! feature.
 
@@ -11,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use russh::keys::{Algorithm, PrivateKey};
+use russh::keys::{Algorithm, PrivateKey, PublicKey};
 use russh::server::{self, Server as _};
 use russh::{ChannelId, MethodKind, MethodSet};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -44,8 +45,12 @@ pub struct TestServer {
     pub port: u16,
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
+    keys: AuthorizedKeys,
     task: JoinHandle<()>,
 }
+
+/// The public keys [`TEST_USER`] logs in with, as `authorized_keys`.
+type AuthorizedKeys = Arc<Mutex<Vec<PublicKey>>>;
 
 /// What a command prints, when not itself.
 type Replies = Arc<Mutex<HashMap<String, String>>>;
@@ -68,17 +73,19 @@ impl TestServer {
         let key = PrivateKey::random(&mut russh::keys::key::safe_rng(), Algorithm::Ed25519)
             .map_err(std::io::Error::other)?;
         let config = Arc::new(server::Config {
-            methods: MethodSet::from(&[MethodKind::Password][..]),
+            methods: MethodSet::from(&[MethodKind::Password, MethodKind::PublicKey][..]),
             keys: vec![key],
             auth_rejection_time: Duration::ZERO,
             auth_rejection_time_initial: Some(Duration::ZERO),
             ..Default::default()
         });
         let replies = Replies::default();
+        let keys = AuthorizedKeys::default();
         let mut server = Listener {
             directory,
             seen: seen.clone(),
             replies: replies.clone(),
+            keys: keys.clone(),
         };
         let task = tokio::spawn(async move {
             let _ = server.run_on_socket(config, &listener).await;
@@ -87,12 +94,18 @@ impl TestServer {
             port,
             seen,
             replies,
+            keys,
             task,
         })
     }
 
     pub fn seen(&self) -> Seen {
         lock(&self.seen).clone()
+    }
+
+    /// From now on [`TEST_USER`] may log in with the private key of `key`.
+    pub fn authorize(&self, key: PublicKey) {
+        lock(&self.keys).push(key);
     }
 
     /// From now on `command` prints `output` rather than itself.
@@ -111,6 +124,7 @@ struct Listener {
     directory: PathBuf,
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
+    keys: AuthorizedKeys,
 }
 
 impl server::Server for Listener {
@@ -121,6 +135,7 @@ impl server::Server for Listener {
             directory: self.directory.clone(),
             seen: self.seen.clone(),
             replies: self.replies.clone(),
+            keys: self.keys.clone(),
             channels: HashMap::new(),
             shells: HashSet::new(),
         }
@@ -131,6 +146,7 @@ struct Handler {
     directory: PathBuf,
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
+    keys: AuthorizedKeys,
     channels: HashMap<ChannelId, russh::Channel<server::Msg>>,
     /// The channels running the shell: russh hands every channel's data to
     /// `data`, SFTP's too.
@@ -146,10 +162,32 @@ impl server::Handler for Handler {
         } else {
             // As OpenSSH: asked again, not dropped.
             server::Auth::Reject {
-                proceed_with_methods: Some(MethodSet::from(&[MethodKind::Password][..])),
+                proceed_with_methods: Some(MethodSet::from(
+                    &[MethodKind::Password, MethodKind::PublicKey][..],
+                )),
                 partial_success: false,
             }
         })
+    }
+
+    /// Called once the client proved it holds the key.
+    async fn auth_publickey(
+        &mut self,
+        user: &str,
+        key: &PublicKey,
+    ) -> anyhow::Result<server::Auth> {
+        Ok(
+            if user == TEST_USER && lock(&self.keys).iter().any(|known| known == key) {
+                server::Auth::Accept
+            } else {
+                server::Auth::Reject {
+                    proceed_with_methods: Some(MethodSet::from(
+                        &[MethodKind::Password, MethodKind::PublicKey][..],
+                    )),
+                    partial_success: false,
+                }
+            },
+        )
     }
 
     async fn channel_open_session(

@@ -1,5 +1,6 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/error.rs
 // 裁剪：去掉外部 CLI 的说法，品牌字样改为 QiShell。
+// 改造：私钥进保险库：`KeyUnreadable` 说是哪把私钥（`PrivateKeySource`），加 `KeyMissing`。
 //! Why connecting, logging in or a channel failed: values the app turns
 //! into its own words. The `Display` texts here are English for logs, never
 //! shown as they are.
@@ -12,6 +13,8 @@ use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use super::login::PrivateKeySource;
 
 /// A typed error over the error that made it happen. anyhow's own `context`
 /// hides the context's type from the links of [`anyhow::Error::chain`];
@@ -187,8 +190,13 @@ pub enum AuthError {
     KeyRejected,
     NoKeyAccepted,
     KeyNotChosen,
+    /// The login's private key is not in the vault: lost with a vault
+    /// copied to another computer, or deleted.
+    KeyMissing,
+    /// The key's text, or the key file, is not a private key that can be
+    /// read.
     KeyUnreadable {
-        path: PathBuf,
+        key: PrivateKeySource,
     },
     KeyTooManyAttempts,
     PasswordFailed,
@@ -212,10 +220,14 @@ impl fmt::Display for AuthError {
             Self::KeyFailed => f.write_str("private key authentication failed"),
             Self::KeyRejected => f.write_str("the server didn't accept the private key"),
             Self::NoKeyAccepted => f.write_str("the server accepted none of the default keys"),
-            Self::KeyNotChosen => f.write_str("no private key file chosen"),
-            Self::KeyUnreadable { path } => {
-                write!(f, "couldn't read the private key file {}", path.display())
-            }
+            Self::KeyNotChosen => f.write_str("no private key chosen"),
+            Self::KeyMissing => f.write_str("the private key isn't in the vault"),
+            Self::KeyUnreadable {
+                key: PrivateKeySource::Saved(_),
+            } => f.write_str("couldn't read the saved private key"),
+            Self::KeyUnreadable {
+                key: PrivateKeySource::File(path),
+            } => write!(f, "couldn't read the private key file {}", path.display()),
             Self::KeyTooManyAttempts => f.write_str("too many incorrect passphrases"),
             Self::PasswordFailed => f.write_str("password authentication failed"),
             Self::Cancelled => f.write_str("authentication cancelled"),

@@ -1,10 +1,10 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/secret.rs
 // 裁剪：去掉同步用的秘密（`SyncKeyring`、`SyncLogin`）。
+// 改造：私钥进保险库：加 `PrivateKey`，口令从按文件路径存改成按凭据的 `keychain_id` 存。
 //! Which secret a connection needs, and where it reads the saved ones.
 //! Each app keeps its secrets in its own platform's keychain; the
 //! connection only ever asks for one by its [`SecretRef`].
 
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -14,10 +14,11 @@ use zeroize::Zeroizing;
 ///
 /// A login password belongs to the user and endpoint it logs in to, not to
 /// a saved host: renaming or copying a host keeps it, and hosts of the same
-/// user and endpoint share it. A passphrase belongs to its key file, so one
-/// key is asked about once. A password credential's password belongs to the
-/// credential, shared by the hosts that use it. A proxy's password belongs
-/// to the proxy's address and user, shared by the hosts behind it.
+/// user and endpoint share it. A key credential's private key and its
+/// passphrase belong to the credential, so one key is asked about once. A
+/// password credential's password belongs to the credential, shared by the
+/// hosts that use it. A proxy's password belongs to the proxy's address and
+/// user, shared by the hosts behind it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SecretRef {
     /// The login password of an SSH endpoint.
@@ -26,8 +27,12 @@ pub enum SecretRef {
         host: String,
         port: u16,
     },
-    /// The passphrase of a private key file.
-    Passphrase { key_path: String },
+    /// A key credential's private key, the key file's text (OpenSSH, PEM or
+    /// PuTTY), by the credential's `keychain_id`.
+    PrivateKey { keychain_id: String },
+    /// The passphrase of a key credential's private key, by the credential's
+    /// `keychain_id`.
+    Passphrase { keychain_id: String },
     /// A password credential's password, by the credential's random
     /// `keychain_id` that is never reused.
     Credential { keychain_id: String },
@@ -52,9 +57,15 @@ impl SecretRef {
         }
     }
 
-    pub fn passphrase(key_path: impl AsRef<Path>) -> Self {
+    pub fn private_key(keychain_id: impl Into<String>) -> Self {
+        Self::PrivateKey {
+            keychain_id: keychain_id.into(),
+        }
+    }
+
+    pub fn passphrase(keychain_id: impl Into<String>) -> Self {
         Self::Passphrase {
-            key_path: key_path.as_ref().display().to_string(),
+            keychain_id: keychain_id.into(),
         }
     }
 
@@ -82,7 +93,8 @@ impl SecretRef {
     pub fn account(&self) -> String {
         match self {
             Self::Password { user, host, port } => format!("password:{user}@{host}:{port}"),
-            Self::Passphrase { key_path } => format!("passphrase:{key_path}"),
+            Self::PrivateKey { keychain_id } => format!("private-key:{keychain_id}"),
+            Self::Passphrase { keychain_id } => format!("passphrase:{keychain_id}"),
             Self::Credential { keychain_id } => format!("credential:{keychain_id}"),
             Self::Proxy { user, host, port } => format!("proxy:{user}@{host}:{port}"),
             Self::Temporary { host } => format!("temporary:{host}"),
@@ -102,7 +114,8 @@ pub trait SecretSource: Send + Sync + 'static {
 
 pub type SharedSecretSource = Arc<dyn SecretSource>;
 
-/// Read a saved secret off the async workers. A source that errors, is
+/// Read a saved secret off the async workers, for what the connection can
+/// ask for instead (a password, a passphrase). A source that errors, is
 /// locked, or holds an empty value counts as nothing saved: the connection
 /// then falls back to asking, which is always better than refusing to
 /// connect.
@@ -119,6 +132,19 @@ pub async fn read_secret(
         .filter(|value| !value.is_empty())
 }
 
+/// Read a saved secret off the async workers, for what nobody can be asked
+/// for instead (a private key): the source's own error, such as a locked
+/// vault's, comes out as it is, for the caller to recognise. An empty value
+/// counts as nothing saved.
+pub(crate) async fn read_secret_or_fail(
+    secrets: &SharedSecretSource,
+    secret: &SecretRef,
+) -> Result<Option<Zeroizing<String>>> {
+    let (secrets, secret) = (secrets.clone(), secret.clone());
+    let value = tokio::task::spawn_blocking(move || secrets.secret(&secret)).await??;
+    Ok(value.filter(|value| !value.is_empty()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::SecretRef;
@@ -130,9 +156,15 @@ mod tests {
     }
 
     #[test]
-    fn passphrase_accounts_name_the_key_file() {
-        let secret = SecretRef::passphrase("/Users/me/.ssh/id_ed25519");
-        assert_eq!(secret.account(), "passphrase:/Users/me/.ssh/id_ed25519");
+    fn private_key_and_passphrase_accounts_name_the_keychain_id() {
+        assert_eq!(
+            SecretRef::private_key("Jwg5rHvXCxw89paM").account(),
+            "private-key:Jwg5rHvXCxw89paM"
+        );
+        assert_eq!(
+            SecretRef::passphrase("Jwg5rHvXCxw89paM").account(),
+            "passphrase:Jwg5rHvXCxw89paM"
+        );
     }
 
     #[test]
@@ -156,6 +188,7 @@ mod tests {
     fn accounts_of_different_kinds_never_collide() {
         let accounts = [
             SecretRef::password("root", "10.0.1.12", 22),
+            SecretRef::private_key("root@10.0.1.12:22"),
             SecretRef::passphrase("root@10.0.1.12:22"),
             SecretRef::credential("root@10.0.1.12:22"),
             SecretRef::proxy("root", "10.0.1.12", 22),
