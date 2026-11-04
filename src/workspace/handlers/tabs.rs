@@ -201,7 +201,7 @@ impl Workspace {
             return;
         };
         for card in tab.cards() {
-            card.update(cx, |card, cx| card.close(cx));
+            self.retire_card(card, cx);
         }
         self.focus_active_tab(window, cx);
     }

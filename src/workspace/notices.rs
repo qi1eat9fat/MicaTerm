@@ -3,6 +3,7 @@
 //! 工单 06 加了卡片的橙点：程序在用户看不到的地方结束或响铃时亮，看到了就熄。
 // 参考 since2006/shell-rs @ b2a307a: src/workspace/notices.rs（裁剪：去掉关键字高亮和通知开关）
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::{WindowExt as _, notification::Notification};
@@ -58,12 +59,65 @@ pub(super) fn notice_text(card: &str, notice: &TerminalNotice) -> (String, Strin
     }
 }
 
-/// 上一条同类的在 `last` 发出，这一条现在能不能发。
-pub(super) fn due(last: Option<Instant>, now: Instant, interval: Duration) -> bool {
-    last.is_none_or(|last| now.saturating_duration_since(last) >= interval)
+/// 通知的类别：各自限频。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum NoticeKind {
+    /// 程序要的通知（OSC 9 / 777）。
+    Program,
+    /// 响铃。
+    Bell,
+}
+
+impl NoticeKind {
+    fn of(notice: &TerminalNotice) -> Self {
+        match notice {
+            TerminalNotice::Program { .. } => Self::Program,
+            TerminalNotice::Bell { .. } => Self::Bell,
+        }
+    }
+
+    /// 同一张卡片这一类通知最多多久一次。
+    fn interval(self) -> Duration {
+        match self {
+            Self::Program => PROGRAM_INTERVAL,
+            Self::Bell => BELL_INTERVAL,
+        }
+    }
+}
+
+/// 每张卡片每类通知上一次发出的时间，用来限频。卡片关了就 `forget` 它。
+#[derive(Default)]
+pub(super) struct NoticeTimes(HashMap<(CardId, NoticeKind), Instant>);
+
+impl NoticeTimes {
+    /// 卡片 `card` 现在能不能发一条 `kind` 类的通知：离上一条够久就能，并记下这一条。
+    pub(super) fn try_send(&mut self, card: CardId, kind: NoticeKind, now: Instant) -> bool {
+        let due = self
+            .0
+            .get(&(card, kind))
+            .is_none_or(|last| now.saturating_duration_since(*last) >= kind.interval());
+        if due {
+            self.0.insert((card, kind), now);
+        }
+        due
+    }
+
+    /// 卡片关了：丢掉它的记录。
+    pub(super) fn forget(&mut self, card: CardId) {
+        self.0.retain(|(id, _), _| *id != card);
+    }
+
+    /// 有记录的卡片，从小到大。
+    pub(super) fn cards(&self) -> Vec<CardId> {
+        let mut cards: Vec<_> = self.0.keys().map(|(card, _)| *card).collect();
+        cards.sort();
+        cards.dedup();
+        cards
+    }
 }
 
 /// 系统通知的 tag：一张卡片的新通知替换它的旧通知；点通知时靠它找回卡片。
+/// 系统通知只认字符串，这是卡片 id 唯一要写成字符串的地方。
 pub(super) fn notice_tag(card: CardId) -> String {
     format!("card:{}", card.0)
 }
@@ -192,22 +246,18 @@ impl Workspace {
         let Some(name) = self.card(card, cx).map(|entity| entity.read(cx).name()) else {
             return;
         };
-        let tag = notice_tag(card);
-        let (kind, interval) = match notice {
-            TerminalNotice::Program { .. } => ("program", PROGRAM_INTERVAL),
-            TerminalNotice::Bell { .. } => ("bell", BELL_INTERVAL),
-        };
-        let key = format!("{tag}:{kind}");
         // 执行器的时钟，测试能拨它。
         let now = cx.background_executor().now();
-        if !due(self.notice_times.get(&key).copied(), now, interval) {
+        if !self
+            .notice_times
+            .try_send(card, NoticeKind::of(notice), now)
+        {
             return;
         }
-        self.notice_times.insert(key, now);
         let (title, body) = notice_text(&name, notice);
         match delivery {
             Delivery::System => cx.show_system_notification(SystemNotification {
-                tag: tag.into(),
+                tag: notice_tag(card).into(),
                 title: title.into(),
                 body: body.into(),
                 actions: Vec::new(),
@@ -215,7 +265,7 @@ impl Workspace {
             Delivery::InApp => {
                 let workspace = cx.weak_entity();
                 let notification = Notification::new()
-                    .id1::<TerminalNoticeTag>(SharedString::from(tag))
+                    .id1::<TerminalNoticeTag>(card.element("notice"))
                     .title(title)
                     .message(body)
                     .on_click(move |_, window, cx| {
@@ -236,7 +286,7 @@ mod tests {
     use qishell_terminal::TerminalNotice;
 
     use super::{
-        BELL_INTERVAL, CardId, Delivery, card_of_tag, delivery, due, notice_tag, notice_text,
+        CardId, Delivery, NoticeKind, NoticeTimes, card_of_tag, delivery, notice_tag, notice_text,
     };
 
     fn program(title: Option<&str>) -> TerminalNotice {
@@ -279,20 +329,45 @@ mod tests {
         );
     }
 
+    /// 同一张卡片同一类通知限频：响铃每 10 秒一次，程序每 2 秒一次，两类各算各的，卡片之间也不相干。
     #[test]
-    fn notices_are_spaced_out() {
+    fn notices_are_spaced_out_per_card_and_kind() {
         let start = Instant::now();
-        assert!(due(None, start, BELL_INTERVAL));
-        assert!(!due(
-            Some(start),
-            start + Duration::from_secs(9),
-            BELL_INTERVAL
+        let mut times = NoticeTimes::default();
+        assert!(times.try_send(CardId(1), NoticeKind::Bell, start));
+        assert!(!times.try_send(CardId(1), NoticeKind::Bell, start + Duration::from_secs(9)));
+        assert!(times.try_send(
+            CardId(1),
+            NoticeKind::Program,
+            start + Duration::from_secs(9)
         ));
-        assert!(due(
-            Some(start),
-            start + Duration::from_secs(10),
-            BELL_INTERVAL
+        assert!(times.try_send(CardId(2), NoticeKind::Bell, start + Duration::from_secs(9)));
+        assert!(times.try_send(CardId(1), NoticeKind::Bell, start + Duration::from_secs(10)));
+        assert!(!times.try_send(
+            CardId(1),
+            NoticeKind::Program,
+            start + Duration::from_secs(10)
         ));
+        assert!(times.try_send(
+            CardId(1),
+            NoticeKind::Program,
+            start + Duration::from_secs(11)
+        ));
+    }
+
+    /// 卡片关了，它的限频记录跟着丢掉，别的卡片的留着。
+    #[test]
+    fn a_closed_card_is_forgotten() {
+        let start = Instant::now();
+        let mut times = NoticeTimes::default();
+        times.try_send(CardId(1), NoticeKind::Bell, start);
+        times.try_send(CardId(1), NoticeKind::Program, start);
+        times.try_send(CardId(2), NoticeKind::Bell, start);
+
+        times.forget(CardId(1));
+
+        assert_eq!(times.cards(), [CardId(2)]);
+        assert!(!times.try_send(CardId(2), NoticeKind::Bell, start));
     }
 
     #[test]
