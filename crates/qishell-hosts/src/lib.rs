@@ -25,6 +25,7 @@ mod database;
 mod mark;
 mod model;
 mod private_key;
+mod search;
 pub mod secrets;
 mod snippet;
 
@@ -39,3 +40,5 @@ pub use private_key::{
 };
 pub use secrets::{SecretRef, SecretStore, SharedSecretStore};
 pub use snippet::*;
+// 主机栏和快速连接共用的主机搜索（工单 11）。
+pub use search::host_matches;

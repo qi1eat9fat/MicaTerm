@@ -24,3 +24,5 @@ pub use model::{
 };
 pub use store::{SettingsProblem, SettingsStore, SettingsStoreEvent};
 pub use terminal_themes::theme_card_id;
+// 分段按钮和标签轨道同一种样式，主机对话框也用它（工单 11）。
+pub use controls::{OnChoose, segmented};

@@ -66,6 +66,16 @@ pub fn settings_path() -> io::Result<PathBuf> {
     Ok(dir.join(SETTINGS_FILE))
 }
 
+/// 主机数据库的文件名（工单 11）：主机、凭据、命令片段，不含任何秘密。
+pub const DATABASE_FILE: &str = "qishell.db";
+
+/// 主机数据库的路径。数据目录还不存在时先建好；建不了就返回错误，由调用方报告。
+pub fn database_path() -> io::Result<PathBuf> {
+    let dir = data_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(DATABASE_FILE))
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;

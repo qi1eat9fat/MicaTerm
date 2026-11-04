@@ -8,7 +8,11 @@ use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use qishell_hosts::HostData;
+use qishell_hosts::secrets::{InMemorySecretStore, SharedSecretStore};
 use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportProvider};
+
+use crate::host::{HostList, HostStore, HostStoreEvent};
 
 use super::handlers;
 use super::host_sidebar::render_host_sidebar;
@@ -31,6 +35,13 @@ use crate::theme::{GAP, Tokens};
 pub struct WorkspaceServices {
     /// 本地终端的传输：生产是本机 PTY，测试注入假的。
     pub local_terminals: SharedLocalTerminalTransportProvider,
+    /// 主机数据（工单 11）：生产从数据目录的 `qishell.db` 读，打不开时是给用户看的原因
+    /// （这次运行改用只在内存里的空数据）；测试注入 `HostData::seed()` 或内存数据库。
+    /// 窗口壳构造时把它取走、建成 `HostStore`，之后这里只剩一份空的。
+    pub hosts: Result<HostData, SharedString>,
+    /// 密码、口令、私钥存在哪里（工单 11）：主机数据把秘密写到这里。
+    /// 保险库（工单 10、13）接上之前，生产也是只在内存里的存储；测试注入 `InMemorySecretStore`。
+    pub secrets: SharedSecretStore,
 }
 
 impl WorkspaceServices {
@@ -39,6 +50,8 @@ impl WorkspaceServices {
     pub fn new() -> Self {
         Self {
             local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
+            hosts: crate::host::load_hosts(),
+            secrets: std::sync::Arc::new(InMemorySecretStore::default()),
         }
     }
 }
@@ -63,6 +76,10 @@ pub struct Workspace {
     pub(super) tab_rail: TabRail,
     /// 窗口在不在前：不在前时哪张卡片用户都看不到（橙点，`notices`）。
     pub(super) window_active: bool,
+    /// 主机数据（工单 11），主机栏和各个对话框都观察它。
+    pub(super) hosts: Entity<HostStore>,
+    /// 主机栏里的搜索框和主机列表（工单 11）。
+    pub(super) host_list: Entity<HostList>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -79,11 +96,14 @@ impl Workspace {
     /// 注入式构造：窗口壳用 `services` 里的服务，而不是自己去建。
     pub fn new_with_services(
         settings: Entity<SettingsStore>,
-        services: WorkspaceServices,
+        mut services: WorkspaceServices,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let subscriptions = vec![
+        let focus_handle = cx.focus_handle();
+        let (hosts, host_list, host_subscriptions) =
+            Self::open_hosts(&mut services, &focus_handle, window, cx);
+        let mut subscriptions = vec![
             // 设置写不进文件时告诉用户，不静默吞掉。
             cx.subscribe_in(
                 &settings,
@@ -111,6 +131,7 @@ impl Workspace {
             // 切标签、放大还原、关卡片……窗口壳一变，就看看哪些卡片又看得见了。
             cx.observe_self(|this, cx| this.see_cards(cx)),
         ];
+        subscriptions.extend(host_subscriptions);
         apply(&settings.read(cx).settings(), window, cx);
         // 点终端的系统通知，回到那张卡片。
         Self::listen_for_notice_clicks(window, cx);
@@ -118,7 +139,7 @@ impl Workspace {
         // 启动时没有标签：开始卡片持有焦点。
         start_card_focus.focus(window, cx);
         Self {
-            focus_handle: cx.focus_handle(),
+            focus_handle,
             start_card_focus,
             settings,
             services,
@@ -128,8 +149,65 @@ impl Workspace {
             notice_times: NoticeTimes::default(),
             tab_rail: TabRail::default(),
             window_active: window.is_window_active(),
+            hosts,
+            host_list,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// 把注入的主机数据建成 `HostStore` 和主机栏的列表；写不进数据库、保险库时弹出错误通知。
+    /// 数据库打不开时用只在内存里的空数据，并告诉用户这次的改动不会保存。
+    fn open_hosts(
+        services: &mut WorkspaceServices,
+        target: &FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<HostStore>, Entity<HostList>, Vec<Subscription>) {
+        let data = match std::mem::replace(&mut services.hosts, Ok(HostData::empty())) {
+            Ok(data) => data,
+            Err(problem) => {
+                // 窗口还没挂上 `Root`，等下一帧再弹。
+                window.defer(cx, move |window, cx| {
+                    window.push_notification(Notification::error(problem), cx);
+                });
+                HostData::empty()
+            }
+        };
+        let secrets = services.secrets.clone();
+        let hosts = cx.new(|_| HostStore::new(data.with_secrets(secrets)));
+        let failures = cx.subscribe_in(
+            &hosts,
+            window,
+            |_, _, event: &HostStoreEvent, window, cx| match event {
+                HostStoreEvent::PersistFailed(message) => {
+                    window.push_notification(Notification::error(message.clone()), cx);
+                }
+            },
+        );
+        let host_list = cx.new(|cx| HostList::new(hosts.clone(), target.clone(), window, cx));
+        // 主机栏标题里的「主机 N」跟着变。
+        let changes = cx.observe(&hosts, |_, _, cx| cx.notify());
+        (hosts, host_list, vec![failures, changes])
+    }
+
+    /// 主机数据（工单 11）。
+    pub fn host_store(&self) -> &Entity<HostStore> {
+        &self.hosts
+    }
+
+    /// 主机栏里选中的主机。
+    pub fn selected_host(&self, cx: &App) -> Option<qishell_hosts::HostId> {
+        self.host_list.read(cx).selected_host()
+    }
+
+    /// 主机栏搜索时高亮的主机。
+    pub fn highlighted_host(&self, cx: &App) -> Option<qishell_hosts::HostId> {
+        self.host_list.read(cx).highlighted_host(cx)
+    }
+
+    /// 主机栏列出的主机，从上到下（搜索时只有匹配的）。
+    pub fn listed_hosts(&self, cx: &App) -> Vec<qishell_hosts::HostId> {
+        self.host_list.read(cx).listed_hosts(cx)
     }
 
     /// 设置。
@@ -307,6 +385,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_cards_actions(root, cx))
             .map(|root| handlers::bind_terminal_actions(root, cx))
             .map(|root| handlers::bind_settings_actions(root, cx))
+            .map(|root| handlers::bind_hosts_actions(root, cx))
             .relative()
             .flex()
             .size_full()
@@ -318,7 +397,12 @@ impl Render for Workspace {
                 linear_color_stop(tokens.bg_bottom, 1.),
             ))
             .when(self.host_sidebar_open, |root| {
-                root.child(render_host_sidebar(&target, &tokens))
+                root.child(render_host_sidebar(
+                    self.hosts.read(cx).hosts().len(),
+                    self.host_list.clone(),
+                    &target,
+                    &tokens,
+                ))
             })
             .child(main)
             .children(Root::render_sheet_layer(window, cx))

@@ -32,8 +32,12 @@ dunce = "1"
 rust-i18n = "4.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 从保险库读出来的密码用完清零（工单 11）。
+zeroize = "1"
 # 终端引擎、视图和本地 PTY（拷自 shell-rs，见 crates/qishell-terminal）。
 qishell-terminal = { path = "crates/qishell-terminal" }
+# 主机、凭据、命令片段的模型和写穿的数据库（拷自 shell-rs，见 crates/qishell-hosts）。
+qishell-hosts = { path = "crates/qishell-hosts" }
 
 # Windows 可执行文件里的图标与版本信息（build.rs）。
 [target.'cfg(windows)'.build-dependencies]
@@ -45,6 +49,8 @@ gpui-kit = { version = "0.6.1", features = ["test-support"] }
 async-channel = "2"
 regex = "1"
 tempfile = "3"
+# 内存数据库夹具 `HostDatabase::in_memory`（工单 11）。
+qishell-hosts = { path = "crates/qishell-hosts", features = ["testing"] }
 
 [profile.release]
 lto = "thin"

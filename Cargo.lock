@@ -6020,6 +6020,7 @@ dependencies = [
  "async-channel",
  "dunce",
  "gpui-kit",
+ "qishell-hosts",
  "qishell-terminal",
  "regex",
  "rust-i18n",

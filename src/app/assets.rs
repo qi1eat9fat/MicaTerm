@@ -68,6 +68,50 @@ fn brand_icon(path: &str) -> Option<Cow<'static, [u8]>> {
         .map(|(_, bytes)| Cow::Borrowed(*bytes))
 }
 
+/// 主机的系统徽章（工单 11）：每个 `HostOs` 一个文件，路径就是 `HostOs::icon_path()`。
+/// 来自 shell-rs 的 assets/icons/os/（Simple Icons，CC0；Windows 那个是 shell-rs 自己画的），
+/// 许可见 `assets/icons/os/LICENSE.md`。
+macro_rules! os_icons {
+    ($($name:literal),* $(,)?) => {
+        const OS_ICONS: &[(&str, &[u8])] = &[
+            $((
+                concat!("icons/os/", $name, ".svg"),
+                include_bytes!(concat!("../../assets/icons/os/", $name, ".svg")),
+            )),*
+        ];
+    };
+}
+
+os_icons!(
+    "almalinux",
+    "alpinelinux",
+    "apple",
+    "archlinux",
+    "centos",
+    "debian",
+    "fedora",
+    "freebsd",
+    "gentoo",
+    "kalilinux",
+    "linux",
+    "manjaro",
+    "netbsd",
+    "openbsd",
+    "opensuse",
+    "raspberrypi",
+    "redhat",
+    "rockylinux",
+    "ubuntu",
+    "windows",
+);
+
+fn os_icon(path: &str) -> Option<Cow<'static, [u8]>> {
+    OS_ICONS
+        .iter()
+        .find(|(name, _)| *name == path)
+        .map(|(_, bytes)| Cow::Borrowed(*bytes))
+}
+
 /// 图标名，凡是建 `Icon` 的地方都能用（`ExtraIcons` 和默认图标包里的都在里面）。
 pub use gpui_kit::assets::IconName as CatalogIcon;
 
@@ -85,6 +129,9 @@ impl AssetSource for AppAssets {
         if let Some(bytes) = brand_icon(path) {
             return Ok(Some(bytes));
         }
+        if let Some(bytes) = os_icon(path) {
+            return Ok(Some(bytes));
+        }
         gpui_kit::assets::Assets.load(path)
     }
 
@@ -94,6 +141,13 @@ impl AssetSource for AppAssets {
         paths.extend(TerminalIcons.list(path)?);
         paths.extend(
             BRAND_ICONS
+                .iter()
+                .map(|(name, _)| *name)
+                .filter(|name| name.starts_with(path))
+                .map(SharedString::from),
+        );
+        paths.extend(
+            OS_ICONS
                 .iter()
                 .map(|(name, _)| *name)
                 .filter(|name| name.starts_with(path))
@@ -110,6 +164,18 @@ mod tests {
     use gpui_kit::AssetSource as _;
 
     use super::AppAssets;
+
+    /// 每种系统的徽章图标都加载得出来（工单 11）。
+    #[test]
+    fn every_host_os_icon_loads() {
+        for os in qishell_hosts::HostOs::ALL {
+            let bytes = AppAssets.load(os.icon_path()).unwrap();
+            assert!(
+                bytes.is_some_and(|bytes| bytes.starts_with(b"<svg")),
+                "{os:?}"
+            );
+        }
+    }
 
     /// 程序名表里的每个图标都加载得出来：Lucide 的在 gpui-kit 的图标包里，品牌的是 QiShell 自带的。
     #[test]
