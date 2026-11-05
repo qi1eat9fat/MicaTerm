@@ -370,6 +370,51 @@ mod tests {
     }
 
     #[test]
+    fn a_named_program_replaces_the_badge_and_an_unnamed_one_keeps_it() {
+        let mut card = card(Some(HostOs::Debian));
+        assert_eq!(card.running_program(), None);
+        assert!(card.shell_command(ShellCommand::Running(Some("htop".into()))));
+        assert_eq!(card.running_program(), Some(program_of("htop")));
+        // 卡片里又开了个 shell：在提示符下一样，用系统徽章。
+        card.shell_command(ShellCommand::Running(Some("bash".into())));
+        assert_eq!(card.running_program(), None);
+        // 只知道在跑：图块还是系统徽章，但算在跑（有输出时亮绿点）。
+        card.shell_command(ShellCommand::Prompt);
+        card.shell_command(ShellCommand::Running(None));
+        let running = card.running_program().unwrap();
+        assert_eq!(running.name, card.badge().name);
+        assert!(!running.shell);
+        assert!(card.shell_command(ShellCommand::Prompt));
+        assert_eq!(card.running_program(), None);
+        // 没变的不算变。
+        assert!(!card.shell_command(ShellCommand::Prompt));
+    }
+
+    #[test]
+    fn the_hostname_probed_later_rechecks_what_was_reported_before() {
+        let mut card = card(None);
+        let report = ReportedDirectory {
+            host: Some("web-01".into()),
+            path: "/srv".into(),
+        };
+        assert!(!card.report_directory(&report));
+        assert!(card.observe_screen(Some("root@web-01: ~/x"), false));
+        assert_eq!(card.directory(), None);
+        card.apply(RemoteUpdate::Probed(ProbedHost {
+            os: "ubuntu",
+            hostname: Some("web-01".into()),
+        }));
+        assert!(card.recheck(Some(&report), Some("root@web-01: ~/x")));
+        assert_eq!(card.directory(), Some("/srv"));
+        assert_eq!(card.activity.start_directory.as_deref(), Some("/srv"));
+        assert_eq!(card.activity.title.as_deref(), Some("root@web-01: ~/x"));
+        // 重连：上一条连接说的都忘掉。
+        let (host, target) = (card.host().clone(), card.target().clone());
+        card.reconnecting(host, target);
+        assert_eq!(card.activity, RemoteActivity::default());
+    }
+
+    #[test]
     fn the_state_follows_the_terminal_and_says_why_it_ended() {
         let mut card = card(None);
         assert_eq!(

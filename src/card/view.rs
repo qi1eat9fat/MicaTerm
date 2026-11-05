@@ -324,7 +324,8 @@ impl TerminalCard {
     }
 
     /// 图块上显示的程序：前台程序；shell 在提示符下时，本地卡片是 shell 的终端图块，
-    /// 远程卡片是主机的系统徽章。远程卡片没连着时图块变灰。
+    /// 远程卡片是主机的系统徽章（拿不到程序名时也是它，还没探测出系统时是名称首字；被动解析出
+    /// 程序名后换成程序图块，工单 17）。远程卡片没连着时图块变灰。
     pub fn tile_program(&self) -> Program {
         match &self.kind {
             CardKind::Local { .. } => self
@@ -589,8 +590,8 @@ impl TerminalCard {
             .or_else(|| self.launch_directory.clone())
     }
 
-    /// 头部和标签上显示的目录：本地卡片主目录下的写成 `~` 开头；远程卡片是远程 shell 报告的目录，
-    /// 没报告过时是空的。
+    /// 头部和标签上显示的目录：本地卡片主目录下的写成 `~` 开头；远程卡片是远程报告的目录，
+    /// 没有时是窗口标题里的（工单 17），都没有时是空的。
     pub fn directory_label(&self) -> String {
         if let Some(remote) = self.remote_part() {
             return remote.directory().unwrap_or_default().to_string();

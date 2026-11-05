@@ -15,12 +15,14 @@
 //! - `host_dialog`：主机对话框（11）
 //! - `snippets`：命令片段（19）
 //! - `remote_card`：密码登录远程卡片（12）
+//! - `remote_activity`：远程卡片被动解析（17）
 
 mod support;
 
 mod host_dialog;
 mod hosts;
 mod programs;
+mod remote_activity;
 mod remote_card;
 mod settings;
 mod snippets;
