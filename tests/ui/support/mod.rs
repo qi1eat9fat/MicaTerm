@@ -21,6 +21,7 @@
 //! 元素要能被查到，需要 `.id(..)` 加 `.test_support()`；`ElementSnapshot` 里没有文字和样式，
 //! 要断言的文字放进 `aria_label`，样式类状态给实体加只读查询方法。
 
+mod hosts;
 mod terminal;
 
 pub use std::sync::Arc;
@@ -31,6 +32,7 @@ pub use gpui_kit::test::TestWindowExt;
 pub use gpui_kit::{
     Action, App, AppContext as _, ElementId, Entity, TestAppContext, WindowHandle, px, size,
 };
+pub use hosts::*;
 pub use qishell::app::{CloseCard, NewLocalTerminalTab, ToggleHostSidebar};
 pub use qishell::card::CardId;
 pub use qishell::settings::AppSettings;
@@ -62,10 +64,15 @@ pub fn settings_store() -> SettingsStore {
 
 /// 注入窗口壳的服务，全部是假实现：测试不碰真实的终端、钥匙串和网络。
 /// 后续工单每给 `WorkspaceServices` 加一项服务，就在这里填上它的假实现。
+///
+/// 各工单加字段时只改这一处；别的夹具一律写 `WorkspaceServices { 字段, ..fake_services() }`。
 pub fn fake_services() -> WorkspaceServices {
     WorkspaceServices {
         local_terminals: fake_local_terminals(),
         hosts: HostData::empty(),
+        hosts_problem: None,
+        // 秘密只在内存里（工单 11）。
+        secrets: Arc::new(qishell_hosts::secrets::InMemorySecretStore::default()),
     }
 }
 

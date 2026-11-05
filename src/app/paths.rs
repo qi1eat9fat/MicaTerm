@@ -69,7 +69,7 @@ pub fn settings_path() -> io::Result<PathBuf> {
     Ok(dir.join(SETTINGS_FILE))
 }
 
-/// 数据库 `qishell.db` 的路径。数据目录还不存在时先建好；建不了就返回错误，由调用方报告。
+/// 主机数据库的路径。数据目录还不存在时先建好；建不了就返回错误，由调用方报告。
 pub fn database_path() -> io::Result<PathBuf> {
     let dir = data_dir()?;
     std::fs::create_dir_all(&dir)?;

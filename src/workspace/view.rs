@@ -9,6 +9,7 @@ use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use qishell_hosts::secrets::{InMemorySecretStore, SharedSecretStore};
 use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportProvider};
 
 use super::handlers;
@@ -19,7 +20,7 @@ use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
 use crate::card::{CardId, StatusDot, TerminalCard};
-use crate::host::{HostData, HostDatabase, HostStore, HostStoreEvent};
+use crate::host::{HostData, HostList, HostStore, HostStoreEvent};
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
 use crate::snippets::SnippetPanel;
 use crate::split::NodeId;
@@ -35,32 +36,31 @@ pub struct WorkspaceServices {
     /// 本地终端的传输：生产是本机 PTY，测试注入假的。
     pub local_terminals: SharedLocalTerminalTransportProvider,
     /// 主机、凭据、命令片段：生产是数据目录里的 `qishell.db`，测试是内存里的（`HostData::empty`、`seed`）。
-    /// 窗口壳把它包成 `HostStore` 实体。
+    /// 窗口壳构造时把它取走、包成 `HostStore` 实体，之后这里只剩一份空的。
     pub hosts: HostData,
+    /// 数据库打不开时给用户看的原因（这次运行用的是只在内存里的空数据，改动不会保存）。
+    /// 窗口壳打开后弹出错误通知（工单 11）。
+    pub hosts_problem: Option<SharedString>,
+    /// 密码、口令、私钥存在哪里（工单 11）：主机数据把秘密写到这里。
+    /// 保险库（工单 10、13）接上之前，生产也是只在内存里的存储；测试注入 `InMemorySecretStore`。
+    pub secrets: SharedSecretStore,
 }
 
 impl WorkspaceServices {
     /// 真实的服务。
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        let (hosts, hosts_problem) = match crate::host::load_hosts() {
+            Ok(hosts) => (hosts, None),
+            Err(problem) => (HostData::empty(), Some(problem)),
+        };
         Self {
             local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
-            hosts: load_hosts(),
+            hosts,
+            hosts_problem,
+            secrets: std::sync::Arc::new(InMemorySecretStore::default()),
         }
     }
-}
-
-/// 读数据目录里的数据库。读不了就用只在内存里的空数据，本次运行照样能用。
-// 工单 11：读不了时要告诉用户（像设置那样弹通知），而不是只打一行日志。
-fn load_hosts() -> HostData {
-    let loaded = crate::app::database_path()
-        .map_err(anyhow::Error::from)
-        .and_then(|path| Ok(HostDatabase::open(&path)?))
-        .and_then(|database| Ok(HostData::load(database)?));
-    loaded.unwrap_or_else(|error| {
-        eprintln!("qishell: cannot open the host database: {error:#}");
-        HostData::empty()
-    })
 }
 
 /// 窗口壳。
@@ -83,8 +83,10 @@ pub struct Workspace {
     pub(super) tab_rail: TabRail,
     /// 窗口在不在前：不在前时哪张卡片用户都看不到（橙点，`notices`）。
     pub(super) window_active: bool,
-    /// 主机、凭据、命令片段（`services.hosts` 包成的实体）。
+    /// 主机数据（工单 11），主机栏和各个对话框都观察它。
     pub(super) hosts: Entity<HostStore>,
+    /// 主机栏里的搜索框和主机列表（工单 11）。
+    pub(super) host_list: Entity<HostList>,
     /// 右侧栏展开的面板。
     pub(super) right_panel: Option<RightPanel>,
     /// 命令片段面板（工单 19）。
@@ -109,8 +111,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let hosts = std::mem::replace(&mut services.hosts, HostData::empty());
-        let hosts = cx.new(|_| HostStore::new(hosts));
+        let focus_handle = cx.focus_handle();
+        let (hosts, host_list, host_subscriptions) =
+            Self::open_hosts(&mut services, &focus_handle, window, cx);
         let snippet_panel = SnippetPanel::new(window, cx);
         let mut subscriptions = vec![
             // 设置写不进文件时告诉用户，不静默吞掉。
@@ -140,18 +143,8 @@ impl Workspace {
             // 切标签、放大还原、关卡片……窗口壳一变，就看看哪些卡片又看得见了。
             cx.observe_self(|this, cx| this.see_cards(cx)),
         ];
-        subscriptions.extend([
-            // 主机数据写不进数据库、保险库时告诉用户；有变化就重画（命令片段面板）。
-            cx.subscribe_in(
-                &hosts,
-                window,
-                |_, _, event: &HostStoreEvent, window, cx| match event {
-                    HostStoreEvent::PersistFailed(message) => {
-                        window.push_notification(Notification::error(message.clone()), cx);
-                    }
-                },
-            ),
-            cx.observe(&hosts, |_, _, cx| cx.notify()),
+        subscriptions.extend(host_subscriptions);
+        subscriptions.push(
             // 命令片段面板的搜索框。
             cx.subscribe(
                 snippet_panel.search(),
@@ -163,7 +156,7 @@ impl Workspace {
                     }
                 },
             ),
-        ]);
+        );
         apply(&settings.read(cx).settings(), window, cx);
         // 点终端的系统通知，回到那张卡片。
         Self::listen_for_notice_clicks(window, cx);
@@ -171,7 +164,7 @@ impl Workspace {
         // 启动时没有标签：开始卡片持有焦点。
         start_card_focus.focus(window, cx);
         Self {
-            focus_handle: cx.focus_handle(),
+            focus_handle,
             start_card_focus,
             settings,
             services,
@@ -182,10 +175,58 @@ impl Workspace {
             tab_rail: TabRail::default(),
             window_active: window.is_window_active(),
             hosts,
+            host_list,
             right_panel: None,
             snippet_panel,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// 把注入的主机数据建成 `HostStore` 和主机栏的列表；写不进数据库、保险库时弹出错误通知。
+    /// 数据库打不开时用只在内存里的空数据，并告诉用户这次的改动不会保存。
+    fn open_hosts(
+        services: &mut WorkspaceServices,
+        target: &FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<HostStore>, Entity<HostList>, Vec<Subscription>) {
+        let data = std::mem::replace(&mut services.hosts, HostData::empty());
+        if let Some(problem) = services.hosts_problem.take() {
+            // 窗口还没挂上 `Root`，等下一帧再弹。
+            window.defer(cx, move |window, cx| {
+                window.push_notification(Notification::error(problem), cx);
+            });
+        }
+        let secrets = services.secrets.clone();
+        let hosts = cx.new(|_| HostStore::new(data.with_secrets(secrets)));
+        let failures = cx.subscribe_in(
+            &hosts,
+            window,
+            |_, _, event: &HostStoreEvent, window, cx| match event {
+                HostStoreEvent::PersistFailed(message) => {
+                    window.push_notification(Notification::error(message.clone()), cx);
+                }
+            },
+        );
+        let host_list = cx.new(|cx| HostList::new(hosts.clone(), target.clone(), window, cx));
+        // 主机栏标题里的「主机 N」跟着变。
+        let changes = cx.observe(&hosts, |_, _, cx| cx.notify());
+        (hosts, host_list, vec![failures, changes])
+    }
+
+    /// 主机栏里选中的主机。
+    pub fn selected_host(&self, cx: &App) -> Option<qishell_hosts::HostId> {
+        self.host_list.read(cx).selected_host()
+    }
+
+    /// 主机栏搜索时高亮的主机。
+    pub fn highlighted_host(&self, cx: &App) -> Option<qishell_hosts::HostId> {
+        self.host_list.read(cx).highlighted_host(cx)
+    }
+
+    /// 主机栏列出的主机，从上到下（搜索时只有匹配的）。
+    pub fn listed_hosts(&self, cx: &App) -> Vec<qishell_hosts::HostId> {
+        self.host_list.read(cx).listed_hosts(cx)
     }
 
     /// 设置。
@@ -378,6 +419,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_cards_actions(root, cx))
             .map(|root| handlers::bind_terminal_actions(root, cx))
             .map(|root| handlers::bind_settings_actions(root, cx))
+            .map(|root| handlers::bind_hosts_actions(root, cx))
             .map(|root| handlers::bind_snippets_actions(root, cx))
             .relative()
             .flex()
@@ -390,7 +432,12 @@ impl Render for Workspace {
                 linear_color_stop(tokens.bg_bottom, 1.),
             ))
             .when(self.host_sidebar_open, |root| {
-                root.child(render_host_sidebar(&target, &tokens))
+                root.child(render_host_sidebar(
+                    self.hosts.read(cx).hosts().len(),
+                    self.host_list.clone(),
+                    &target,
+                    &tokens,
+                ))
             })
             .child(main)
             .children(Root::render_sheet_layer(window, cx))

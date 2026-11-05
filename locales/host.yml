@@ -1,9 +1,148 @@
 _version: 2
-host.store.not_saved:
-  zh-CN: 改动没能保存到本地数据库：%{error}
-host.store.secret_not_saved:
-  zh-CN: 秘密没能写进保险库：%{error}
-host.store.secrets_unavailable:
-  zh-CN: 没有地方存放秘密
-host.store.secrets_locked:
+# 主机数据说的话（工单 11）：写不进数据库、保险库没收下
+host.store.copy_name:
+  zh-CN: "%{name} 副本"
+host.store.not_saved.new_host:
+  zh-CN: 新建主机未能保存到本地数据库：%{error}
+host.store.not_saved.save_host:
+  zh-CN: 保存主机未能保存到本地数据库：%{error}
+host.store.not_saved.delete_host:
+  zh-CN: 删除主机未能保存到本地数据库：%{error}
+host.store.not_saved.duplicate_host:
+  zh-CN: 复制主机未能保存到本地数据库：%{error}
+host.store.not_saved.host_order:
+  zh-CN: 主机的新顺序未能保存到本地数据库：%{error}
+host.store.not_saved.new_credential:
+  zh-CN: 新建凭据未能保存到本地数据库：%{error}
+host.store.not_saved.save_credential:
+  zh-CN: 保存凭据未能保存到本地数据库：%{error}
+host.store.not_saved.delete_credential:
+  zh-CN: 删除凭据未能保存到本地数据库：%{error}
+host.store.not_saved.recent:
+  zh-CN: 记录最近连接未能保存到本地数据库：%{error}
+host.store.not_saved.host_os:
+  zh-CN: 记录主机系统未能保存到本地数据库：%{error}
+host.store.not_saved.new_snippet:
+  zh-CN: 新建命令片段未能保存到本地数据库：%{error}
+host.store.not_saved.save_snippet:
+  zh-CN: 保存命令片段未能保存到本地数据库：%{error}
+host.store.not_saved.delete_snippet:
+  zh-CN: 删除命令片段未能保存到本地数据库：%{error}
+host.store.not_saved.batch:
+  zh-CN: 这批改动未能保存到本地数据库：%{error}
+host.store.secret.write:
+  zh-CN: 密码、口令或私钥未能写入保险库：%{error}
+host.store.secret.delete:
+  zh-CN: 密码、口令或私钥未能从保险库删除：%{error}
+host.store.secret.unavailable:
+  zh-CN: 这台电脑上没有可用的保险库
+host.store.secret.locked:
   zh-CN: 保险库已锁定
+host.store.open_failed:
+  zh-CN: 主机数据库打不开，这次的改动不会保存：%{error}
+host.store.newer_database:
+  zh-CN: 数据库来自更新版本的 QiShell（结构版本 %{version}，这个版本最高认 %{supported}）
+
+# 主机表单的错误
+host.draft.address:
+  zh-CN: 地址不能为空
+host.draft.port:
+  zh-CN: 端口必须是 1 到 65535 之间的数字
+host.draft.no_jump_hosts:
+  zh-CN: 请添加跳板主机
+host.draft.deleted_jump_host:
+  zh-CN: 请移除已删除的跳板主机
+host.draft.proxy_address:
+  zh-CN: 代理地址不能为空
+host.draft.proxy_port:
+  zh-CN: 代理端口必须是 1 到 65535 之间的数字
+
+# 主机栏的列表和搜索
+host.list.search:
+  zh-CN: 搜索主机
+host.list.clear_search:
+  zh-CN: 清空搜索
+host.list.no_match:
+  zh-CN: 没有匹配「%{query}」的主机
+
+# 主机右键菜单
+host.menu.connect:
+  zh-CN: 连接
+host.menu.split_right:
+  zh-CN: 在右侧分屏打开
+host.menu.split_down:
+  zh-CN: 在下方分屏打开
+host.menu.open_sftp:
+  zh-CN: 打开 SFTP
+host.menu.edit:
+  zh-CN: 编辑…
+host.menu.duplicate:
+  zh-CN: 创建副本
+host.menu.copy_ip:
+  zh-CN: 复制 IP
+host.menu.copy_host_name:
+  zh-CN: 复制主机名
+host.menu.delete:
+  zh-CN: 删除
+
+# 主机对话框
+host.dialog.title_new:
+  zh-CN: 新建主机
+host.dialog.title_edit:
+  zh-CN: 编辑主机
+host.dialog.subtitle_new:
+  zh-CN: 建好后自动选上
+host.dialog.close:
+  zh-CN: 关闭
+host.dialog.general:
+  zh-CN: 常规
+host.dialog.name:
+  zh-CN: 名称
+host.dialog.name_placeholder:
+  zh-CN: 留空时用地址
+host.dialog.address:
+  zh-CN: 地址
+host.dialog.address_placeholder:
+  zh-CN: 主机名或 IP 地址
+host.dialog.port:
+  zh-CN: 端口
+host.dialog.auth:
+  zh-CN: 认证
+host.dialog.auth_password:
+  zh-CN: 密码
+host.dialog.user:
+  zh-CN: 用户名
+host.dialog.password:
+  zh-CN: 密码
+host.dialog.password_placeholder:
+  zh-CN: 留空则每次连接时询问
+host.dialog.route:
+  zh-CN: 连接方式
+host.dialog.route_direct:
+  zh-CN: 直接
+host.dialog.notes:
+  zh-CN: 备注
+host.dialog.notes_placeholder:
+  zh-CN: 写点什么，悬停主机时显示
+host.dialog.test_connection:
+  zh-CN: 测试连接
+host.dialog.cancel:
+  zh-CN: 取消
+host.dialog.save:
+  zh-CN: 保存
+
+# 删除主机的确认
+host.delete.title:
+  zh-CN: 删除主机
+host.delete.question:
+  zh-CN: 确定删除「%{name}」吗？
+host.delete.jump_users:
+  zh-CN: 有 %{count} 台主机把它当作跳板：
+host.delete.jump_users_after:
+  zh-CN: 删除后，这些主机的跳板列表里会留一项「已删除的主机」，连接时直接报错。
+host.delete.cards_stay:
+  zh-CN: 已打开的卡片不受影响。
+host.delete.cancel:
+  zh-CN: 取消
+host.delete.confirm:
+  zh-CN: 删除
