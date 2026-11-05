@@ -14,6 +14,7 @@
 //! - `tabs`：标签列表的纯逻辑、终端标签、标签轨道里的标签；
 //! - `host`：主机核心（`qishell-hosts`）包成 GPUI 实体 `HostStore`；
 //! - `snippets`：命令片段面板和对话框；
+//! - `credential`：凭据面板、凭据对话框和删除凭据的确认（工单 14）；
 //! - `secrets`：系统钥匙串（只存保险库的数据密钥）和打开数据目录里的保险库；
 //! - `vault`：保险库的界面（工单 13）：状态、设置主密码框、解锁小卡片、重置，和用到秘密之前弹哪个框；
 //! - `workspace`：窗口壳，持有全部 action 的处理器（`workspace/handlers/` 按领域分文件）。
@@ -22,6 +23,7 @@ pub mod app;
 pub mod backend;
 pub mod card;
 pub mod connect;
+pub mod credential;
 pub mod host;
 pub mod i18n;
 pub mod programs;

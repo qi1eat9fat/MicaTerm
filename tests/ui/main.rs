@@ -20,9 +20,11 @@
 //! - `route`：跳板与代理（15）
 //! - `vault`：保险库界面（13）
 //! - `remote_activity`：远程卡片被动解析（17）
+//! - `credentials`：凭据（14）
 
 mod support;
 
+mod credentials;
 mod host_dialog;
 mod hosts;
 mod programs;

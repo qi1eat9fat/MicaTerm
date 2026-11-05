@@ -24,6 +24,7 @@ use crate::backend::{
     SharedConnectionTester, SharedRemoteTerminals, SshConnectionTester, SshRemoteTerminals,
 };
 use crate::card::{CardId, StatusDot, TerminalCard};
+use crate::credential::CredentialPanel;
 use crate::host::{HostData, HostList, HostStore, HostStoreEvent};
 use crate::i18n::t;
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
@@ -143,6 +144,8 @@ pub struct Workspace {
     pub(super) prompts: PromptQueue,
     /// 保险库（工单 13），也装成了全局量，对话框和设置页经 `VaultStore::global` 找到它。
     pub(super) vault: Entity<VaultStore>,
+    /// 凭据面板（工单 14）。
+    pub(super) credential_panel: Entity<CredentialPanel>,
     /// 一直收连接表的事件（工单 12）。
     _remote_events: Task<()>,
     /// 开着的快速连接弹层（工单 18）。
@@ -226,6 +229,10 @@ impl Workspace {
         // 启动时没有标签：开始卡片持有焦点。
         start_card_focus.focus(window, cx);
         let remote_events = Self::listen_for_remote_events(&services, window, cx);
+        let credential_panel = {
+            let (hosts, vault, target) = (hosts.clone(), vault.clone(), focus_handle.clone());
+            cx.new(|cx| CredentialPanel::new(hosts, vault, target, cx))
+        };
         Self {
             focus_handle,
             start_card_focus,
@@ -243,6 +250,7 @@ impl Workspace {
             snippet_panel,
             prompts: PromptQueue::default(),
             vault,
+            credential_panel,
             _remote_events: remote_events,
             quick_connect: None,
             quick_connect_anchor: Default::default(),
@@ -513,8 +521,7 @@ impl Render for Workspace {
                     .child(content)
                     .children(self.right_panel.map(|panel| match panel {
                         RightPanel::Snippets => self.render_snippet_panel(&tokens, cx),
-                        // 凭据面板在工单 14 接上。
-                        RightPanel::Credentials => div().into_any_element(),
+                        RightPanel::Credentials => self.credential_panel.clone().into_any_element(),
                     }))
                     .child(render_right_sidebar(self.right_panel, &target, &tokens)),
             );
@@ -532,6 +539,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_remote_actions(root, cx))
             .map(|root| handlers::bind_quick_connect_actions(root, cx))
             .map(|root| handlers::bind_vault_actions(root, cx))
+            .map(|root| handlers::bind_credentials_actions(root, cx))
             .relative()
             .flex()
             .size_full()
