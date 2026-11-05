@@ -16,6 +16,12 @@ pub const MAX_STACKED_TILES: usize = 3;
 
 /// 一块图块：`glyph` 为假时只画底色（叠在后面的那几块）。
 fn tile(program: &Program, glyph: bool, tokens: &Tokens) -> Div {
+    // 断开时变灰：灰底白字（原型 `.tile i.off`）。
+    let (background, ink): (Hsla, Hsla) = if program.off {
+        (tokens.offline, rgb(0xffffff).into())
+    } else {
+        (rgb(program.tile_bg).into(), rgb(program.tile_fg).into())
+    };
     div()
         .flex()
         .flex_none()
@@ -24,9 +30,9 @@ fn tile(program: &Program, glyph: bool, tokens: &Tokens) -> Div {
         .w(TILE_WIDTH)
         .h(TILE_HEIGHT)
         .rounded(px(4.5))
-        .bg(rgb(program.tile_bg))
-        .text_color(rgb(program.tile_fg))
-        .when(program.border, |tile| {
+        .bg(background)
+        .text_color(ink)
+        .when(program.border && !program.off, |tile| {
             tile.border(px(0.5)).border_color(hsla(0., 0., 0., 0.12))
         })
         .shadow(vec![
@@ -45,8 +51,12 @@ fn tile(program: &Program, glyph: bool, tokens: &Tokens) -> Div {
                 inset: false,
             },
         ])
-        .when(glyph, |tile| {
-            tile.child(Icon::default().path(program.glyph).size(px(11.)))
+        .when(glyph, |tile| match &program.letter {
+            Some(letter) => tile
+                .text_size(px(10.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(letter.clone()),
+            None => tile.child(Icon::default().path(program.glyph).size(px(11.))),
         })
 }
 

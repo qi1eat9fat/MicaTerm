@@ -1,13 +1,14 @@
 //! 主机的处理器（工单 11）：新建、编辑、创建副本、复制地址、删除、拖动排序、聚焦主机搜索。
 //!
-//! 连接类的 action（`ConnectHost`、`ConnectHostRight`、`ConnectHostDown`、`OpenHostSftp`）
-//! 的处理器由后面的工单加在这里（12、16、M3），主机栏和右键菜单已经在派发它们。
+//! 连接类的 action：`ConnectHost`（12，在新标签里连接）在这里；`ConnectHostRight`、`ConnectHostDown`
+//! 由 16 加（经 `open_remote_card` 建卡片再分屏），`OpenHostSftp` 由 M3 加。
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 
 use crate::app::{
-    CopyHostAddress, DeleteHost, DuplicateHost, EditHost, FocusHostSearch, MoveHost, NewHost,
+    ConnectHost, CopyHostAddress, DeleteHost, DuplicateHost, EditHost, FocusHostSearch, MoveHost,
+    NewHost,
 };
 use crate::host::{open_delete_host_dialog, open_host_dialog};
 use crate::workspace::Workspace;
@@ -23,16 +24,28 @@ pub(in crate::workspace) fn bind_hosts_actions(
         .on_action(cx.listener(Workspace::on_delete_host))
         .on_action(cx.listener(Workspace::on_move_host))
         .on_action(cx.listener(Workspace::on_focus_host_search))
+        .on_action(cx.listener(Workspace::on_connect_host))
 }
 
 impl Workspace {
+    /// 在新标签里连接主机（双击、回车、右键菜单「连接」）：已经连着就复用连接，不重新登录。
+    fn on_connect_host(
+        &mut self,
+        &ConnectHost(id): &ConnectHost,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.connect_host(id, window, cx);
+    }
+
     /// 新建主机（主机栏「主机 N」后面的「+」、Ctrl+Shift+N、开始卡片的「新建主机」）。
     /// 已经开着对话框时不再叠一个。
     fn on_new_host(&mut self, _: &NewHost, window: &mut Window, cx: &mut Context<Self>) {
         if window.has_active_dialog(cx) {
             return;
         }
-        open_host_dialog(self.hosts.clone(), None, window, cx);
+        let tester = self.services.connection_tester.clone();
+        open_host_dialog(self.hosts.clone(), None, tester, window, cx);
     }
 
     fn on_edit_host(
@@ -44,7 +57,8 @@ impl Workspace {
         if window.has_active_dialog(cx) || self.hosts.read(cx).host(id).is_none() {
             return;
         }
-        open_host_dialog(self.hosts.clone(), Some(id), window, cx);
+        let tester = self.services.connection_tester.clone();
+        open_host_dialog(self.hosts.clone(), Some(id), tester, window, cx);
     }
 
     /// 创建副本：名称后加「 副本」，不带密码，插在原主机后面；主机栏自动选上它。

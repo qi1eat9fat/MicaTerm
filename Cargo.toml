@@ -40,6 +40,15 @@ qishell-terminal = { path = "crates/qishell-terminal" }
 qishell-hosts = { path = "crates/qishell-hosts" }
 # 系统钥匙串（Windows 凭据管理器、macOS 钥匙串、Secret Service）：只存保险库的数据密钥。
 keyring = "4"
+# SSH 连接（拷自 shell-rs，见 crates/qishell-ssh）：远程卡片和「测试连接」都经它登录（工单 12）。
+qishell-ssh = { path = "crates/qishell-ssh" }
+# 错误链里 russh 自己的错误（超时、算法谈不拢）要认出来翻成中文；和 qishell-ssh 用同一版。
+russh = "0.63"
+# 共享连接跑在 backend 自己的多线程运行时上：卡片关了连接不跟着断（工单 12）。
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net"] }
+# 远程终端把连接的事件（问答、延迟、系统）送到窗口壳；测试连接的问答用一次性通道。
+async-channel = "2"
+futures = "0.3"
 
 # Windows 可执行文件里的图标与版本信息（build.rs）。
 [target.'cfg(windows)'.build-dependencies]
@@ -47,8 +56,8 @@ winresource = "0.1"
 
 [dev-dependencies]
 gpui-kit = { version = "0.6.1", features = ["test-support"] }
-# 假终端传输往终端发事件用。
-async-channel = "2"
+# 进程内的 SSH 测试服务器（`qishell_ssh::testing`），backend 的连接测试用。
+qishell-ssh = { path = "crates/qishell-ssh", features = ["testing"] }
 # 测试用内存数据库（`HostDatabase::in_memory`）。
 qishell-hosts = { path = "crates/qishell-hosts", features = ["testing"] }
 regex = "1"

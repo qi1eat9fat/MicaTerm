@@ -12,6 +12,9 @@
 //! - `notes`：备注。
 //!
 //! 校验：出错的字段描红，下面写原因，保存失败时对话框不关闭。
+//!
+//! 「测试连接」（工单 12）用表单里现在的值真的登录一次（`ConnectionTester`），第一次见到的主机密钥
+//! 叠一个确认框问；结果写在按钮旁边。
 
 mod auth;
 mod delete;
@@ -20,14 +23,15 @@ mod general;
 mod notes;
 mod route;
 
+use gpui_kit::component::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Icon, IconName, Sizable as _, WindowExt as _};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use qishell_hosts::{AuthKind, HostDraft, HostDraftError, HostId, SSH_PORT};
+use futures::FutureExt as _;
+use qishell_hosts::{AuthKind, Host, HostDraft, HostDraftError, HostId, SSH_PORT};
 
 pub use auth::{AUTH_CHOICE, FIELD_PASSWORD, FIELD_USER};
 pub use delete::open_delete_host_dialog;
@@ -42,14 +46,16 @@ use self::notes::NotesSection;
 use self::route::RouteSection;
 use super::describe::ErrorMessage as _;
 use super::store::HostStore;
+use crate::backend::{
+    ConnectionPromptKind, ConnectionPromptReply, LoginTest, SharedConnectionTester, TrustAsker,
+    UnknownHostPrompt,
+};
+use crate::connect::open_prompt_dialog;
 use crate::i18n::t;
 use crate::theme::Tokens;
 
 /// 对话框的键上下文。
 pub const HOST_DIALOG_KEY_CONTEXT: &str = "HostDialog";
-
-/// 「测试连接」按钮：工单 12 接上连接测试器后改成 `true`。
-const SHOW_TEST_CONNECTION: bool = false;
 
 /// 对话框的宽（原型 `.dlg.B`）和最高高度。
 const WIDTH: Pixels = px(500.);
@@ -67,14 +73,24 @@ pub struct HostDialog {
     route: RouteSection,
     notes: NotesSection,
     errors: FieldErrors,
+    /// 「测试连接」用的测试器（工单 12）。
+    tester: SharedConnectionTester,
+    /// 正在测试；测试时按钮不能再点。
+    testing: Option<Task<()>>,
+    /// 上一次测试的结果：成功，或者给用户看的原因。
+    tested: Option<Result<(), SharedString>>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
+
+/// 测试连接要确认主机密钥时，问题和回答的去处。
+type TrustQuestion = (UnknownHostPrompt, futures::channel::oneshot::Sender<bool>);
 
 impl HostDialog {
     pub fn new(
         store: Entity<HostStore>,
         editing: Option<HostId>,
+        tester: SharedConnectionTester,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -119,6 +135,9 @@ impl HostDialog {
             route,
             notes,
             errors: FieldErrors::default(),
+            tester,
+            testing: None,
+            tested: None,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -129,8 +148,13 @@ impl HostDialog {
         &self.errors
     }
 
-    /// 校验并写进 store。返回对话框能不能关：出错时不关，出错的字段描红。
-    pub fn commit(&mut self, cx: &mut Context<Self>) -> bool {
+    /// 上一次「测试连接」的结果，测试用。
+    pub fn test_outcome(&self) -> Option<&Result<(), SharedString>> {
+        self.tested.as_ref()
+    }
+
+    /// 表单里现在的值，校验过的；出错时记下出错的字段，返回 `None`。
+    fn validated_draft(&mut self, cx: &mut Context<Self>) -> Option<HostDraft> {
         let mut errors = FieldErrors::default();
         let mut draft = HostDraft::new("", "", SSH_PORT, "", AuthKind::Password);
         self.general.fill(&mut draft, &mut errors, cx);
@@ -144,9 +168,69 @@ impl HostDialog {
                 None
             }
         };
-        let Some(draft) = draft.filter(|_| errors.is_empty()) else {
+        let draft = draft.filter(|_| errors.is_empty());
+        if draft.is_none() {
             self.errors = errors;
             cx.notify();
+        }
+        draft
+    }
+
+    /// 测试连接：用表单里现在的值（没保存的也算）真的登录一次再挂断。第一次见到的主机密钥叠一个
+    /// 确认框问；密钥变了只报错不问。结果写在按钮旁边。
+    fn test_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.testing.is_some() {
+            return;
+        }
+        let Some(draft) = self.validated_draft(cx) else {
+            return;
+        };
+        let name = draft.name.clone();
+        // 新建的主机还没有 id：密码条目随便哪个都行，测试只用表单里的密码。
+        let host = Host::new(self.editing.unwrap_or(HostId(0)), draft);
+        let login = self.store.read(cx).login_of(&host);
+        let request = LoginTest::new(login, &self.auth.typed_password(cx));
+        let (questions, asked) = async_channel::unbounded::<TrustQuestion>();
+        let trust: TrustAsker = std::sync::Arc::new(move |prompt| {
+            let (answer, answered) = futures::channel::oneshot::channel();
+            let _ = questions.try_send((prompt, answer));
+            async move { answered.await.unwrap_or(false) }.boxed()
+        });
+        let test = self.tester.test(request, trust);
+        self.tested = None;
+        // 问主机密钥：问题一来就叠一个确认框。测试结束、问的口子没了，这个循环也就结束。
+        cx.spawn_in(window, async move |_, cx| {
+            while let Ok((prompt, answer)) = asked.recv().await {
+                let subtitle = name.clone();
+                let _ = cx.update(|window, cx| {
+                    open_prompt_dialog(
+                        subtitle,
+                        ConnectionPromptKind::UnknownHost(prompt),
+                        move |reply, _, _| {
+                            let _ =
+                                answer.send(matches!(reply, ConnectionPromptReply::TrustAndSave));
+                        },
+                        window,
+                        cx,
+                    );
+                });
+            }
+        })
+        .detach();
+        self.testing = Some(cx.spawn(async move |this, cx| {
+            let result = test.await.map_err(SharedString::from);
+            let _ = this.update(cx, |this, cx| {
+                this.testing = None;
+                this.tested = Some(result);
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// 校验并写进 store。返回对话框能不能关：出错时不关，出错的字段描红。
+    pub fn commit(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(draft) = self.validated_draft(cx) else {
             return false;
         };
         let password = self.auth.password_change(cx);
@@ -238,11 +322,33 @@ impl HostDialog {
             .pb(px(14.))
             .pl(px(18.))
             .pr(px(14.))
-            .when(SHOW_TEST_CONNECTION, |footer| {
-                footer.child(
-                    Button::new("host-test-connection").label(t!("host.dialog.test_connection")),
-                )
-            })
+            .child(
+                Button::new("host-test-connection")
+                    .small()
+                    .label(if self.testing.is_some() {
+                        t!("host.dialog.testing")
+                    } else {
+                        t!("host.dialog.test_connection")
+                    })
+                    .disabled(self.testing.is_some())
+                    .on_click(cx.listener(|this, _, window, cx| this.test_connection(window, cx))),
+            )
+            .children(self.tested.as_ref().map(|tested| {
+                let tokens = Tokens::current(cx);
+                let (text, color) = match tested {
+                    Ok(()) => (t!("host.dialog.test_ok"), tokens.busy),
+                    Err(reason) => (t!("host.dialog.test_failed", reason = reason), tokens.bad),
+                };
+                div()
+                    .id("host-test-result")
+                    .test_support()
+                    .aria_label(text.clone())
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(12.))
+                    .text_color(color)
+                    .child(text)
+            }))
             .child(div().flex_1())
             .child(
                 Button::new("host-dialog-cancel")
@@ -319,10 +425,11 @@ impl Render for HostDialog {
 pub fn open_host_dialog(
     store: Entity<HostStore>,
     editing: Option<HostId>,
+    tester: SharedConnectionTester,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let view = cx.new(|cx| HostDialog::new(store, editing, window, cx));
+    let view = cx.new(|cx| HostDialog::new(store, editing, tester, window, cx));
     let name = view.read(cx).general.name.clone();
     window.open_dialog(cx, move |dialog, window, _| {
         let height = MAX_HEIGHT.min(window.viewport_size().height - px(40.));

@@ -411,7 +411,8 @@ impl TerminalView {
 
     /// What Enter and Space do once the connection has ended: reconnect,
     /// and close the card. Only remote cards opt in, with their own
-    /// terminal-scoped actions.
+    /// terminal-scoped actions. 提示「连接已断开 · Enter 重新连接 · Space 关闭」
+    /// 由卡片画在终端上面（工单 12），终端里不再追加一行字。
     pub fn set_ended_actions(
         &mut self,
         reconnect: impl Action,
@@ -420,8 +421,7 @@ impl TerminalView {
     ) {
         self.reconnect_action = Some(Box::new(reconnect));
         self.close_action = Some(Box::new(close));
-        self.engine
-            .update(cx, |engine, _| engine.enable_reconnect_on_enter());
+        cx.notify();
     }
 
     pub fn restart(&mut self, cx: &mut Context<Self>) {

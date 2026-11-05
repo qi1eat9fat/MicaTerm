@@ -65,6 +65,7 @@ impl Workspace {
             cx.subscribe(card, |this, card, event: &CardEvent, cx| match event {
                 CardEvent::Changed => cx.notify(),
                 CardEvent::WantsAttention => this.on_card_wants_attention(&card, cx),
+                CardEvent::Connected => this.on_remote_card_connected(&card, cx),
             }),
             cx.on_focus_in(&focus, window, move |this, _, cx| {
                 this.on_card_focused(id, cx)

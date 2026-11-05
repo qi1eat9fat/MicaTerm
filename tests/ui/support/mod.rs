@@ -22,6 +22,7 @@
 //! 要断言的文字放进 `aria_label`，样式类状态给实体加只读查询方法。
 
 mod hosts;
+mod remote;
 mod terminal;
 
 pub use std::sync::Arc;
@@ -42,6 +43,7 @@ pub use qishell::theme::Tokens;
 pub use qishell::workspace::{Workspace, WorkspaceServices};
 pub use qishell_terminal::{FixedLocalTerminalTransportProvider, LocalShell, LocalShellInfo};
 pub use qishell_terminal::{RightClick, TerminalColors, TerminalFont, TerminalInteraction};
+pub use remote::*;
 pub use terminal::*;
 // 卡片分屏（工单 05）。
 pub use gpui_kit::VisualTestContext;
@@ -73,6 +75,9 @@ pub fn fake_services() -> WorkspaceServices {
         hosts_problem: None,
         // 秘密只在内存里（工单 11）。
         secrets: Arc::new(qishell_hosts::secrets::InMemorySecretStore::default()),
+        // 远程终端不连网络，测试连接总是成功（工单 12）。
+        remote_terminals: Arc::new(FakeRemoteTerminals::default()),
+        connection_tester: Arc::new(FakeConnectionTester::succeeding()),
     }
 }
 
