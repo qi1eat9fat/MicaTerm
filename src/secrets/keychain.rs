@@ -148,7 +148,11 @@ mod tests {
         let again = open();
         assert_eq!(again.status(), VaultStatus::Unprotected);
         assert_eq!(
-            again.get(&SecretRef::password(1)).unwrap().as_deref().map(String::as_str),
+            again
+                .get(&SecretRef::password(1))
+                .unwrap()
+                .as_deref()
+                .map(String::as_str),
             Some("hunter2")
         );
 

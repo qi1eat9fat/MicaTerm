@@ -53,7 +53,11 @@ impl KdfParams {
         }
         let params = Params::new(self.memory_kib, self.passes, self.parallelism, Some(32))
             .map_err(|error| VaultError::Damaged(error.to_string()))?;
-        Ok(Argon2::new(Algorithm::Argon2id, ArgonVersion::V0x13, params))
+        Ok(Argon2::new(
+            Algorithm::Argon2id,
+            ArgonVersion::V0x13,
+            params,
+        ))
     }
 
     /// 在跑之前先检查：越界的参数直接拒绝。

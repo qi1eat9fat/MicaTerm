@@ -428,7 +428,12 @@ fn check_aad(vault_id: &[u8; 16]) -> Vec<u8> {
 
 /// 把一条秘密的密文绑在它的保险库和条目名上：挪到别的条目、别的保险库都打不开。
 fn secret_aad(vault_id: &[u8; 16], account: &str) -> Vec<u8> {
-    [b"qishell-vault secret".as_slice(), vault_id, account.as_bytes()].concat()
+    [
+        b"qishell-vault secret".as_slice(),
+        vault_id,
+        account.as_bytes(),
+    ]
+    .concat()
 }
 
 /// 手上没有数据密钥时为什么：锁着，还是丢了。

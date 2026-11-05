@@ -1,7 +1,7 @@
 // 保险库的行为测试：只经公开接口（`Vault` 的方法和它实现的 `SecretStore`）和磁盘上的 `vault.json`。
 // 钥匙串用 `InMemoryDataKeyStore`；换一个新的空实例就是「拷到了另一台电脑」。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tempfile::TempDir;
@@ -20,8 +20,13 @@ impl Computer {
         }
     }
 
-    fn open(&self, path: &PathBuf) -> Vault {
-        Vault::open(path.clone(), self.keychain.clone(), KdfParams::FAST_FOR_TESTS).unwrap()
+    fn open(&self, path: &Path) -> Vault {
+        Vault::open(
+            path.to_path_buf(),
+            self.keychain.clone(),
+            KdfParams::FAST_FOR_TESTS,
+        )
+        .unwrap()
     }
 }
 
@@ -48,12 +53,18 @@ fn without_a_master_password_secrets_open_on_this_computer() {
     vault.set_up(None, false).unwrap();
     assert_eq!(vault.status(), VaultStatus::Unprotected);
     vault.set(&SecretRef::password(1), "hunter2").unwrap();
-    assert_eq!(read(&vault, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&vault, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
 
     // 下次启动：钥匙串里有数据密钥，不用解锁。
     let again = computer.open(&path);
     assert_eq!(again.status(), VaultStatus::Unprotected);
-    assert_eq!(read(&again, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&again, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
     assert_eq!(read(&again, &SecretRef::password(2)), None);
 
     // 秘密进了 vault.json，但不是明文。
@@ -119,7 +130,10 @@ fn resetting_a_lost_vault_empties_it_and_starts_over() {
 
     lost.set_up(None, false).unwrap();
     lost.set(&SecretRef::password(1), "new one").unwrap();
-    assert_eq!(read(&elsewhere.open(&path), &SecretRef::password(1)).as_deref(), Some("new one"));
+    assert_eq!(
+        read(&elsewhere.open(&path), &SecretRef::password(1)).as_deref(),
+        Some("new one")
+    );
 }
 
 /// 重置换一个新的保险库 id，并删掉本机钥匙串里旧的数据密钥，不留残余。
@@ -131,7 +145,7 @@ fn resetting_forgets_the_old_key() {
     vault.set_up(None, false).unwrap();
     vault.set(&SecretRef::password(1), "hunter2").unwrap();
     let old_id = vault.vault_id().unwrap();
-    assert_eq!(computer.keychain.vault_ids(), [old_id.clone()]);
+    assert_eq!(computer.keychain.vault_ids(), std::slice::from_ref(&old_id));
 
     vault.reset().unwrap();
     assert_eq!(vault.vault_id(), None);
@@ -173,7 +187,10 @@ fn a_master_password_locks_the_vault_until_it_is_typed() {
     assert_eq!(again.status(), VaultStatus::Locked);
     again.unlock("correct horse", false).unwrap();
     assert_eq!(again.status(), VaultStatus::Unlocked { remembered: false });
-    assert_eq!(read(&again, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&again, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
 }
 
 /// 「在本机记住」把数据密钥（不是主密码）存进本机钥匙串：这台电脑上自动解锁；
@@ -189,13 +206,22 @@ fn a_remembered_vault_unlocks_by_itself_here_and_with_its_password_elsewhere() {
 
     let again = computer.open(&path);
     assert_eq!(again.status(), VaultStatus::Unlocked { remembered: true });
-    assert_eq!(read(&again, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&again, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
 
     let elsewhere = Computer::new().open(&path);
     assert_eq!(elsewhere.status(), VaultStatus::Locked);
     elsewhere.unlock("correct horse", true).unwrap();
-    assert_eq!(elsewhere.status(), VaultStatus::Unlocked { remembered: true });
-    assert_eq!(read(&elsewhere, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        elsewhere.status(),
+        VaultStatus::Unlocked { remembered: true }
+    );
+    assert_eq!(
+        read(&elsewhere, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
 }
 
 /// 解锁时不勾「在本机记住」，就把以前记住的那份从钥匙串里删掉。
@@ -225,14 +251,17 @@ fn locking_needs_a_master_password() {
     let (_other, unprotected_path) = data_dir();
     let unprotected = Computer::new().open(&unprotected_path);
     unprotected.set_up(None, false).unwrap();
-    assert_eq!(vault_error(unprotected.lock()), VaultError::NoMasterPassword);
+    assert_eq!(
+        vault_error(unprotected.lock()),
+        VaultError::NoMasterPassword
+    );
     assert_eq!(
         vault_error(unprotected.unlock("anything", false)),
         VaultError::NoMasterPassword
     );
 }
 
-fn written(path: &PathBuf) -> serde_json::Value {
+fn written(path: &Path) -> serde_json::Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 
@@ -249,7 +278,10 @@ fn a_master_password_set_later_keeps_the_old_secrets() {
 
     vault.set_master_password("correct horse", false).unwrap();
     assert_eq!(vault.status(), VaultStatus::Unlocked { remembered: false });
-    assert_eq!(read(&vault, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&vault, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
     assert_eq!(written(&path)["secrets"], before);
     assert!(computer.keychain.vault_ids().is_empty());
     assert_eq!(
@@ -260,7 +292,10 @@ fn a_master_password_set_later_keeps_the_old_secrets() {
     let elsewhere = Computer::new().open(&path);
     assert_eq!(elsewhere.status(), VaultStatus::Locked);
     elsewhere.unlock("correct horse", false).unwrap();
-    assert_eq!(read(&elsewhere, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&elsewhere, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
 }
 
 /// 补设主密码时勾了「在本机记住」：这台电脑上照旧自动打开。
@@ -275,7 +310,10 @@ fn a_master_password_set_later_can_stay_remembered_here() {
 
     let again = computer.open(&path);
     assert_eq!(again.status(), VaultStatus::Unlocked { remembered: true });
-    assert_eq!(read(&again, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&again, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
 }
 
 /// 更换主密码：要先给对现在的主密码；换完旧的打不开、新的打得开，秘密不重新加密，
@@ -307,11 +345,17 @@ fn changing_the_master_password_rewraps_the_same_key() {
         VaultError::WrongPassword
     );
     elsewhere.unlock("battery staple", false).unwrap();
-    assert_eq!(read(&elsewhere, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&elsewhere, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
 
     let here = computer.open(&path);
     assert_eq!(here.status(), VaultStatus::Unlocked { remembered: true });
-    assert_eq!(read(&here, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&here, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
 }
 
 /// 锁着也能换主密码：核对通过就解锁了。没设主密码的保险库没有主密码可换。
@@ -470,12 +514,18 @@ fn writes_replace_the_file_in_one_step() {
     assert!(vault.set(&SecretRef::password(2), "new").is_err());
     assert!(vault.delete(&SecretRef::password(1)).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
-    assert_eq!(read(&vault, &SecretRef::password(1)).as_deref(), Some("hunter2"));
+    assert_eq!(
+        read(&vault, &SecretRef::password(1)).as_deref(),
+        Some("hunter2")
+    );
     assert!(!vault.contains(&SecretRef::password(2)));
 
     std::fs::remove_dir(&temporary).unwrap();
     vault.set(&SecretRef::password(1), "changed").unwrap();
-    assert_eq!(read(&vault, &SecretRef::password(1)).as_deref(), Some("changed"));
+    assert_eq!(
+        read(&vault, &SecretRef::password(1)).as_deref(),
+        Some("changed")
+    );
 }
 
 /// 删除不需要数据密钥：锁着时删主机，它的密码照样从保险库里删掉。
