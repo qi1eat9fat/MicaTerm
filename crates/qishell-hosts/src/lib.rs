@@ -42,7 +42,8 @@ pub use login::{
 pub use mark::mark_color;
 pub use model::*;
 pub use private_key::{
-    GeneratedKey, KeyAlgorithm, PastedKey, PastedKeyError, read_public_key, read_small,
+    GeneratedKey, KeyAlgorithm, PastedKey, PastedKeyError, key_algorithm, read_public_key,
+    read_small,
 };
 pub use secrets::{SecretRef, SecretStore, SharedSecretStore, StoreSource};
 pub use snippet::*;
