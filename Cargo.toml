@@ -68,3 +68,6 @@ ttf-parser = { opt-level = 3 }
 resvg = { opt-level = 3 }
 usvg = { opt-level = 3 }
 zed-font-kit = { opt-level = 3 }
+# 保险库的 Argon2id：不优化时 64 MiB、3 遍要好几秒（照 shell-rs）。
+argon2 = { opt-level = 3 }
+blake2 = { opt-level = 3 }
