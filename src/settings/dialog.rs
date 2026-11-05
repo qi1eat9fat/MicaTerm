@@ -47,6 +47,11 @@ const CATEGORIES: &[Category] = &[
         icon: CatalogIcon::Terminal,
         page: pages::terminal,
     },
+    Category {
+        title: "settings.category.security",
+        icon: CatalogIcon::Shield,
+        page: super::security::security,
+    },
 ];
 
 /// 设置对话框的内容。每次打开新建一个。
@@ -69,6 +74,10 @@ impl SettingsDialog {
     pub fn new(store: Entity<SettingsStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let local_shell = cx.new(|cx| LocalShellEditor::new(store.clone(), window, cx));
         let mut subscriptions = vec![cx.observe(&store, |_, _, cx| cx.notify())];
+        // 设置 › 安全跟着保险库的状态变（工单 13）。
+        if let Some(vault) = crate::vault::VaultStore::global(cx) {
+            subscriptions.push(cx.observe(&vault, |_, _, cx| cx.notify()));
+        }
         let (terminal_font_size, font_size_subscriptions) =
             pages::terminal_font_size_field(&store, window, cx);
         let (terminal_line_height, line_height_subscriptions) =

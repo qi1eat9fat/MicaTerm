@@ -253,6 +253,22 @@ impl HostDialog {
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 要写密码而保险库还收不下（第一次保存、锁着、打不开）：先弹保险库的框，好了再保存，
+        // 取消了对话框照旧开着（工单 13）。
+        if self.auth.writes_password(cx)
+            && crate::vault::asks_before_saving(cx)
+            && self.validated_draft(cx).is_some()
+        {
+            let this = cx.entity().downgrade();
+            crate::vault::before_saving_secret(window, cx, move |window, cx| {
+                this.update(cx, |this, cx| this.save_now(window, cx)).ok();
+            });
+            return;
+        }
+        self.save_now(window, cx);
+    }
+
+    fn save_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.commit(cx) {
             window.close_dialog(cx);
         }

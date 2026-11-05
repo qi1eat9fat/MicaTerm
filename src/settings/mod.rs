@@ -10,6 +10,7 @@ mod dialog;
 mod local_shell_editor;
 mod model;
 mod pages;
+mod security;
 mod store;
 mod terminal_themes;
 

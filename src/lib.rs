@@ -30,6 +30,7 @@ pub mod snippets;
 pub mod split;
 pub mod tabs;
 pub mod theme;
+pub mod vault;
 pub mod workspace;
 
 // 全部文案，来自 `locales/`：见 `i18n`。

@@ -15,6 +15,7 @@
 //! - `host_dialog`：主机对话框（11）
 //! - `snippets`：命令片段（19）
 //! - `remote_card`：密码登录远程卡片（12）
+//! - `vault`：保险库界面（13）
 
 mod support;
 
@@ -28,4 +29,5 @@ mod split;
 mod tabs;
 mod terminal_card;
 mod terminal_input;
+mod vault;
 mod window;
