@@ -15,6 +15,7 @@
 //! - `host_dialog`：主机对话框（11）
 //! - `snippets`：命令片段（19）
 //! - `remote_card`：密码登录远程卡片（12）
+//! - `route`：跳板与代理（15）
 
 mod support;
 
@@ -22,6 +23,7 @@ mod host_dialog;
 mod hosts;
 mod programs;
 mod remote_card;
+mod route;
 mod settings;
 mod snippets;
 mod split;

@@ -40,3 +40,5 @@ pub use qishell_ssh::{
     ConnectionPromptReply, ConnectionSecret, HostKeyChangedPrompt, HostLogin, Latency, ProbedHost,
     UnknownHostPrompt,
 };
+// 跳板和代理的路线（工单 15）。
+pub use qishell_ssh::{JumpLogin, LoginRoute};
