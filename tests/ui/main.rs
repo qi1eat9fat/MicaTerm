@@ -18,6 +18,7 @@
 //! - `quick_connect`：快速连接与最近连接（18）
 //! - `split_remote`：分屏复用连接（16）
 //! - `route`：跳板与代理（15）
+//! - `vault`：保险库界面（13）
 
 mod support;
 
@@ -34,4 +35,5 @@ mod split_remote;
 mod tabs;
 mod terminal_card;
 mod terminal_input;
+mod vault;
 mod window;

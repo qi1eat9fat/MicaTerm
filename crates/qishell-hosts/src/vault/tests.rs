@@ -575,3 +575,37 @@ fn a_key_in_the_keychain_that_does_not_fit_is_ignored() {
         .unwrap();
     assert_eq!(computer.open(&path).status(), VaultStatus::Locked);
 }
+
+/// 设置 › 安全的「在本机记住」开关：关掉就从本机钥匙串删掉数据密钥（下次启动要输主密码），
+/// 打开就存回去（下次启动自动解锁）。要打开得先解锁；没设主密码的保险库没有这个开关。
+#[test]
+fn remembering_can_be_turned_off_and_on_again() {
+    let (_dir, path) = data_dir();
+    let computer = Computer::new();
+    let vault = computer.open(&path);
+    vault.set_up(Some("correct horse"), true).unwrap();
+
+    vault.remember_here(false).unwrap();
+    assert_eq!(vault.status(), VaultStatus::Unlocked { remembered: false });
+    assert!(computer.keychain.vault_ids().is_empty());
+    assert_eq!(computer.open(&path).status(), VaultStatus::Locked);
+
+    vault.remember_here(true).unwrap();
+    assert_eq!(vault.status(), VaultStatus::Unlocked { remembered: true });
+    assert_eq!(
+        computer.open(&path).status(),
+        VaultStatus::Unlocked { remembered: true }
+    );
+
+    vault.lock().unwrap();
+    vault.remember_here(false).unwrap();
+    assert!(is_locked(vault.remember_here(true)));
+
+    let (_other, unprotected_path) = data_dir();
+    let unprotected = Computer::new().open(&unprotected_path);
+    unprotected.set_up(None, false).unwrap();
+    assert_eq!(
+        vault_error(unprotected.remember_here(false)),
+        VaultError::NoMasterPassword
+    );
+}

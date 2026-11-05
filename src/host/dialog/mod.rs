@@ -263,6 +263,31 @@ impl HostDialog {
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 要写密码（主机的、代理的）而保险库还收不下（第一次保存、锁着、打不开）：先弹保险库的框，
+        // 好了再保存，取消了对话框照旧开着（工单 13）。
+        if crate::vault::asks_before_saving(cx) && self.writes_secret(cx) {
+            let this = cx.entity().downgrade();
+            crate::vault::before_saving_secret(window, cx, move |window, cx| {
+                this.update(cx, |this, cx| this.save_now(window, cx)).ok();
+            });
+            return;
+        }
+        self.save_now(window, cx);
+    }
+
+    /// 表单校验得过、保存时要往保险库里写秘密（主机密码或代理密码）。
+    fn writes_secret(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(draft) = self.validated_draft(cx) else {
+            return false;
+        };
+        self.auth.writes_password(cx)
+            || matches!(
+                self.route.proxy_password_change(&draft.route, cx),
+                Some((_, Some(_)))
+            )
+    }
+
+    fn save_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.commit(cx) {
             window.close_dialog(cx);
         }
