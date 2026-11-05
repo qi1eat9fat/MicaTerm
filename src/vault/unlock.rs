@@ -12,9 +12,9 @@ use zeroize::Zeroizing;
 use super::reply::{Reply, close_and_reply, open_small_dialog};
 use super::store::{VaultStore, describe};
 use crate::app::CatalogIcon;
-use crate::host::dialog::form::{FieldErrors, text_input};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::form::{FieldErrors, text_input};
 
 pub const FIELD_UNLOCK: &str = "vault-unlock-password";
 

@@ -18,9 +18,9 @@ use qishell_hosts::VaultStatus;
 use super::reply::{Reply, close_and_reply, open_small_dialog};
 use super::store::{VaultStore, describe, is_wrong_password};
 use crate::app::CatalogIcon;
-use crate::host::dialog::form::{FieldErrors, FieldNote, form_field, text_input};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::form::{FieldErrors, FieldNote, form_field, text_input};
 
 pub const FIELD_CURRENT: &str = "vault-current-password";
 pub const FIELD_MASTER: &str = "vault-master-password";

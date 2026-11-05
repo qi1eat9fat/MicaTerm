@@ -18,7 +18,6 @@
 
 mod auth;
 mod delete;
-pub mod form;
 mod general;
 mod notes;
 mod route;
@@ -47,7 +46,6 @@ pub use route::{
 };
 
 use self::auth::AuthSection;
-use self::form::FieldErrors;
 use self::general::GeneralSection;
 use self::notes::NotesSection;
 use self::route::RouteSection;
@@ -61,6 +59,7 @@ use crate::connect::open_prompt_dialog;
 use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
+use crate::ui::form::FieldErrors;
 
 /// 对话框的键上下文。
 pub const HOST_DIALOG_KEY_CONTEXT: &str = "HostDialog";

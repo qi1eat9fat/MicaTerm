@@ -6,9 +6,9 @@ use gpui_kit::*;
 use qishell_hosts::HostDraft;
 
 use super::HostDialog;
-use super::form::{FieldErrors, form_group};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::form::{FieldErrors, form_group};
 
 pub const FIELD_NOTES: &str = "host-notes";
 

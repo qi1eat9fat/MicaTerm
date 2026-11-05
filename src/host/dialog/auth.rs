@@ -24,11 +24,11 @@ use zeroize::Zeroizing;
 use qishell_hosts::{AuthKind, Credential, CredentialId, HostDraft, SecretRef};
 
 use super::HostDialog;
-use super::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret, text_input};
 use crate::host::HostStore;
 use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
 use crate::theme::Tokens;
+use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret, text_input};
 use crate::vault::{VaultStatus, VaultStore};
 
 pub const FIELD_USER: &str = "host-user";

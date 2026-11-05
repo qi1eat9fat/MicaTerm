@@ -8,7 +8,6 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::host::{HostStore, SnippetDraft, SnippetDraftError, SnippetId};
@@ -16,11 +15,10 @@ use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Confirm, ConfirmLine, open_confirm_dialog};
+use crate::ui::form::{FieldNote, form_field};
 
 /// 对话框宽约 500（spec 第 4 节「编辑表单」）。
 const DIALOG_WIDTH: Pixels = px(500.);
-/// 字段名那一栏的宽（`.fr` 的 76）。
-const LABEL_WIDTH: Pixels = px(76.);
 
 /// 对话框的表单。保存时校验，过了才碰存储。
 pub struct SnippetForm {
@@ -96,53 +94,42 @@ impl SnippetForm {
 impl Render for SnippetForm {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
-        let error = |field: SnippetDraftError| {
-            (self.error == Some(field)).then(|| {
-                let message = match field {
-                    SnippetDraftError::Name => t!("snippets.dialog.name_required"),
-                    SnippetDraftError::Command => t!("snippets.dialog.command_required"),
-                };
-                div()
-                    .id("snippet-form-error")
-                    .test_support()
-                    .aria_label(message.clone())
-                    .mt(px(4.))
-                    .text_size(px(11.5))
-                    .text_color(tokens.bad)
-                    .child(message)
-            })
+        // 两个字段的错误共用一个元素 id `snippet-form-error`。
+        let error = |field: SnippetDraftError| -> Vec<FieldNote> {
+            (self.error == Some(field))
+                .then(|| FieldNote::Error {
+                    field: "snippet-form",
+                    message: match field {
+                        SnippetDraftError::Name => t!("snippets.dialog.name_required"),
+                        SnippetDraftError::Command => t!("snippets.dialog.command_required"),
+                    },
+                })
+                .into_iter()
+                .collect()
         };
         div()
             .id("snippet-form")
             .flex()
             .flex_col()
-            .gap(px(10.))
             .text_size(px(12.5))
-            .child(row(
-                t!("snippets.dialog.name"),
-                false,
-                div()
-                    .child(Input::new(&self.name).id("snippet-name").small())
-                    .children(error(SnippetDraftError::Name)),
+            .child(form_field(
+                Some(t!("snippets.dialog.name")),
+                Input::new(&self.name).id("snippet-name").small(),
+                error(SnippetDraftError::Name),
                 &tokens,
             ))
-            .child(row(
-                t!("snippets.dialog.command"),
-                true,
-                div()
-                    .child(
-                        div().id("snippet-command").test_support().w_full().child(
-                            Textarea::new(&self.command)
-                                .text_size(px(12.5))
-                                .font_family(cx.theme().mono_font_family.clone()),
-                        ),
-                    )
-                    .children(error(SnippetDraftError::Command)),
+            .child(form_field(
+                Some(t!("snippets.dialog.command")),
+                div().id("snippet-command").test_support().w_full().child(
+                    Textarea::new(&self.command)
+                        .text_size(px(12.5))
+                        .font_family(cx.theme().mono_font_family.clone()),
+                ),
+                error(SnippetDraftError::Command),
                 &tokens,
             ))
-            .child(row(
-                SharedString::default(),
-                false,
+            .child(form_field(
+                None,
                 Checkbox::new("snippet-run-on-click")
                     .label(t!("snippets.dialog.run_on_click"))
                     .checked(self.run_on_click)
@@ -151,31 +138,10 @@ impl Render for SnippetForm {
                         this.run_on_click = *checked;
                         cx.notify();
                     })),
+                Vec::new(),
                 &tokens,
             ))
     }
-}
-
-/// 表单的一行（`.fr`）：左边字段名，右边字段。`top`：字段名对齐到顶（多行的命令）。
-fn row(
-    label: SharedString,
-    top: bool,
-    field: impl IntoElement,
-    tokens: &Tokens,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .gap(px(10.))
-        .when(!top, |row| row.items_center())
-        .child(
-            div()
-                .flex_none()
-                .w(LABEL_WIDTH)
-                .when(top, |label| label.pt(px(7.)))
-                .text_color(tokens.muted)
-                .child(label),
-        )
-        .child(div().flex_1().min_w_0().child(field))
 }
 
 /// 打开新建（`editing` 为 `None`）或编辑片段的对话框。

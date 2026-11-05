@@ -26,12 +26,12 @@ use zeroize::Zeroizing;
 use qishell_hosts::{HostDraft, HostId, ProxyKind, ProxySettings, Route, SecretRef};
 
 use super::HostDialog;
-use super::form::{FieldErrors, FieldNote, form_field, text_input};
 use super::general::parse_port;
 use crate::host::HostStore;
 use crate::i18n::t;
 use crate::settings::segmented;
 use crate::theme::Tokens;
+use crate::ui::form::{FieldErrors, FieldNote, form_field, text_input};
 
 /// 连接方式的分段按钮。
 pub const ROUTE_CHOICE: &str = "host-route";
@@ -397,7 +397,7 @@ impl RouteSection {
             RouteChoice::Jump => rows.extend(self.render_jumps(errors, tokens, this_host, cx)),
             RouteChoice::Proxy => rows.extend(self.render_proxy(errors, tokens, cx)),
         }
-        super::form::form_group(t!("host.dialog.route"), rows, tokens)
+        crate::ui::form::form_group(t!("host.dialog.route"), rows, tokens)
     }
 
     /// 路线和跳板列表两行。

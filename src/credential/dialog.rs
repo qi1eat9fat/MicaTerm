@@ -30,9 +30,6 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use zeroize::Zeroizing;
 
-use crate::host::dialog::form::{
-    FieldErrors, FieldNote, form_field, form_group, locked_secret, text_input,
-};
 use crate::host::{
     CredentialDraft, CredentialDraftError, CredentialId, CredentialKind, DEFAULT_USER,
     GeneratedKey, HostStore, KeyAlgorithm, PastedKey, PastedKeyError, SecretRef, read_small,
@@ -41,6 +38,7 @@ use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
+use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret, text_input};
 use crate::vault::{VaultStore, asks_before_saving, before_saving_secret};
 
 pub const FIELD_NAME: &str = "credential-name";
