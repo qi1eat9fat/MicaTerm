@@ -45,11 +45,46 @@ fn label(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &'static str) 
 }
 
 fn click(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &'static str) {
+    reveal(cx, handle, id);
     in_frame(cx, handle, move |window, cx| window.click(id, cx));
+}
+
+/// 主机对话框放不下全部字段，要滚动：把它里面的 `id` 滚进看得见的地方（照 `route.rs` 的 `reveal`）。
+fn reveal(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &'static str) {
+    // 底部按钮不随内容滚动。
+    if !id.starts_with("host-") || id.starts_with("host-dialog") {
+        return;
+    }
+    for _ in 0..40 {
+        let place = in_frame(cx, handle, |window, _| {
+            let target = window.find(id);
+            let Some(dialog) = window.try_find("host-dialog").map(|dialog| dialog.bounds()) else {
+                return (true, false);
+            };
+            let bounds = target.bounds();
+            let shown = target.visible()
+                && bounds.top() >= dialog.top() + px(46.)
+                && bounds.bottom() <= dialog.bottom() - px(60.);
+            (shown, bounds.top() < dialog.center().y)
+        });
+        match place {
+            (true, _) => return,
+            (false, above) => in_frame(cx, handle, |window, cx| {
+                let step = if above { 80. } else { -80. };
+                window.scroll(
+                    "host-dialog",
+                    gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(step))),
+                    cx,
+                )
+            }),
+        }
+    }
+    panic!("{id} 滚不进视野");
 }
 
 /// 把字段 `field` 的内容换成 `text`。
 fn fill(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &'static str, text: &str) {
+    reveal(cx, handle, field);
     in_frame(cx, handle, move |window, cx| window.click(field, cx));
     in_frame(cx, handle, |window, cx| {
         window.press("ctrl-a", cx);
@@ -541,5 +576,35 @@ fn resetting_a_vault_from_another_computer_lets_passwords_be_saved_again(cx: &mu
     assert_eq!(
         vault.read(&SecretRef::password(7)).as_deref(),
         Some("hunter2")
+    );
+}
+
+#[gpui_kit::test]
+fn a_proxy_password_is_a_first_saved_secret_too(cx: &mut TestAppContext) {
+    let vault = TestVault::absent();
+    let (handle, workspace, _) = open_with_vault(cx, &vault);
+    dispatch(cx, handle, NewHost);
+    fill(cx, handle, "host-address", "10.0.3.11");
+    in_frame(cx, handle, |window, cx| {
+        window.click(("host-route", 2usize), cx)
+    });
+    fill(cx, handle, "host-proxy-host", "proxy.test");
+    fill(cx, handle, "host-proxy-port", "8080");
+    fill(cx, handle, "host-proxy-user", "me");
+    fill(cx, handle, "host-proxy-password", "proxy-secret");
+    click(cx, handle, "host-dialog-save");
+
+    // 主机自己没填密码，代理的密码也是秘密：先问要不要设主密码。
+    assert!(visible(cx, handle, "vault-password-dialog"));
+    assert_eq!(host_names(cx, &workspace).len(), 6);
+    click(cx, handle, "vault-password-skip");
+
+    assert!(!visible(cx, handle, "host-dialog"));
+    assert_eq!(host_names(cx, &workspace).len(), 7);
+    assert_eq!(
+        vault
+            .read(&SecretRef::proxy("me", "proxy.test", 8080))
+            .as_deref(),
+        Some("proxy-secret")
     );
 }

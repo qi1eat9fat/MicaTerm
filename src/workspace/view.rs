@@ -15,9 +15,9 @@ use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportPr
 use super::handlers;
 use super::host_sidebar::render_host_sidebar;
 use super::notices::NoticeTimes;
+use super::quick_connect::{QuickConnectAnchor, QuickConnectPopup};
 use super::remote::PromptQueue;
 use super::right_sidebar::{RightPanel, render_right_sidebar};
-use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
 use crate::backend::{
@@ -48,7 +48,7 @@ pub struct WorkspaceServices {
     /// 窗口壳打开后弹出错误通知（工单 11）。
     pub hosts_problem: Option<SharedString>,
     /// 密码、口令、私钥存在哪里（工单 11）：主机数据把秘密写到这里。
-    /// 保险库（工单 10、13）接上之前，生产也是只在内存里的存储；测试注入 `InMemorySecretStore`。
+    /// 生产是数据目录里的保险库（见下面的 `vault`，打不开时是只在内存里的存储）；测试注入 `InMemorySecretStore`。
     pub secrets: SharedSecretStore,
     /// 远程终端（工单 12）：生产是 backend 的 SSH 连接表（按主机共享连接），测试注入假的。
     pub remote_terminals: SharedRemoteTerminals,
@@ -145,6 +145,12 @@ pub struct Workspace {
     pub(super) vault: Entity<VaultStore>,
     /// 一直收连接表的事件（工单 12）。
     _remote_events: Task<()>,
+    /// 开着的快速连接弹层（工单 18）。
+    pub(super) quick_connect: Option<QuickConnectPopup>,
+    /// 「+ ⌄」画在哪里，快速连接弹层挂在它下面（工单 18）。
+    pub(super) quick_connect_anchor: std::rc::Rc<QuickConnectAnchor>,
+    /// 开始卡片的最近连接列表高亮第几行（工单 18）。
+    pub(super) start_highlight: usize,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -238,6 +244,9 @@ impl Workspace {
             prompts: PromptQueue::default(),
             vault,
             _remote_events: remote_events,
+            quick_connect: None,
+            quick_connect_anchor: Default::default(),
+            start_highlight: 0,
             _subscriptions: subscriptions,
         }
     }
@@ -466,6 +475,10 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let target = self.focus_handle.clone();
+        // 主机栏右侧的绿色数字（工单 16）：开卡片、关卡片、关标签都会让窗口壳重画，这里统一告诉主机列表。
+        let open_cards = self.open_cards_by_host(cx);
+        self.host_list
+            .update(cx, |list, cx| list.set_open_cards(open_cards, cx));
         // 有标签时是在前那个标签的内容，没有时是开始卡片。
         let content = div()
             .flex()
@@ -474,12 +487,7 @@ impl Render for Workspace {
             .when(!self.host_sidebar_open, |content| content.pl(GAP))
             .map(|content| match self.tabs.active_content() {
                 Some(tab) => content.child(tab.content()),
-                None => content.child(render_start_card(
-                    &self.start_card_focus,
-                    &target,
-                    &tokens,
-                    window,
-                )),
+                None => content.child(self.render_start_card(&target, &tokens, window, cx)),
             });
         let main = div()
             .flex()
@@ -488,6 +496,8 @@ impl Render for Workspace {
             .min_w_0()
             .child(render_title_bar(
                 self.host_sidebar_open,
+                self.quick_connect.is_some(),
+                &self.quick_connect_anchor(),
                 self.tab_rail
                     .render(self.tab_snapshots(cx), &target, &tokens),
                 &target,
@@ -520,6 +530,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_hosts_actions(root, cx))
             .map(|root| handlers::bind_snippets_actions(root, cx))
             .map(|root| handlers::bind_remote_actions(root, cx))
+            .map(|root| handlers::bind_quick_connect_actions(root, cx))
             .map(|root| handlers::bind_vault_actions(root, cx))
             .relative()
             .flex()
@@ -541,6 +552,7 @@ impl Render for Workspace {
                 ))
             })
             .child(main)
+            .children(self.render_quick_connect())
             .children(Root::render_sheet_layer(window, cx))
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))

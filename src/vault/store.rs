@@ -69,10 +69,6 @@ impl VaultStore {
         self.status
     }
 
-    pub fn has_vault(&self) -> bool {
-        self.vault.is_some()
-    }
-
     pub fn has_master_password(&self) -> bool {
         self.status.is_some_and(VaultStatus::has_master_password)
     }
@@ -120,11 +116,9 @@ impl VaultStore {
         self.key_lost_asked = true;
     }
 
+    /// 操作跑完，重读状态（只碰内存）。
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let status = self.vault.as_ref().map(|vault| vault.status());
-        if status != self.status {
-            self.status = status;
-        }
+        self.status = self.vault.as_ref().map(|vault| vault.status());
         cx.notify();
     }
 

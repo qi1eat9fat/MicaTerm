@@ -1,6 +1,7 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/testing.rs
 // 裁剪：本 crate 自己的测试也用它（`cfg(test)`）。
-// 改造：也接受公钥登录（`TestServer::authorize`），给私钥登录的测试用。
+// 改造：也接受公钥登录（`TestServer::authorize`），给私钥登录的测试用；
+// 也能当跳板（转发 direct-tcpip 通道，记在 `Seen::forwards`），给跳板的测试用（工单 15）。
 //! A real SSH server in the test's own process, for this crate's tests and
 //! those of what is built on it: a password login, a login with the keys it
 //! is told to accept, a shell that echoes what is typed, commands, and SFTP through this machine's OpenSSH
@@ -9,6 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -46,6 +48,7 @@ pub struct TestServer {
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
     keys: AuthorizedKeys,
+    single_channel: Arc<AtomicBool>,
     task: JoinHandle<()>,
 }
 
@@ -62,6 +65,8 @@ pub struct Seen {
     /// last window change.
     pub size: Option<(u32, u32)>,
     pub commands: Vec<String>,
+    /// 当作跳板时，每个 direct-tcpip 通道要去的 `(host, port)`，按顺序（工单 15）。
+    pub forwards: Vec<(String, u32)>,
 }
 
 impl TestServer {
@@ -81,11 +86,13 @@ impl TestServer {
         });
         let replies = Replies::default();
         let keys = AuthorizedKeys::default();
+        let single_channel = Arc::new(AtomicBool::new(false));
         let mut server = Listener {
             directory,
             seen: seen.clone(),
             replies: replies.clone(),
             keys: keys.clone(),
+            single_channel: single_channel.clone(),
         };
         let task = tokio::spawn(async move {
             let _ = server.run_on_socket(config, &listener).await;
@@ -95,8 +102,15 @@ impl TestServer {
             seen,
             replies,
             keys,
+            single_channel,
             task,
         })
+    }
+
+    /// From now on every connection opens one session channel only and
+    /// refuses the next ones, as some bastion hosts do.
+    pub fn single_channel(&self) {
+        self.single_channel.store(true, Ordering::SeqCst);
     }
 
     pub fn seen(&self) -> Seen {
@@ -125,6 +139,7 @@ struct Listener {
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
     keys: AuthorizedKeys,
+    single_channel: Arc<AtomicBool>,
 }
 
 impl server::Server for Listener {
@@ -136,6 +151,8 @@ impl server::Server for Listener {
             seen: self.seen.clone(),
             replies: self.replies.clone(),
             keys: self.keys.clone(),
+            single_channel: self.single_channel.clone(),
+            sessions: 0,
             channels: HashMap::new(),
             shells: HashSet::new(),
         }
@@ -147,6 +164,9 @@ struct Handler {
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
     keys: AuthorizedKeys,
+    single_channel: Arc<AtomicBool>,
+    /// The session channels this connection opened.
+    sessions: usize,
     channels: HashMap<ChannelId, russh::Channel<server::Msg>>,
     /// The channels running the shell: russh hands every channel's data to
     /// `data`, SFTP's too.
@@ -196,8 +216,46 @@ impl server::Handler for Handler {
         reply: server::ChannelOpenHandle,
         _: &mut server::Session,
     ) -> anyhow::Result<()> {
+        if self.sessions > 0 && self.single_channel.load(Ordering::SeqCst) {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        }
+        self.sessions += 1;
         self.channels.insert(channel.id(), channel);
         reply.accept().await;
+        Ok(())
+    }
+
+    /// 当作跳板：连到要去的地方，把通道和那个 socket 接起来；连不上就拒绝通道（工单 15）。
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: russh::Channel<server::Msg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        _: &str,
+        _: u32,
+        reply: server::ChannelOpenHandle,
+        _: &mut server::Session,
+    ) -> anyhow::Result<()> {
+        lock(&self.seen)
+            .forwards
+            .push((host_to_connect.to_string(), port_to_connect));
+        let Ok(port) = u16::try_from(port_to_connect) else {
+            reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+            return Ok(());
+        };
+        match tokio::net::TcpStream::connect((host_to_connect, port)).await {
+            Ok(mut socket) => {
+                reply.accept().await;
+                tokio::spawn(async move {
+                    let mut stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+                });
+            }
+            Err(_) => reply.reject(russh::ChannelOpenFailure::ConnectFailed).await,
+        }
         Ok(())
     }
 

@@ -15,6 +15,7 @@
 //! - `host`：主机核心（`qishell-hosts`）包成 GPUI 实体 `HostStore`；
 //! - `snippets`：命令片段面板和对话框；
 //! - `secrets`：系统钥匙串（只存保险库的数据密钥）和打开数据目录里的保险库；
+//! - `vault`：保险库的界面（工单 13）：状态、设置主密码框、解锁小卡片、重置，和用到秘密之前弹哪个框；
 //! - `workspace`：窗口壳，持有全部 action 的处理器（`workspace/handlers/` 按领域分文件）。
 
 pub mod app;

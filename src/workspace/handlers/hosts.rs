@@ -1,16 +1,17 @@
 //! 主机的处理器（工单 11）：新建、编辑、创建副本、复制地址、删除、拖动排序、聚焦主机搜索。
 //!
-//! 连接类的 action：`ConnectHost`（12，在新标签里连接）在这里；`ConnectHostRight`、`ConnectHostDown`
-//! 由 16 加（经 `open_remote_card` 建卡片再分屏），`OpenHostSftp` 由 M3 加。
+//! 连接类的 action：`ConnectHost`（12，在新标签里连接）、`ConnectHostRight`、`ConnectHostDown`
+//! （16，开在焦点卡片旁边，见 `split_open_host`）在这里，`OpenHostSftp` 由 M3 加。
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 
 use crate::app::{
-    ConnectHost, CopyHostAddress, DeleteHost, DuplicateHost, EditHost, FocusHostSearch, MoveHost,
-    NewHost,
+    ConnectHost, ConnectHostDown, ConnectHostRight, CopyHostAddress, DeleteHost, DuplicateHost,
+    EditHost, FocusHostSearch, MoveHost, NewHost,
 };
 use crate::host::{open_delete_host_dialog, open_host_dialog};
+use crate::split::Axis;
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) fn bind_hosts_actions(
@@ -25,6 +26,8 @@ pub(in crate::workspace) fn bind_hosts_actions(
         .on_action(cx.listener(Workspace::on_move_host))
         .on_action(cx.listener(Workspace::on_focus_host_search))
         .on_action(cx.listener(Workspace::on_connect_host))
+        .on_action(cx.listener(Workspace::on_connect_host_right))
+        .on_action(cx.listener(Workspace::on_connect_host_down))
 }
 
 impl Workspace {
@@ -36,6 +39,26 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.connect_host(id, window, cx);
+    }
+
+    /// 右键菜单「在右侧分屏打开」：开在在前标签焦点卡片的右边。
+    fn on_connect_host_right(
+        &mut self,
+        &ConnectHostRight(id): &ConnectHostRight,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.split_open_host(id, Axis::Horizontal, window, cx);
+    }
+
+    /// 右键菜单「在下方分屏打开」：开在在前标签焦点卡片的下面。
+    fn on_connect_host_down(
+        &mut self,
+        &ConnectHostDown(id): &ConnectHostDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.split_open_host(id, Axis::Vertical, window, cx);
     }
 
     /// 新建主机（主机栏「主机 N」后面的「+」、Ctrl+Shift+N、开始卡片的「新建主机」）。

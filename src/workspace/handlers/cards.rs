@@ -172,7 +172,8 @@ impl Workspace {
             .is_some_and(|tab| tab.focus_card(card, cx))
     }
 
-    /// 分在前那个标签的焦点卡片。本地卡片在同一个目录里、用同一个 shell 开新的本地终端。
+    /// 分在前那个标签的焦点卡片，按卡片类型分开：本地卡片在同一个目录里、用同一个 shell 开新的本地终端；
+    /// 远程卡片复用同一条连接、新开 shell 通道（工单 16，见 `split_remote_card`）。
     fn split_focused_card(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.tabs.active() else {
             return;
@@ -180,7 +181,12 @@ impl Workspace {
         let Some(tab) = self.tabs.get(id) else {
             return;
         };
-        let source = tab.focused_card().read(cx);
+        let source = tab.focused_card().clone();
+        if source.read(cx).remote_host().is_some() {
+            self.split_remote_card(id, &source, axis, window, cx);
+            return;
+        }
+        let source = source.read(cx);
         let shell = source.local_shell().cloned().unwrap_or_else(|| {
             LocalShell::new(
                 &self
@@ -197,9 +203,26 @@ impl Workspace {
             directory: source.directory(),
         };
         let card = self.open_local_card(launch, window, cx);
+        self.place_beside_focused_card(id, axis, card, window, cx);
+    }
+
+    /// 把新卡片 `card` 放进标签 `tab`，在它焦点卡片的右边或下面，焦点给新卡片。
+    /// 标签已经不在了（等解锁时关掉了）就关掉新卡片的 shell。
+    pub(in crate::workspace) fn place_beside_focused_card(
+        &mut self,
+        tab: TabId,
+        axis: Axis,
+        card: Entity<TerminalCard>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tabs.get(tab).is_none() {
+            self.retire_card(&card, cx);
+            return;
+        }
         let subscriptions = self.card_subscriptions(&card, window, cx);
         let focus = card.read(cx).focus_handle();
-        if let Some(tab) = self.tabs.get_mut(id) {
+        if let Some(tab) = self.tabs.get_mut(tab) {
             tab.split(axis, card, subscriptions, cx);
         }
         window.focus(&focus, cx);

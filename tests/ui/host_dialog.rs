@@ -60,11 +60,10 @@ fn the_plus_after_the_host_count_opens_a_new_host_dialog(cx: &mut TestAppContext
         ] {
             assert!(window.find(id).visible(), "{id}");
         }
-        // 本工单的认证只有「密码」，连接方式只有「直接」。
+        // 本工单的认证只有「密码」；连接方式默认「直接」（跳板和代理见 `route.rs`）。
         assert_eq!(window.find(("host-auth", 0usize)).label(), Some("密码"));
         assert!(window.try_find(("host-auth", 1usize)).is_none());
         assert_eq!(window.find(("host-route", 0usize)).label(), Some("直接"));
-        assert!(window.try_find(("host-route", 1usize)).is_none());
     });
 
     in_frame(cx, handle, |window, cx| {

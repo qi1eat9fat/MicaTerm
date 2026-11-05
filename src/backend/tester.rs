@@ -1,5 +1,5 @@
 // 来自 since2006/shell-rs @ b2a307a: src/ssh/tester.rs 和 src/connection.rs 的 `LoginTest`、`ConnectionTester`
-// 裁剪：去掉 Telnet、串口、凭据登录的 `saved`、私钥口令和代理密码的表单值（14、15 加）；
+// 裁剪：去掉 Telnet、串口、凭据登录的 `saved`、私钥口令的表单值（14 加）；代理密码的表单值工单 15 加回；
 // 改造：测试是一个 future（在共享运行时上跑，窗口壳的执行器上等），确认主机密钥也是异步问的，
 // 这样 UI 测试的假测试器可以完全跑在测试执行器上。
 
@@ -31,6 +31,8 @@ pub struct LoginTest {
     login: HostLogin,
     /// 表单里的密码；留空是 `None`。
     password: Option<Zeroizing<String>>,
+    /// 表单里的代理密码；留空是 `None`（工单 15）。
+    proxy_password: Option<Zeroizing<String>>,
 }
 
 impl LoginTest {
@@ -38,8 +40,15 @@ impl LoginTest {
     pub fn new(login: HostLogin, password: &str) -> Self {
         Self {
             login,
-            password: (!password.is_empty()).then(|| Zeroizing::new(password.to_string())),
+            password: typed(password),
+            proxy_password: None,
         }
+    }
+
+    /// 代理密码也用表单里填的（存没存过都一样）；空的就是没填。
+    pub fn with_proxy_password(mut self, password: &str) -> Self {
+        self.proxy_password = typed(password);
+        self
     }
 
     pub fn login(&self) -> &HostLogin {
@@ -62,8 +71,17 @@ impl std::fmt::Debug for LoginTest {
         f.debug_struct("LoginTest")
             .field("login", &self.login)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field(
+                "proxy_password",
+                &self.proxy_password.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
+}
+
+/// 输入框里的字：空的就是没填。
+fn typed(text: &str) -> Option<Zeroizing<String>> {
+    (!text.is_empty()).then(|| Zeroizing::new(text.to_string()))
 }
 
 /// 问用户信不信第一次见到的主机密钥；关了对话框也算不信。
@@ -239,10 +257,13 @@ fn describe_test_failure(error: &anyhow::Error, host_trust: HostTrust) -> String
     describe_login_error(error)
 }
 
-/// 测试用的秘密：登录密码以表单为准（存没存过都一样），其余从保险库读。什么都不写。
+/// 测试用的秘密：登录密码和代理密码以表单为准（存没存过都一样），其余（跳板主机的密码等）
+/// 从保险库读。什么都不写。
 struct FormSecrets {
     password: Option<SecretRef>,
     typed: Option<Zeroizing<String>>,
+    proxy_password: Option<SecretRef>,
+    typed_proxy_password: Option<Zeroizing<String>>,
     fallback: SharedSecretSource,
 }
 
@@ -251,6 +272,8 @@ impl FormSecrets {
         Self {
             password: request.login().password.clone(),
             typed: request.password.clone(),
+            proxy_password: request.login().route.proxy_password(),
+            typed_proxy_password: request.proxy_password.clone(),
             fallback,
         }
     }
@@ -260,6 +283,9 @@ impl SecretSource for FormSecrets {
     fn secret(&self, secret: &SecretRef) -> anyhow::Result<Option<Zeroizing<String>>> {
         if self.password.as_ref() == Some(secret) {
             return Ok(self.typed.clone());
+        }
+        if self.proxy_password.as_ref() == Some(secret) {
+            return Ok(self.typed_proxy_password.clone());
         }
         self.fallback.secret(secret)
     }
