@@ -15,10 +15,14 @@ use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportPr
 use super::handlers;
 use super::host_sidebar::render_host_sidebar;
 use super::notices::NoticeTimes;
+use super::remote::PromptQueue;
 use super::right_sidebar::{RightPanel, render_right_sidebar};
 use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
+use crate::backend::{
+    SharedConnectionTester, SharedRemoteTerminals, SshConnectionTester, SshRemoteTerminals,
+};
 use crate::card::{CardId, StatusDot, TerminalCard};
 use crate::host::{HostData, HostList, HostStore, HostStoreEvent};
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
@@ -44,6 +48,10 @@ pub struct WorkspaceServices {
     /// 密码、口令、私钥存在哪里（工单 11）：主机数据把秘密写到这里。
     /// 保险库（工单 10、13）接上之前，生产也是只在内存里的存储；测试注入 `InMemorySecretStore`。
     pub secrets: SharedSecretStore,
+    /// 远程终端（工单 12）：生产是 backend 的 SSH 连接表（按主机共享连接），测试注入假的。
+    pub remote_terminals: SharedRemoteTerminals,
+    /// 主机对话框的「测试连接」（工单 12）：生产真的登录一次，测试注入假的。
+    pub connection_tester: SharedConnectionTester,
 }
 
 impl WorkspaceServices {
@@ -54,11 +62,21 @@ impl WorkspaceServices {
             Ok(hosts) => (hosts, None),
             Err(problem) => (HostData::empty(), Some(problem)),
         };
+        let secrets: SharedSecretStore = std::sync::Arc::new(InMemorySecretStore::default());
+        // 连接读秘密经同一个存储（13 换成保险库时一起换）；主机密钥记在数据目录的 known_hosts。
+        let known_hosts = crate::app::known_hosts_path()
+            .unwrap_or_else(|_| std::path::PathBuf::from(crate::app::KNOWN_HOSTS_FILE));
+        let source = qishell_hosts::secrets::StoreSource::shared(secrets.clone());
         Self {
             local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
             hosts,
             hosts_problem,
-            secrets: std::sync::Arc::new(InMemorySecretStore::default()),
+            remote_terminals: std::sync::Arc::new(SshRemoteTerminals::new(
+                known_hosts.clone(),
+                source.clone(),
+            )),
+            connection_tester: std::sync::Arc::new(SshConnectionTester::new(known_hosts, source)),
+            secrets,
         }
     }
 }
@@ -91,6 +109,10 @@ pub struct Workspace {
     pub(super) right_panel: Option<RightPanel>,
     /// 命令片段面板（工单 19）。
     pub(super) snippet_panel: SnippetPanel,
+    /// 连接表的问题，一次问一个（工单 12）。
+    pub(super) prompts: PromptQueue,
+    /// 一直收连接表的事件（工单 12）。
+    _remote_events: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -163,6 +185,7 @@ impl Workspace {
         let start_card_focus = cx.focus_handle();
         // 启动时没有标签：开始卡片持有焦点。
         start_card_focus.focus(window, cx);
+        let remote_events = Self::listen_for_remote_events(&services, window, cx);
         Self {
             focus_handle,
             start_card_focus,
@@ -178,6 +201,8 @@ impl Workspace {
             host_list,
             right_panel: None,
             snippet_panel,
+            prompts: PromptQueue::default(),
+            _remote_events: remote_events,
             _subscriptions: subscriptions,
         }
     }
@@ -315,6 +340,12 @@ impl Workspace {
             .map(|entity| entity.read(cx).tile_program().name)
     }
 
+    /// 卡片的图块是不是灰的（远程卡片没连着，工单 12）。
+    pub fn card_tile_off(&self, card: CardId, cx: &App) -> Option<bool> {
+        self.card(card, cx)
+            .map(|entity| entity.read(cx).tile_program().off)
+    }
+
     /// 标签上叠放的图块的程序名，从前到后。
     pub fn tab_tiles(&self, tab: TabId, cx: &App) -> Vec<String> {
         self.tabs
@@ -421,6 +452,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_settings_actions(root, cx))
             .map(|root| handlers::bind_hosts_actions(root, cx))
             .map(|root| handlers::bind_snippets_actions(root, cx))
+            .map(|root| handlers::bind_remote_actions(root, cx))
             .relative()
             .flex()
             .size_full()

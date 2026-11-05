@@ -106,6 +106,11 @@ impl AuthSection {
         }
     }
 
+    /// 密码框里现在的字（「测试连接」用表单里的密码登录，存没存过都一样，工单 12）。
+    pub(super) fn typed_password(&self, cx: &App) -> SharedString {
+        self.password.read(cx).value()
+    }
+
     /// 保存时密码要怎么改：`None` 不动，`Some(None)` 删掉，`Some(Some(..))` 写进去。
     pub(super) fn password_change(&self, cx: &App) -> Option<Option<String>> {
         if self.choice != AuthChoice::Password {

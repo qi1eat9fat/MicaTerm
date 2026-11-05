@@ -206,10 +206,10 @@ impl Workspace {
 
 /// 输入前要不要先清掉提示符后面已经打的字（Ctrl-E Ctrl-U，照 shell-rs）。
 /// Windows 上的 shell（PowerShell、cmd）不认这两个键，只能接着已有的字往后打。
-/// 远程卡片（工单 12）要按主机的系统判断：Windows 主机同样不清。
+/// 远程卡片按主机的系统判断（工单 12）：Windows 主机同样不清。
 fn clears_typed_line(card: &TerminalCard) -> bool {
     match card.local_shell() {
         Some(_) => !cfg!(windows),
-        None => true,
+        None => card.remote_os() != Some(qishell_hosts::HostOs::Windows),
     }
 }

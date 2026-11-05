@@ -130,6 +130,12 @@ host.dialog.notes_placeholder:
   zh-CN: 写点什么，悬停主机时显示
 host.dialog.test_connection:
   zh-CN: 测试连接
+host.dialog.testing:
+  zh-CN: 正在测试…
+host.dialog.test_ok:
+  zh-CN: 连接成功
+host.dialog.test_failed:
+  zh-CN: 连接失败：%{reason}
 host.dialog.cancel:
   zh-CN: 取消
 host.dialog.save:

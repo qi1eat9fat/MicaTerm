@@ -19,8 +19,8 @@ use crate::app::{
 };
 use crate::i18n::t;
 
-/// 「连接」：工单 12 接上 `ConnectHost` 的处理器后改成 `true`。
-pub const SHOW_CONNECT: bool = false;
+/// 「连接」：工单 12 接上了 `ConnectHost` 的处理器。
+pub const SHOW_CONNECT: bool = true;
 /// 「在右侧 / 下方分屏打开」：工单 16 接上处理器后改成 `true`。
 pub const SHOW_SPLIT_OPEN: bool = false;
 /// 「打开 SFTP」：M3 接上处理器后改成 `true`。
