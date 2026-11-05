@@ -6,6 +6,7 @@
 //! - `password`：设置主密码（第一次保存秘密时带「不设置」）、更换主密码；
 //! - `unlock`：解锁小卡片（「在本机记住」默认勾选，主密码不对时描红）；
 //! - `confirm`：重置保险库的确认、「在另一台电脑上创建」的确认；
+//! - `field`：存在保险库里的一条秘密的输入框（[`SecretField`]），主机、代理、凭据的密码和口令共用；
 //! - `flows`：写秘密之前（[`before_saving_secret`]）和连接用秘密之前（[`before_using_secrets`]）
 //!   要弹哪个框；
 //! - `login`：一次登录要用到哪些秘密（无密码和 Agent 登录不用）。
@@ -13,6 +14,7 @@
 //! 功能模块不依赖窗口壳：按钮派发 `crate::app` 的保险库 action，由窗口壳交给这里。
 
 mod confirm;
+mod field;
 mod flows;
 mod login;
 mod password;
@@ -21,6 +23,7 @@ mod store;
 mod unlock;
 
 pub use confirm::open_reset_dialog;
+pub use field::{ReadSecret, SecretChange, SecretField, locked_away};
 pub use flows::{
     asks_before_saving, asks_before_using, before_saving_secret, before_using_secrets,
 };

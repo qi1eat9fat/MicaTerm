@@ -321,7 +321,14 @@ impl HostDialog {
 
     /// 关掉主机对话框（只关它自己那一层）。
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.forget_secrets(window, cx);
         self.layer.close(window, cx);
+    }
+
+    /// 对话框要关了：密码框里的明文现在就放掉，不等实体回收。
+    fn forget_secrets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.auth.forget_secrets(window, cx);
+        self.route.forget_secrets(window, cx);
     }
 
     fn render_header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
@@ -502,7 +509,8 @@ pub fn open_host_dialog(
     let view = cx.new(|cx| HostDialog::new(store, editing, tester, window, cx));
     let name = view.read(cx).general.name.clone();
     let layer = view.read(cx).layer.clone();
-    layer.open(
+    let dismissed = view.downgrade();
+    layer.open_dismissable(
         move |dialog, window, _| {
             let height = MAX_HEIGHT.min(window.viewport_size().height - px(40.));
             dialog
@@ -513,6 +521,12 @@ pub fn open_host_dialog(
                 .close_button(false)
                 .overlay_closable(false)
                 .child(view.clone())
+        },
+        // Esc 关掉的：密码框一样现在就清空。
+        move |window, cx| {
+            dismissed
+                .update(cx, |dialog, cx| dialog.forget_secrets(window, cx))
+                .ok();
         },
         window,
         cx,

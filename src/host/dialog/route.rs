@@ -31,7 +31,8 @@ use crate::host::HostStore;
 use crate::i18n::t;
 use crate::settings::segmented;
 use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, FieldNote, form_field, text_input};
+use crate::ui::form::{FieldErrors, FieldNote, form_field, locked_secret, text_input};
+use crate::vault::{SecretField, VaultStore};
 
 /// 连接方式的分段按钮。
 pub const ROUTE_CHOICE: &str = "host-route";
@@ -54,6 +55,9 @@ pub const FIELD_PROXY_HOST: &str = "host-proxy-host";
 pub const FIELD_PROXY_PORT: &str = "host-proxy-port";
 pub const FIELD_PROXY_USER: &str = "host-proxy-user";
 pub const FIELD_PROXY_PASSWORD: &str = "host-proxy-password";
+/// 保险库锁着时代替代理密码框的那一行，和它的「解锁…」。
+pub const PROXY_PASSWORD_LOCKED: &str = "host-proxy-password-locked";
+pub const PROXY_PASSWORD_UNLOCK: &str = "host-proxy-password-unlock";
 
 /// 代理端口输入框的宽度（原型 `.in.narrow`）。
 const PORT_WIDTH: Pixels = px(80.);
@@ -118,11 +122,10 @@ pub(super) struct RouteSection {
     proxy_host: Entity<InputState>,
     proxy_port: Entity<InputState>,
     proxy_user: Entity<InputState>,
-    proxy_password: Entity<InputState>,
-    /// 编辑的主机原来的代理密码条目，和保险库里存的值：值是 `None` 时还没读回来
-    /// （这时空的密码框不表示「删掉」），`Some(None)` 是没存过。
-    saved_proxy: Option<(SecretRef, Option<Option<Zeroizing<String>>>)>,
-    _load: Option<Task<()>>,
+    /// 代理密码框：条目是编辑的主机原来的代理密码；锁着又存过时显示「已保存，保险库锁定中」。
+    proxy_password: SecretField,
+    store: Entity<HostStore>,
+    _vault: Option<Subscription>,
 }
 
 impl RouteSection {
@@ -188,15 +191,26 @@ impl RouteSection {
             window,
             cx,
         );
-        let proxy_password = cx.new(|cx| {
-            InputState::new(window, cx)
-                .masked(true)
-                .placeholder(t!("host.dialog.optional"))
+        let mut proxy_password = SecretField::new(
+            proxy.as_ref().and_then(ProxySettings::password_secret),
+            t!("host.dialog.optional"),
+            window,
+            cx,
+        );
+        proxy_password.load_saved(&HostStore::reader(store), window, cx, |dialog| {
+            &mut dialog.route.proxy_password
         });
-        let saved_secret = proxy.as_ref().and_then(ProxySettings::password_secret);
-        let load = saved_secret
-            .clone()
-            .map(|secret| load_saved_proxy_password(store, secret, window, cx));
+        // 锁着的代理密码解开了就换回密码框、读回存的（工单 13）。
+        let watch = VaultStore::global(cx).map(|vault| {
+            cx.observe_in(&vault, window, |dialog, _, window, cx| {
+                let read = HostStore::reader(&dialog.route.store);
+                dialog
+                    .route
+                    .proxy_password
+                    .vault_changed(&read, window, cx, |dialog| &mut dialog.route.proxy_password);
+                cx.notify();
+            })
+        });
         Self {
             choice: RouteChoice::of(&draft.route),
             hops,
@@ -207,9 +221,14 @@ impl RouteSection {
             proxy_port,
             proxy_user,
             proxy_password,
-            saved_proxy: saved_secret.map(|secret| (secret, None)),
-            _load: load,
+            store: store.clone(),
+            _vault: watch,
         }
+    }
+
+    /// 对话框要关了：清空代理密码框。
+    pub(super) fn forget_secrets(&self, window: &mut Window, cx: &mut App) {
+        self.proxy_password.clear(window, cx);
     }
 
     /// 各输入框和它的字段名：改了就收起那个字段的错误。
@@ -218,7 +237,7 @@ impl RouteSection {
             (FIELD_PROXY_HOST, self.proxy_host.clone()),
             (FIELD_PROXY_PORT, self.proxy_port.clone()),
             (FIELD_PROXY_USER, self.proxy_user.clone()),
-            (FIELD_PROXY_PASSWORD, self.proxy_password.clone()),
+            (FIELD_PROXY_PASSWORD, self.proxy_password.input().clone()),
         ]
     }
 
@@ -234,7 +253,7 @@ impl RouteSection {
                     DEFAULT_PROXY_PORT
                 });
                 let user = self.proxy_user.read(cx).value().trim().to_string();
-                if user.is_empty() && !self.proxy_password.read(cx).value().is_empty() {
+                if user.is_empty() && !self.proxy_password.typed(cx).is_empty() {
                     errors.set(
                         FIELD_PROXY_USER,
                         t!("host.dialog.proxy_password_needs_user"),
@@ -247,10 +266,10 @@ impl RouteSection {
     }
 
     /// 代理密码框里现在的字（「测试连接」用表单里的，存没存过都一样）。
-    pub(super) fn typed_proxy_password(&self, cx: &App) -> SharedString {
+    pub(super) fn typed_proxy_password(&self, cx: &App) -> Zeroizing<String> {
         match self.choice {
-            RouteChoice::Proxy => self.proxy_password.read(cx).value(),
-            _ => SharedString::default(),
+            RouteChoice::Proxy if !self.proxy_password.is_locked() => self.proxy_password.typed(cx),
+            _ => Zeroizing::default(),
         }
     }
 
@@ -260,42 +279,18 @@ impl RouteSection {
         &self,
         route: &Route,
         cx: &App,
-    ) -> Option<(SecretRef, Option<String>)> {
+    ) -> Option<(SecretRef, Option<Zeroizing<String>>)> {
         let Route::Proxy(proxy) = route else {
             return None;
         };
         let secret = proxy.password_secret()?;
-        let typed = self.proxy_password.read(cx).value();
-        // 原来存的值，只在条目没变、也已经读回来时才算数。
-        let saved = match &self.saved_proxy {
-            Some((original, Some(saved))) if *original == secret => Some(saved.as_ref()),
-            _ => None,
+        // 原来存的值只在条目没变时才算数（改了代理的用户名、地址、端口就是另一个条目）。
+        let change = if self.proxy_password.secret() == Some(&secret) {
+            self.proxy_password.change(cx)
+        } else {
+            self.proxy_password.change_ignoring_saved(cx)
         };
-        match (saved, typed.is_empty()) {
-            (Some(Some(_)), true) => Some((secret, None)),
-            (_, true) => None,
-            (Some(Some(saved)), false) if saved.as_str() == typed.as_ref() => None,
-            (_, false) => Some((secret, Some(typed.to_string()))),
-        }
-    }
-
-    fn set_saved_proxy_password(
-        &mut self,
-        saved: Option<Zeroizing<String>>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        // 读回来之前用户已经输了，就不盖掉。
-        if self.proxy_password.read(cx).value().is_empty()
-            && let Some(saved) = &saved
-        {
-            let value = SharedString::from(saved.to_string());
-            self.proxy_password
-                .update(cx, |field, cx| field.set_value(value, window, cx));
-        }
-        if let Some((_, loaded)) = &mut self.saved_proxy {
-            *loaded = Some(saved);
-        }
+        change.map(|change| (secret, change))
     }
 
     fn choose(&mut self, choice: RouteChoice, errors: &mut FieldErrors) {
@@ -728,13 +723,19 @@ impl RouteSection {
             ),
             form_field(
                 Some(t!("host.dialog.password")),
-                text_input(
-                    FIELD_PROXY_PASSWORD,
-                    t!("host.dialog.proxy_password"),
-                    &self.proxy_password,
-                    false,
-                    tokens,
-                ),
+                if self.proxy_password.is_locked() {
+                    locked_secret(PROXY_PASSWORD_LOCKED, PROXY_PASSWORD_UNLOCK, tokens)
+                        .into_any_element()
+                } else {
+                    text_input(
+                        FIELD_PROXY_PASSWORD,
+                        t!("host.dialog.proxy_password"),
+                        self.proxy_password.input(),
+                        false,
+                        tokens,
+                    )
+                    .into_any_element()
+                },
                 Vec::new(),
                 tokens,
             ),
@@ -770,24 +771,6 @@ fn hop_button(
                 .on_click(on_click)
         })
         .child(Icon::new(icon).size(px(14.)))
-}
-
-/// 在后台读编辑的主机原来存的代理密码，读回来填进密码框。读不出（锁着、坏了）当作没存。
-fn load_saved_proxy_password(
-    store: &Entity<HostStore>,
-    secret: SecretRef,
-    window: &mut Window,
-    cx: &mut Context<HostDialog>,
-) -> Task<()> {
-    let read = store.update(cx, |store, cx| store.read_secret(secret, cx));
-    cx.spawn_in(window, async move |this, cx| {
-        let saved = read.await;
-        this.update_in(cx, |dialog, window, cx| {
-            dialog.route.set_saved_proxy_password(saved, window, cx);
-            cx.notify();
-        })
-        .ok();
-    })
 }
 
 #[cfg(test)]

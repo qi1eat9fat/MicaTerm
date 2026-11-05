@@ -695,7 +695,7 @@ impl HostData {
     /// background thread. A failure costs persistence, never the edit: it
     /// comes back as [`Failure::Secret`], exactly like a failed database
     /// write.
-    pub fn save_secret(&mut self, secret: SecretRef, value: Option<String>) {
+    pub fn save_secret(&mut self, secret: SecretRef, value: Option<Zeroizing<String>>) {
         let job = self.secret_job(secret, value);
         self.secret_jobs.push(job);
     }
@@ -703,11 +703,11 @@ impl HostData {
     /// The vault write [`Self::save_secret`] queues, for a caller that runs
     /// it itself to know how it went. Hand what it comes to back to
     /// [`Self::secret_done`].
-    pub fn secret_job(&self, secret: SecretRef, value: Option<String>) -> SecretJob {
+    pub fn secret_job(&self, secret: SecretRef, value: Option<Zeroizing<String>>) -> SecretJob {
         SecretJob {
             secrets: self.secrets(),
             secret,
-            value: value.map(Zeroizing::new),
+            value,
         }
     }
 
@@ -1500,7 +1500,7 @@ mod tests {
     fn a_vault_write_waits_for_its_runner_and_says_how_it_went() {
         let mut store = HostData::empty();
         let secret = SecretRef::password(1);
-        store.save_secret(secret.clone(), Some("hunter2".into()));
+        store.save_secret(secret.clone(), Some(Zeroizing::new("hunter2".into())));
         assert!(store.take_events().is_empty(), "nothing written yet");
         let jobs = store.take_secret_jobs();
         assert_eq!(jobs.len(), 1);

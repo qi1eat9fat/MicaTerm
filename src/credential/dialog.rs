@@ -32,14 +32,14 @@ use zeroize::Zeroizing;
 
 use crate::host::{
     CredentialDraft, CredentialDraftError, CredentialId, CredentialKind, DEFAULT_USER,
-    GeneratedKey, HostStore, KeyAlgorithm, PastedKey, PastedKeyError, SecretRef, read_small,
+    GeneratedKey, HostStore, KeyAlgorithm, PastedKey, PastedKeyError, read_small,
 };
 use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
 use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret, text_input};
-use crate::vault::{VaultStore, asks_before_saving, before_saving_secret};
+use crate::vault::{SecretField, VaultStore, asks_before_saving, before_saving_secret};
 
 pub const FIELD_NAME: &str = "credential-name";
 pub const FIELD_USER: &str = "credential-user";
@@ -99,67 +99,6 @@ struct KeyMaterial {
     /// `None`：没有口令（原来存的要删掉）。
     passphrase: Option<Zeroizing<String>>,
     public_key: Option<String>,
-}
-
-/// 一个存在保险库里的秘密的输入框：编辑时读回原来存的填进去；保险库锁着、又存过时显示
-/// 「已保存，保险库锁定中」，不读也不改。
-struct SecretField {
-    input: Entity<InputState>,
-    secret: Option<SecretRef>,
-    /// 原来存的：`None` 是还没读回来（这时空框不表示「删掉」），`Some(None)` 是没存过。
-    saved: Option<Option<Zeroizing<String>>>,
-    locked: bool,
-    _load: Option<Task<()>>,
-}
-
-impl SecretField {
-    fn new(placeholder: SharedString, window: &mut Window, cx: &mut App) -> Self {
-        let input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .masked(true)
-                .placeholder(placeholder)
-        });
-        Self {
-            input,
-            secret: None,
-            saved: Some(None),
-            locked: false,
-            _load: None,
-        }
-    }
-
-    /// 保存时要怎么改：`None` 不动，`Some(None)` 删掉，`Some(Some(..))` 写进去。
-    fn change(&self, cx: &App) -> Option<Option<String>> {
-        if self.locked {
-            return None;
-        }
-        let typed = self.input.read(cx).value();
-        match &self.saved {
-            None => (!typed.is_empty()).then(|| Some(typed.to_string())),
-            Some(saved) => match (saved.as_ref().map(|saved| saved.as_str()), typed.is_empty()) {
-                (None, true) => None,
-                (Some(_), true) => Some(None),
-                (Some(saved), false) if saved == typed.as_ref() => None,
-                (_, false) => Some(Some(typed.to_string())),
-            },
-        }
-    }
-
-    fn typed(&self, cx: &App) -> Zeroizing<String> {
-        Zeroizing::new(self.input.read(cx).value().to_string())
-    }
-
-    /// 读回来了：用户还没输就填进去。
-    fn set_saved(&mut self, saved: Option<Zeroizing<String>>, window: &mut Window, cx: &mut App) {
-        if self.input.read(cx).value().is_empty()
-            && let Some(saved) = &saved
-        {
-            let value = SharedString::from(saved.to_string());
-            self.input
-                .update(cx, |input, cx| input.set_value(value, window, cx));
-        }
-        self.saved = Some(saved);
-    }
 }
 
 /// 凭据对话框的内容。每次打开新建一个。
@@ -272,17 +211,26 @@ impl CredentialDialog {
                 .auto_grow(4, 8)
                 .placeholder(t!("credential.dialog.key_text_placeholder"))
         });
-        let mut password =
-            SecretField::new(t!("credential.dialog.password_placeholder"), window, cx);
-        let mut passphrase =
-            SecretField::new(t!("credential.dialog.passphrase_placeholder"), window, cx);
-        if let Some(credential) = &credential {
-            match credential.kind {
-                CredentialKind::Password => password.secret = Some(credential.password_secret()),
-                CredentialKind::Key => passphrase.secret = Some(credential.passphrase_secret()),
-                CredentialKind::Agent => {}
-            }
-        }
+        // 编辑时原来存在哪：密码凭据的密码、密钥凭据的口令。
+        let kind = credential.as_ref().map(|credential| credential.kind);
+        let password = SecretField::new(
+            credential
+                .as_ref()
+                .filter(|_| kind == Some(CredentialKind::Password))
+                .map(|credential| credential.password_secret()),
+            t!("credential.dialog.password_placeholder"),
+            window,
+            cx,
+        );
+        let passphrase = SecretField::new(
+            credential
+                .as_ref()
+                .filter(|_| kind == Some(CredentialKind::Key))
+                .map(|credential| credential.passphrase_secret()),
+            t!("credential.dialog.passphrase_placeholder"),
+            window,
+            cx,
+        );
         let mut subscriptions = vec![cx.subscribe(
             &key_text,
             |this: &mut Self, state, event: &InputEvent, cx| {
@@ -298,9 +246,9 @@ impl CredentialDialog {
         for (field, state) in [
             (FIELD_NAME, name.clone()),
             (FIELD_USER, user.clone()),
-            (FIELD_PASSWORD, password.input.clone()),
+            (FIELD_PASSWORD, password.input().clone()),
             (FIELD_FILE, file.clone()),
-            (FIELD_PASSPHRASE, passphrase.input.clone()),
+            (FIELD_PASSPHRASE, passphrase.input().clone()),
         ] {
             subscriptions.push(cx.subscribe(
                 &state,
@@ -347,8 +295,13 @@ impl CredentialDialog {
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         };
-        dialog.vault_changed(window, cx);
-        dialog.load_saved(window, cx);
+        let read = HostStore::reader(&dialog.store);
+        dialog
+            .password
+            .load_saved(&read, window, cx, |this| &mut this.password);
+        dialog
+            .passphrase
+            .load_saved(&read, window, cx, |this| &mut this.passphrase);
         if dialog.kind == CredentialKind::Key && dialog.source == KeySource::Generate {
             dialog.generate(cx);
         }
@@ -362,46 +315,11 @@ impl CredentialDialog {
 
     /// 保险库变了：存过的秘密锁着就显示「已保存，保险库锁定中」，解开了就读回来。
     fn vault_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let vault = VaultStore::global(cx);
-        let locked_away = |secret: &Option<SecretRef>, cx: &App| match (&vault, secret) {
-            (Some(vault), Some(secret)) => {
-                let vault = vault.read(cx);
-                vault.is_locked() && vault.contains(secret)
-            }
-            _ => false,
-        };
-        let password = locked_away(&self.password.secret, cx);
-        let passphrase = locked_away(&self.passphrase.secret, cx);
-        let unlocked =
-            (self.password.locked && !password) || (self.passphrase.locked && !passphrase);
-        self.password.locked = password;
-        self.passphrase.locked = passphrase;
-        if unlocked {
-            self.load_saved(window, cx);
-        }
-    }
-
-    /// 在后台读回编辑的凭据原来存的密码、口令（锁着的不读）。
-    fn load_saved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        for which in [Secret::Password, Secret::Passphrase] {
-            let field = which.field(self);
-            let Some(secret) = field.secret.clone().filter(|_| !field.locked) else {
-                continue;
-            };
-            field.saved = None;
-            let read = self
-                .store
-                .update(cx, |store, cx| store.read_secret(secret, cx));
-            let task = cx.spawn_in(window, async move |this, cx| {
-                let saved = read.await;
-                this.update_in(cx, |this, window, cx| {
-                    which.field(this).set_saved(saved, window, cx);
-                    cx.notify();
-                })
-                .ok();
-            });
-            which.field(self)._load = Some(task);
-        }
+        let read = HostStore::reader(&self.store);
+        self.password
+            .vault_changed(&read, window, cx, |this| &mut this.password);
+        self.passphrase
+            .vault_changed(&read, window, cx, |this| &mut this.passphrase);
     }
 
     fn set_kind(&mut self, kind: CredentialKind, cx: &mut Context<Self>) {
@@ -423,13 +341,13 @@ impl CredentialDialog {
         self.source = source;
         self.errors = FieldErrors::default();
         // 口令属于一把私钥：换了私钥，原来框里的字就不算数了；回到「当前私钥」时再读回存的。
-        self.passphrase
-            .input
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.passphrase.clear(window, cx);
         if source == KeySource::Kept {
-            self.load_saved(window, cx);
+            let read = HostStore::reader(&self.store);
+            self.passphrase
+                .load_saved(&read, window, cx, |this| &mut this.passphrase);
         } else {
-            self.passphrase.saved = Some(None);
+            self.passphrase.forget_saved();
         }
         if source == KeySource::Generate {
             self.generate(cx);
@@ -537,8 +455,8 @@ impl CredentialDialog {
             }
         };
         if self.kind == CredentialKind::Password
-            && !self.password.locked
-            && self.password.input.read(cx).value().is_empty()
+            && !self.password.is_locked()
+            && self.password.typed(cx).is_empty()
         {
             errors.set(FIELD_PASSWORD, t!("credential.dialog.password_required"));
         }
@@ -656,7 +574,7 @@ impl CredentialDialog {
             .then(|| self.password.change(cx))
             .flatten();
         let passphrase = match &key {
-            Some(key) => Some(key.passphrase.as_ref().map(|value| value.to_string())),
+            Some(key) => Some(key.passphrase.clone()),
             None if kind == CredentialKind::Key => self.passphrase.change(cx),
             None => None,
         };
@@ -671,11 +589,7 @@ impl CredentialDialog {
                 store.save_secret(credential.password_secret(), change, cx);
             }
             if let Some(key) = &key {
-                store.save_secret(
-                    credential.private_key_secret(),
-                    Some(key.text.to_string()),
-                    cx,
-                );
+                store.save_secret(credential.private_key_secret(), Some(key.text.clone()), cx);
             }
             if let Some(change) = passphrase {
                 store.save_secret(credential.passphrase_secret(), change, cx);
@@ -698,6 +612,8 @@ impl CredentialDialog {
     fn forget_secrets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.key_text
             .update(cx, |text, cx| text.set_value("", window, cx));
+        self.password.clear(window, cx);
+        self.passphrase.clear(window, cx);
         self.pasted = None;
         self.generated = None;
     }
@@ -867,13 +783,13 @@ impl CredentialDialog {
             Secret::Password => (&self.password, FIELD_PASSWORD),
             Secret::Passphrase => (&self.passphrase, FIELD_PASSPHRASE),
         };
-        let control = if field.locked {
+        let control = if field.is_locked() {
             locked_secret(which.locked_id(), "credential-secret-unlock", tokens).into_any_element()
         } else {
             text_input(
                 id,
                 label.clone(),
-                &field.input,
+                field.input(),
                 self.errors.get(id).is_some(),
                 tokens,
             )
@@ -1151,13 +1067,6 @@ enum Secret {
 }
 
 impl Secret {
-    fn field(self, dialog: &mut CredentialDialog) -> &mut SecretField {
-        match self {
-            Secret::Password => &mut dialog.password,
-            Secret::Passphrase => &mut dialog.passphrase,
-        }
-    }
-
     fn locked_id(self) -> &'static str {
         match self {
             Secret::Password => "credential-password-locked",

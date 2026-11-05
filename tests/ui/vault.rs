@@ -262,6 +262,55 @@ fn a_saved_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestApp
     assert_eq!(host_names(cx, &workspace).len(), 6);
 }
 
+/// 代理密码存过、保险库锁着：和主机密码一样显示「已保存，保险库锁定中」，解开后换回密码框
+/// （工单 13，M2 code review S4）。
+#[gpui_kit::test]
+fn a_saved_proxy_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestAppContext) {
+    use qishell_hosts::{AuthKind, HostDraft, ProxyKind, ProxySettings, Route};
+    let proxy = SecretRef::proxy("me", "127.0.0.1", 1080);
+    let vault = TestVault::unlocked()
+        .with_secret(&proxy, "proxy-secret")
+        .locked();
+    let mut hosts = HostData::seed();
+    hosts.insert_unnotified(
+        HostDraft::new("mysql-01", "10.0.3.11", 22, "root", AuthKind::Password).with_route(
+            Route::Proxy(ProxySettings::new(ProxyKind::Socks5, "127.0.0.1", 1080).with_user("me")),
+        ),
+    );
+    let services = WorkspaceServices {
+        hosts,
+        ..vault.services()
+    };
+    let (handle, _) = open_workspace_with(cx, settings_store(), services);
+    in_frame(cx, handle, |window, _| window.activate_window());
+
+    dispatch(cx, handle, EditHost(qishell_hosts::HostId(7)));
+    reveal(cx, handle, "host-proxy-password-locked");
+    assert_eq!(
+        label(cx, handle, "host-proxy-password-locked").as_deref(),
+        Some("已保存，保险库锁定中 · 解锁后修改")
+    );
+    assert!(!visible(cx, handle, "host-proxy-password"));
+
+    // 只改名字：锁着的代理密码原样留着。
+    fill(cx, handle, "host-name", "mysql-01a");
+    click(cx, handle, "host-dialog-save");
+    assert!(!visible(cx, handle, "host-dialog"));
+    assert_eq!(vault.status(), VaultStatus::Locked);
+
+    // 再编辑，点「解锁…」：解开后换回密码框，填着存的密码。
+    dispatch(cx, handle, EditHost(qishell_hosts::HostId(7)));
+    click(cx, handle, "host-proxy-password-unlock");
+    fill(cx, handle, "vault-unlock-password", MASTER);
+    click(cx, handle, "vault-unlock-confirm");
+    assert!(!visible(cx, handle, "host-proxy-password-locked"));
+    assert!(visible(cx, handle, "host-proxy-password"));
+    fill(cx, handle, "host-proxy-password", "proxy-secret-2");
+    click(cx, handle, "host-dialog-save");
+    assert!(!visible(cx, handle, "host-dialog"));
+    assert_eq!(vault.read(&proxy).as_deref(), Some("proxy-secret-2"));
+}
+
 #[gpui_kit::test]
 fn saving_a_host_while_locked_leaves_its_saved_password_alone(cx: &mut TestAppContext) {
     let vault = TestVault::unlocked()

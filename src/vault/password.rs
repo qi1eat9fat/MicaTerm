@@ -11,7 +11,6 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::{Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use zeroize::Zeroizing;
 
 use qishell_hosts::VaultStatus;
 
@@ -20,7 +19,7 @@ use super::store::{VaultStore, describe, is_wrong_password};
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, FieldNote, form_field, text_input};
+use crate::ui::form::{FieldErrors, FieldNote, form_field, text_input, typed_secret};
 
 pub const FIELD_CURRENT: &str = "vault-current-password";
 pub const FIELD_MASTER: &str = "vault-master-password";
@@ -119,19 +118,15 @@ impl PasswordDialog {
         }
     }
 
-    fn value(input: &Entity<InputState>, cx: &App) -> Zeroizing<String> {
-        Zeroizing::new(input.read(cx).value().to_string())
-    }
-
     /// 「设置并保存」「设置」「更换」。
     fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.working.is_some() {
             return;
         }
         let mut errors = FieldErrors::default();
-        let current = Self::value(&self.current, cx);
-        let master = Self::value(&self.master, cx);
-        let again = Self::value(&self.again, cx);
+        let current = typed_secret(&self.current, cx);
+        let master = typed_secret(&self.master, cx);
+        let again = typed_secret(&self.again, cx);
         if self.mode == PasswordMode::Change && current.is_empty() {
             errors.set(FIELD_CURRENT, t!("vault.setup.empty"));
         }

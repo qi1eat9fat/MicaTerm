@@ -8,7 +8,7 @@
 
 use std::ops::{Deref, DerefMut};
 
-use gpui_kit::{AppContext as _, Context, EventEmitter, SharedString, Task};
+use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, SharedString, Task};
 use zeroize::Zeroizing;
 
 use qishell_hosts::{
@@ -99,7 +99,7 @@ impl HostStore {
         fn remove_credential(id: CredentialId) -> Vec<HostId>;
         fn record_connection(id: HostId);
         fn set_host_os(id: HostId, os: Option<HostOs>);
-        fn save_secret(secret: SecretRef, value: Option<String>);
+        fn save_secret(secret: SecretRef, value: Option<Zeroizing<String>>);
         fn insert_snippet(draft: SnippetDraft) -> SnippetId;
         fn update_snippet(id: SnippetId, draft: SnippetDraft) -> bool;
         fn remove_snippet(id: SnippetId) -> bool;
@@ -129,11 +129,19 @@ impl HostStore {
         cx.background_spawn(async move { secrets.get(&secret).ok().flatten() })
     }
 
+    /// `store` 的 [`Self::read_secret`]，交给秘密输入框（`vault::SecretField`）在后台读回原来存的。
+    pub fn reader(
+        store: &Entity<Self>,
+    ) -> impl Fn(SecretRef, &mut App) -> Task<Option<Zeroizing<String>>> + 'static {
+        let store = store.clone();
+        move |secret, cx| store.update(cx, |store, cx| store.read_secret(secret, cx))
+    }
+
     /// [`HostData::save_secret`]，给要知道结果的调用方：失败也已经作为 `PersistFailed` 报告过。
     pub fn write_secret(
         &mut self,
         secret: SecretRef,
-        value: Option<String>,
+        value: Option<Zeroizing<String>>,
         cx: &mut Context<Self>,
     ) -> Task<Result<(), SharedString>> {
         let job = self.data.secret_job(secret, value);
@@ -238,7 +246,7 @@ mod tests {
             store.host_password(store.hosts()[0].id).unwrap()
         });
         let write = store.update(cx, |store, cx| {
-            store.write_secret(secret, Some("hunter2".into()), cx)
+            store.write_secret(secret, Some(Zeroizing::new("hunter2".into())), cx)
         });
         let failure = cx.foreground_executor.block_test(write).unwrap_err();
         assert!(

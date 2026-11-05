@@ -6,6 +6,7 @@ use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use zeroize::Zeroizing;
 
 use gpui_kit::component::Icon;
 
@@ -149,6 +150,11 @@ impl FieldNote {
                 .into_any_element(),
         }
     }
+}
+
+/// 输入框里的字，当秘密拿（密码、口令、主密码、验证码）：用完就清零。
+pub fn typed_secret(input: &Entity<InputState>, cx: &App) -> Zeroizing<String> {
+    Zeroizing::new(input.read(cx).value().to_string())
 }
 
 /// 输入框（原型 `.in`）：元素 id 就是字段名，出错时描红。

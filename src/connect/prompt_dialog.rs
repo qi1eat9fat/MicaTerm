@@ -12,7 +12,6 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use zeroize::Zeroizing;
 
 use crate::backend::{
     ConnectionPromptField, ConnectionPromptKind, ConnectionPromptReply, ConnectionSecret,
@@ -22,6 +21,7 @@ use crate::backend::{
 use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
+use crate::ui::form::typed_secret;
 
 /// 对话框的宽（原型 `.dlg.small`）。
 const WIDTH: Pixels = px(440.);
@@ -104,7 +104,7 @@ impl PromptDialog {
                 self.fields
                     .iter()
                     .map(|(_, input)| {
-                        let typed = Zeroizing::new(input.read(cx).value().to_string());
+                        let typed = typed_secret(input, cx);
                         ConnectionSecret::new(typed.as_str())
                     })
                     .collect(),

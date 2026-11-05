@@ -29,7 +29,7 @@ use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
 use crate::theme::Tokens;
 use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret, text_input};
-use crate::vault::{VaultStatus, VaultStore};
+use crate::vault::{SecretChange, SecretField, VaultStatus, VaultStore};
 
 pub const FIELD_USER: &str = "host-user";
 pub const FIELD_PASSWORD: &str = "host-password";
@@ -88,22 +88,15 @@ impl AuthChoice {
 pub(super) struct AuthSection {
     choice: AuthChoice,
     user: Entity<InputState>,
-    password: Entity<InputState>,
+    /// 密码框；编辑时读回原来存的，锁着又存过时显示「已保存，保险库锁定中」。
+    password: SecretField,
     /// 「使用凭据」选的凭据。
     credential: Option<CredentialId>,
     /// 凭据下拉展开着。
     picking: bool,
     store: Entity<HostStore>,
-    /// 编辑的主机的密码条目，新建主机时是 `None`。
-    secret: Option<SecretRef>,
-    /// 保险库里原来存的密码：`None` 是还没读回来（这时空的密码框不表示「删掉」），
-    /// `Some(None)` 是没存过。
-    saved_password: Option<Option<Zeroizing<String>>>,
     /// 保险库的状态（没有保险库时是 `None`），跟着保险库变。
     vault_status: Option<VaultStatus>,
-    /// 密码存过而保险库锁着：显示「已保存，保险库锁定中」，不读也不改密码。
-    locked: bool,
-    _load: Option<Task<()>>,
     _vault: Option<Subscription>,
 }
 
@@ -121,45 +114,28 @@ impl AuthSection {
                 .placeholder(qishell_hosts::DEFAULT_USER)
                 .default_value(draft.user.clone())
         });
-        let password_field = cx.new(|cx| {
-            InputState::new(window, cx)
-                .masked(true)
-                .placeholder(t!("host.dialog.password_placeholder"))
+        let mut password =
+            SecretField::new(password, t!("host.dialog.password_placeholder"), window, cx);
+        password.load_saved(&HostStore::reader(store), window, cx, |dialog| {
+            &mut dialog.auth.password
         });
         let vault = VaultStore::global(cx);
         let vault_status = vault.as_ref().and_then(|vault| vault.read(cx).status());
-        let locked = is_locked_away(vault.as_ref(), password.as_ref(), cx);
         let watch = vault.map(|vault| {
             cx.observe_in(&vault, window, |dialog, vault, window, cx| {
                 dialog.auth.vault_changed(&vault, window, cx);
                 cx.notify();
             })
         });
-        let mut section = Self {
+        Self {
             choice: AuthChoice::of(draft),
             user,
-            password: password_field,
+            password,
             credential: draft.credential,
             picking: false,
             store: store.clone(),
-            secret: password,
-            saved_password: Some(None),
             vault_status,
-            locked,
-            _load: None,
             _vault: watch,
-        };
-        if !locked {
-            section.load_saved(window, cx);
-        }
-        section
-    }
-
-    /// 在后台读回原来存的密码，读回来填进密码框。
-    fn load_saved(&mut self, window: &mut Window, cx: &mut Context<HostDialog>) {
-        if let Some(secret) = self.secret.clone() {
-            self.saved_password = None;
-            self._load = Some(load_saved_password(&self.store, secret, window, cx));
         }
     }
 
@@ -171,20 +147,22 @@ impl AuthSection {
         cx: &mut Context<HostDialog>,
     ) {
         self.vault_status = vault.read(cx).status();
-        let locked = is_locked_away(Some(vault), self.secret.as_ref(), cx);
-        if self.locked && !locked {
-            self.locked = false;
-            self.load_saved(window, cx);
-        } else if locked && !self.locked && self.password.read(cx).value().is_empty() {
-            self.locked = true;
-        }
+        self.password
+            .vault_changed(&HostStore::reader(&self.store), window, cx, |dialog| {
+                &mut dialog.auth.password
+            });
     }
 
     pub(super) fn inputs(&self) -> Vec<(&'static str, Entity<InputState>)> {
         vec![
             (FIELD_USER, self.user.clone()),
-            (FIELD_PASSWORD, self.password.clone()),
+            (FIELD_PASSWORD, self.password.input().clone()),
         ]
+    }
+
+    /// 对话框要关了：清空密码框。
+    pub(super) fn forget_secrets(&self, window: &mut Window, cx: &mut App) {
+        self.password.clear(window, cx);
     }
 
     pub(super) fn fill(&self, draft: &mut HostDraft, errors: &mut FieldErrors, cx: &App) {
@@ -233,32 +211,19 @@ impl AuthSection {
     }
 
     /// 密码框里现在的字（「测试连接」用表单里的密码登录，存没存过都一样，工单 12）。
-    pub(super) fn typed_password(&self, cx: &App) -> SharedString {
-        if self.locked || self.choice != AuthChoice::Password {
-            return SharedString::default();
+    pub(super) fn typed_password(&self, cx: &App) -> Zeroizing<String> {
+        if self.password.is_locked() || self.choice != AuthChoice::Password {
+            return Zeroizing::default();
         }
-        self.password.read(cx).value()
+        self.password.typed(cx)
     }
 
     /// 保存时密码要怎么改：`None` 不动，`Some(None)` 删掉，`Some(Some(..))` 写进去。
-    pub(super) fn password_change(&self, cx: &App) -> Option<Option<String>> {
-        if self.choice != AuthChoice::Password || self.locked {
+    pub(super) fn password_change(&self, cx: &App) -> SecretChange {
+        if self.choice != AuthChoice::Password {
             return None;
         }
-        let typed = self.password.read(cx).value();
-        match &self.saved_password {
-            // 还没读回来：只有真输了东西才写。
-            None => (!typed.is_empty()).then(|| Some(typed.to_string())),
-            Some(saved) => {
-                let saved = saved.as_ref().map(|saved| saved.as_str());
-                match (saved, typed.is_empty()) {
-                    (None, true) => None,
-                    (Some(_), true) => Some(None),
-                    (Some(saved), false) if saved == typed.as_ref() => None,
-                    (_, false) => Some(Some(typed.to_string())),
-                }
-            }
-        }
+        self.password.change(cx)
     }
 
     /// 保存时要往保险库里写密码：保险库收不下时对话框先弹框（设主密码、解锁、重置）。
@@ -474,7 +439,7 @@ impl AuthSection {
     }
 
     fn render_password(&self, tokens: &Tokens) -> AnyElement {
-        if self.locked {
+        if self.password.is_locked() {
             return form_field(
                 Some(t!("host.dialog.password")),
                 locked_secret(PASSWORD_LOCKED, PASSWORD_UNLOCK, tokens),
@@ -492,7 +457,7 @@ impl AuthSection {
                 .child(text_input(
                     FIELD_PASSWORD,
                     t!("host.dialog.password"),
-                    &self.password,
+                    self.password.input(),
                     false,
                     tokens,
                 ))
@@ -510,23 +475,6 @@ impl AuthSection {
             Vec::new(),
             tokens,
         )
-    }
-
-    fn set_saved_password(
-        &mut self,
-        saved: Option<Zeroizing<String>>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        // 读回来之前用户已经输了，就不盖掉。
-        if self.password.read(cx).value().is_empty()
-            && let Some(saved) = &saved
-        {
-            let value = SharedString::from(saved.to_string());
-            self.password
-                .update(cx, |field, cx| field.set_value(value, window, cx));
-        }
-        self.saved_password = Some(saved);
     }
 }
 
@@ -550,37 +498,4 @@ fn hint_line(hint: SharedString, tokens: &Tokens) -> impl IntoElement + use<> {
         .line_height(relative(1.45))
         .text_color(tokens.faint)
         .child(hint)
-}
-
-/// 这条密码存过，保险库却锁着：读不出来，也不能改。
-fn is_locked_away(
-    vault: Option<&Entity<VaultStore>>,
-    secret: Option<&SecretRef>,
-    cx: &App,
-) -> bool {
-    match (vault, secret) {
-        (Some(vault), Some(secret)) => {
-            let vault = vault.read(cx);
-            vault.is_locked() && vault.contains(secret)
-        }
-        _ => false,
-    }
-}
-
-/// 在后台读编辑的主机原来存的密码，读回来填进密码框。读不出（锁着、坏了）当作没存。
-fn load_saved_password(
-    store: &Entity<HostStore>,
-    secret: SecretRef,
-    window: &mut Window,
-    cx: &mut Context<HostDialog>,
-) -> Task<()> {
-    let read = store.update(cx, |store, cx| store.read_secret(secret, cx));
-    cx.spawn_in(window, async move |this, cx| {
-        let saved = read.await;
-        this.update_in(cx, |dialog, window, cx| {
-            dialog.auth.set_saved_password(saved, window, cx);
-            cx.notify();
-        })
-        .ok();
-    })
 }

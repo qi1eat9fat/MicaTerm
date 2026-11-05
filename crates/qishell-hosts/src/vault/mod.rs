@@ -491,9 +491,10 @@ impl SecretStore for Vault {
             &secret_aad(&vault_id, &account),
         )
         .ok_or_else(|| VaultError::Damaged(format!("{account} does not open")))?;
-        let text = String::from_utf8(plain.to_vec())
+        // 就地检查，不另拷一份：拷出来的明文在出错的那条路上会原样留在内存里。
+        let text = std::str::from_utf8(&plain)
             .map_err(|_| VaultError::Damaged(format!("{account} is not text")))?;
-        Ok(Some(Zeroizing::new(text)))
+        Ok(Some(Zeroizing::new(text.to_owned())))
     }
 
     fn set(&self, secret: &SecretRef, value: &str) -> Result<()> {
