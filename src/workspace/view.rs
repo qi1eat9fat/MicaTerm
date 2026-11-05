@@ -30,7 +30,7 @@ use crate::i18n::t;
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
 use crate::snippets::SnippetPanel;
 use crate::split::NodeId;
-use crate::tabs::{TabId, TabList, TabRail, TabSnapshot, TerminalTab};
+use crate::tabs::{Tab, TabId, TabList, TabRail, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
 use crate::vault::{Vault, VaultStore, VaultStoreEvent};
 
@@ -122,8 +122,8 @@ pub struct Workspace {
     pub(super) services: WorkspaceServices,
     /// 主机栏是否显示。
     pub(super) host_sidebar_open: bool,
-    /// 终端标签，从左到右，和在前的那个。
-    pub(super) tabs: TabList<TerminalTab>,
+    /// 标签（终端、SFTP、编辑器），从左到右，和在前的那个。
+    pub(super) tabs: TabList<Tab>,
     /// 下一张卡片的 id：从 1 起，不复用。
     pub(super) next_card_id: u64,
     /// 每张卡片每类通知上一次发出的时间，用来限频（`notices`）。
@@ -368,19 +368,29 @@ impl Workspace {
         self.tabs.active()
     }
 
-    /// 一个标签里的卡片。
+    /// 在前的标签，是终端标签时。卡片的处理器都经它，在 SFTP、编辑器标签里自然什么都不做。
+    pub(super) fn active_terminal_tab(&self) -> Option<&TerminalTab> {
+        self.tabs.active_content().and_then(Tab::as_terminal)
+    }
+
+    /// 全部终端标签，从左到右。
+    pub(super) fn terminal_tabs(&self) -> impl Iterator<Item = &TerminalTab> {
+        self.tabs.iter().filter_map(|(_, tab)| tab.as_terminal())
+    }
+
+    /// 一个标签里的卡片。SFTP 标签和编辑器标签没有卡片。
     pub fn tab_cards(&self, tab: TabId) -> Vec<Entity<TerminalCard>> {
         self.tabs
             .get(tab)
+            .and_then(Tab::as_terminal)
             .map(|tab| tab.cards().cloned().collect())
             .unwrap_or_default()
     }
 
     /// id 为 `card` 的卡片，在哪个标签里都找。
     pub fn card(&self, card: CardId, cx: &App) -> Option<Entity<TerminalCard>> {
-        self.tabs
-            .iter()
-            .flat_map(|(_, tab)| tab.cards())
+        self.terminal_tabs()
+            .flat_map(|tab| tab.cards())
             .find(|entity| entity.read(cx).id() == card)
             .cloned()
     }
@@ -391,24 +401,21 @@ impl Workspace {
             .map(|entity| entity.read(cx).screen_text(cx))
     }
 
-    /// 在前那个标签的焦点卡片。
+    /// 在前那个标签的焦点卡片。SFTP 标签、编辑器标签和开始卡片没有焦点卡片。
     pub fn focused_card(&self, cx: &App) -> Option<CardId> {
-        self.tabs
-            .active_content()
+        self.active_terminal_tab()
             .map(|tab| tab.focused_card().read(cx).id())
     }
 
     /// 在前那个标签里放大着的卡片。
     pub fn zoomed_card(&self) -> Option<CardId> {
-        self.tabs
-            .active_content()
+        self.active_terminal_tab()
             .and_then(|tab| tab.tree().zoomed())
     }
 
     /// 在前那个标签里分隔线 `node` 的比例（左边或上边占的份额）。
     pub fn divider_ratio(&self, node: NodeId) -> Option<f32> {
-        self.tabs
-            .active_content()
+        self.active_terminal_tab()
             .and_then(|tab| tab.tree().ratio(node))
     }
 
@@ -464,17 +471,7 @@ impl Workspace {
         let active = self.tabs.active();
         self.tabs
             .iter()
-            .map(|(id, tab)| {
-                let card = tab.focused_card().read(cx);
-                TabSnapshot {
-                    id,
-                    name: card.name(),
-                    directory: card.directory_label().into(),
-                    active: active == Some(id),
-                    tiles: tab.tiles(cx),
-                    dot: tab.dot(cx),
-                }
-            })
+            .map(|(id, tab)| tab.snapshot(id, active == Some(id), cx))
             .collect()
     }
 }
@@ -494,7 +491,7 @@ impl Render for Workspace {
             .min_w_0()
             .when(!self.host_sidebar_open, |content| content.pl(GAP))
             .map(|content| match self.tabs.active_content() {
-                Some(tab) => content.child(tab.content()),
+                Some(tab) => content.child(tab.content(cx)),
                 None => content.child(self.render_start_card(&target, &tokens, window, cx)),
             });
         let main = div()

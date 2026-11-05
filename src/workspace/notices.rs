@@ -169,8 +169,7 @@ impl Workspace {
 
     /// 卡片看不看得见：在前那个标签里画出来的卡片看得见；放大着时被藏起来的那几张看不见。
     pub(super) fn card_in_sight(&self, card: CardId, _cx: &App) -> bool {
-        self.tabs
-            .active_content()
+        self.active_terminal_tab()
             .is_some_and(|tab| tab.shows(card))
     }
 
@@ -196,7 +195,7 @@ impl Workspace {
         if !self.window_active {
             return;
         }
-        let Some(tab) = self.tabs.active_content() else {
+        let Some(tab) = self.active_terminal_tab() else {
             return;
         };
         let seen: Vec<_> = tab
@@ -215,11 +214,14 @@ impl Workspace {
     /// 把卡片所在的标签放到前面，焦点给这张卡片；它被放大的别的卡片藏着时先还原放大，
     /// 焦点卡片、画出来的卡片和橙点才说的是同一件事。
     fn show_card(&mut self, card: CardId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(tab) = self.tabs.find(|tab| tab.contains(card, cx)) else {
+        let Some(tab) = self.tabs.find(|tab| {
+            tab.as_terminal()
+                .is_some_and(|tab| tab.contains(card, cx))
+        }) else {
             return;
         };
         self.tabs.activate(tab);
-        if let Some(tab) = self.tabs.get_mut(tab) {
+        if let Some(tab) = self.terminal_tab_mut(tab) {
             tab.reveal_card(card, cx);
         }
         if let Some(entity) = self.card(card, cx) {

@@ -9,7 +9,7 @@ use crate::app::{
     ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NewLocalTerminalTab,
     NextTab, OpenTabMenu, PreviousTab, SwitchToTab,
 };
-use crate::tabs::{TabId, TerminalTab, build_tab_menu};
+use crate::tabs::{Tab, TabId, TerminalTab, build_tab_menu};
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) fn bind_tabs_actions(
@@ -46,7 +46,11 @@ impl Workspace {
         let launch = LocalLaunch::new(LocalShell::new(&shell));
         let card = self.open_local_card(launch, window, cx);
         let subscriptions = self.card_subscriptions(&card, window, cx);
-        self.open_tab(TerminalTab::new(card, subscriptions, cx), window, cx);
+        self.open_tab(
+            Tab::Terminal(TerminalTab::new(card, subscriptions, cx)),
+            window,
+            cx,
+        );
     }
 
     fn on_next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
@@ -170,7 +174,7 @@ impl Workspace {
     }
 
     /// 让 `id` 到前面来并滚进视野，焦点给它的焦点卡片；没有这个标签时什么都不做。
-    fn activate_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn activate_tab(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
         if self.tabs.activate(id) {
             self.tab_rail.request_reveal();
             self.focus_active_tab(window, cx);
@@ -179,9 +183,9 @@ impl Workspace {
 
     /// 焦点给在前标签的焦点卡片；没有标签时给开始卡片（快捷键才有焦点路径可走）。
     /// 不动轨道的滚动位置：在前的标签换了，轨道自己会把它滚进视野。
-    fn focus_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn focus_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let focus = match self.tabs.active_content() {
-            Some(tab) => tab.focused_card().read(cx).focus_handle(),
+            Some(tab) => tab.focus_handle(cx),
             None => self.start_card_focus.clone(),
         };
         window.focus(&focus, cx);
@@ -191,11 +195,11 @@ impl Workspace {
     /// 把标签加在最后、放到前面，焦点给它的焦点卡片。
     pub(in crate::workspace) fn open_tab(
         &mut self,
-        tab: TerminalTab,
+        tab: Tab,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TabId {
-        let focus = tab.focused_card().read(cx).focus_handle();
+        let focus = tab.focus_handle(cx);
         let id = self.tabs.push(tab);
         window.focus(&focus, cx);
         cx.notify();
@@ -212,8 +216,10 @@ impl Workspace {
         let Some(tab) = self.tabs.remove(id) else {
             return;
         };
-        for card in tab.cards() {
-            self.retire_card(card, cx);
+        if let Tab::Terminal(tab) = &tab {
+            for card in tab.cards() {
+                self.retire_card(card, cx);
+            }
         }
         self.focus_active_tab(window, cx);
     }

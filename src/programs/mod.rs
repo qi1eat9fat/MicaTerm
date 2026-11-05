@@ -38,6 +38,8 @@ type Entry = (&'static str, &'static str, &'static str, u32, u32, bool);
 
 /// 终端图标（Lucide `terminal`）：shell 和表里没有的程序都用它。
 pub const TERMINAL_GLYPH: &str = "icons/terminal.svg";
+/// 文件夹图标（Lucide `folder`）：SFTP 标签的图块。
+pub const FOLDER_GLYPH: &str = "icons/folder.svg";
 
 /// shell 图块的颜色：取全部界面原型的 `PROG.pwsh`。
 const SHELL_BG: u32 = 0x334155;
@@ -441,9 +443,39 @@ fn hash_color(name: &str) -> u32 {
     PALETTE[hash as usize % PALETTE.len()]
 }
 
+/// SFTP 标签的图块：固定颜色的文件夹（原型 `PROG.sftp`）。
+pub fn sftp_program() -> Program {
+    Program {
+        name: "SFTP".to_string(),
+        glyph: FOLDER_GLYPH,
+        tile_bg: 0xE8A33D,
+        tile_fg: 0xffffff,
+        border: false,
+        shell: false,
+        letter: None,
+        off: false,
+    }
+}
+
+/// 编辑器标签的图块：写文件名的首字，底色按名字取。工单 23 按文件类型换成原型的颜色。
+pub fn editor_program(name: &str) -> Program {
+    Program {
+        name: name.to_string(),
+        glyph: TERMINAL_GLYPH,
+        tile_bg: hash_color(name),
+        tile_fg: 0xffffff,
+        border: false,
+        shell: false,
+        letter: name.chars().next().map(|first| first.to_string()),
+        off: false,
+    }
+}
+
 /// 全部图标的资源路径：资源来源要能把它们都加载出来（`app::assets` 的测试核对）。
 pub fn glyphs() -> impl Iterator<Item = &'static str> {
-    std::iter::once(TERMINAL_GLYPH).chain(PROGRAMS.iter().map(|entry| entry.2))
+    [TERMINAL_GLYPH, FOLDER_GLYPH]
+        .into_iter()
+        .chain(PROGRAMS.iter().map(|entry| entry.2))
 }
 
 #[cfg(test)]

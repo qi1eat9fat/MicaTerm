@@ -43,8 +43,7 @@ impl Workspace {
         let props = SnippetPanelProps {
             snippets: self.hosts.read(cx).snippets_by_name(),
             target: self
-                .tabs
-                .active_content()
+                .active_terminal_tab()
                 .map(|tab| tab.focused_card().read(cx).name()),
         };
         self.snippet_panel
@@ -109,8 +108,7 @@ impl Workspace {
             return;
         };
         let Some(card) = self
-            .tabs
-            .active_content()
+            .active_terminal_tab()
             .map(|tab| tab.focused_card().clone())
         else {
             self.snippet_panel
@@ -181,7 +179,7 @@ impl Workspace {
                 let focus = this
                     .tabs
                     .active_content()
-                    .map(|tab| tab.focused_card().read(cx).focus_handle())
+                    .map(|tab| tab.focus_handle(cx))
                     .unwrap_or_else(|| this.focus_handle.clone());
                 window.focus(&focus, cx);
                 cx.notify();

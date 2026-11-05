@@ -25,7 +25,7 @@ use crate::backend::{RemoteEvent, RemoteTarget, RemoteTerminalId};
 use crate::card::{CardId, RemoteLaunch, RemoteUpdate, TerminalCard};
 use crate::host::{Host, HostId};
 use crate::split::Axis;
-use crate::tabs::{TabId, TerminalTab};
+use crate::tabs::{Tab, TabId, TerminalTab};
 use crate::workspace::Workspace;
 
 impl Workspace {
@@ -176,7 +176,8 @@ impl Workspace {
     }
 
     /// 主机右键菜单「在右侧 / 下方分屏打开」（工单 16）：把主机 `host` 开在在前标签的焦点卡片旁边，
-    /// 本地卡片、远程卡片旁边都行；已经连着就复用连接。没有终端标签（开始卡片）时开在新标签里。
+    /// 本地卡片、远程卡片旁边都行；已经连着就复用连接。在前的不是终端标签（开始卡片、SFTP 标签、
+    /// 编辑器标签）时开在新标签里。
     pub(in crate::workspace) fn split_open_host(
         &mut self,
         host: HostId,
@@ -184,7 +185,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab) = self.tabs.active() else {
+        let Some(tab) = self
+            .tabs
+            .active()
+            .filter(|_| self.active_terminal_tab().is_some())
+        else {
             self.connect_host(host, window, cx);
             return;
         };
@@ -203,7 +208,7 @@ impl Workspace {
     /// 每台主机开着几张远程卡片（不管连没连着、走哪条连接），主机栏右侧的绿色数字。
     pub(in crate::workspace) fn open_cards_by_host(&self, cx: &App) -> HashMap<HostId, usize> {
         let mut counts = HashMap::new();
-        for (_, tab) in self.tabs.iter() {
+        for tab in self.terminal_tabs() {
             for card in tab.cards() {
                 if let Some(host) = card.read(cx).remote_host() {
                     *counts.entry(host).or_insert(0) += 1;
@@ -238,7 +243,11 @@ impl Workspace {
                 return;
             };
             let subscriptions = this.card_subscriptions(&card, window, cx);
-            this.open_tab(TerminalTab::new(card, subscriptions, cx), window, cx);
+            this.open_tab(
+                Tab::Terminal(TerminalTab::new(card, subscriptions, cx)),
+                window,
+                cx,
+            );
         });
     }
 
