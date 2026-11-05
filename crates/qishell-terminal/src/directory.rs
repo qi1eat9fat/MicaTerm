@@ -1,9 +1,12 @@
 // 来自 since2006/shell-rs @ b2a307a: src/terminal/directory.rs
 
-//! The folder a shell says it is in: OSC 7 (`file://host/path`, which the
-//! setup QiShell offers writes, and fish sends by itself) and iTerm2's OSC
-//! 1337 `CurrentDir=`. `NoticeScanner` finds them in the output on the
-//! parser thread; the right sidebar's 文件 follows them.
+//! The folder a shell says it is in: OSC 7 (`file://host/path`, which fish
+//! sends by itself, and kitty's `kitty-shell-cwd://host/path`), iTerm2's OSC
+//! 1337 `CurrentDir=`, VS Code's OSC 633 `P;Cwd=`, systemd's OSC 3008 `cwd=`
+//! and ConEmu's OSC 9;9（工单 17 加了后四种）. `NoticeScanner` finds them in
+//! the output on the parser thread.
+
+use std::collections::HashMap;
 
 use percent_encoding::percent_decode_str;
 
@@ -37,42 +40,167 @@ impl ReportedDirectory {
     }
 }
 
+/// 哪一种序列报告的目录，越靠前越可信（工单 17 的目录优先级）：同一条连接上收到过靠前的，
+/// 就不再听靠后的（`NoticeScanner` 里记着）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum DirectorySource {
+    /// OSC 7：`file://`、kitty 的 `kitty-shell-cwd://`。
+    Osc7,
+    /// iTerm2 的 OSC 1337 `CurrentDir=`。
+    Iterm,
+    /// VS Code 的 OSC 633 `P;Cwd=`。
+    VsCode,
+    /// systemd 的 OSC 3008 `cwd=`。
+    Context,
+    /// ConEmu / Windows Terminal 的 OSC 9;9。
+    ConEmu,
+}
+
 /// The folder an OSC sequence reports, by its parameters as the parser
-/// splits them on `;`, if it is a well-formed report.
-pub(super) fn reported_directory(params: &[&[u8]]) -> Option<ReportedDirectory> {
+/// splits them on `;`, if it is a well-formed report, with the kind of
+/// sequence that reported it.
+pub(super) fn reported_directory(params: &[&[u8]]) -> Option<(DirectorySource, ReportedDirectory)> {
     // A path may hold `;`, which the parser split on.
-    let rest = || {
-        params
-            .get(1..)
-            .unwrap_or_default()
-            .iter()
-            .map(|param| std::str::from_utf8(param).ok())
-            .collect::<Option<Vec<_>>>()
-            .map(|parts| parts.join(";"))
-    };
-    let directory = match *params.first()? {
-        b"7" => {
-            let url = rest()?;
-            let scheme = url.get(..7)?;
-            if !scheme.eq_ignore_ascii_case("file://") {
-                return None;
-            }
-            let url = &url[7..];
-            let slash = url.find('/')?;
-            let (host, path) = url.split_at(slash);
-            let path = percent_decode_str(path).decode_utf8().ok()?.into_owned();
-            let host = (!host.is_empty() && !host.eq_ignore_ascii_case("localhost"))
-                .then(|| host.to_string());
-            ReportedDirectory { host, path }
+    let rest = |from: usize| joined(params, from);
+    let (source, directory) = match *params.first()? {
+        b"7" => (DirectorySource::Osc7, osc_7(&rest(1)?)?),
+        b"1337" => (
+            DirectorySource::Iterm,
+            ReportedDirectory {
+                host: None,
+                path: rest(1)?.strip_prefix("CurrentDir=")?.to_string(),
+            },
+        ),
+        // `633;P;Cwd=<值>`：值里的反斜杠和 `;` 转义过（`unescape`）。
+        b"633" if params.get(1) == Some(&&b"P"[..]) => (
+            DirectorySource::VsCode,
+            ReportedDirectory {
+                host: None,
+                path: unescape(rest(2)?.strip_prefix("Cwd=")?)?,
+            },
+        ),
+        // `3008;start=<id>;type=shell;hostname=<主机>;cwd=<目录>`：结束（`end=`）的不带目录。
+        b"3008" => {
+            let fields = context_fields(params);
+            fields.get("start")?;
+            (
+                DirectorySource::Context,
+                ReportedDirectory {
+                    host: fields
+                        .get("hostname")
+                        .and_then(|host| unescape(host))
+                        .filter(|host| !host.is_empty()),
+                    path: unescape(fields.get("cwd")?)?,
+                },
+            )
         }
-        b"1337" => ReportedDirectory {
-            host: None,
-            path: rest()?.strip_prefix("CurrentDir=")?.to_string(),
-        },
+        // `9;9;"C:\x"`：路径可以带一对双引号。
+        b"9" if params.get(1) == Some(&&b"9"[..]) => {
+            let path = rest(2)?;
+            let path = path
+                .strip_prefix('"')
+                .and_then(|path| path.strip_suffix('"'))
+                .unwrap_or(&path);
+            (
+                DirectorySource::ConEmu,
+                ReportedDirectory {
+                    host: None,
+                    path: path.to_string(),
+                },
+            )
+        }
         _ => return None,
     };
-    (directory.path.starts_with('/') && !directory.path.chars().any(char::is_control))
-        .then_some(directory)
+    let absolute = directory.path.starts_with('/')
+        // Windows 上的 shell 报 `C:\x`（OSC 7 写成 `/C:/x`，上面已经是 `/` 开头）。
+        || (source != DirectorySource::Osc7 && is_windows_absolute(&directory.path));
+    (absolute && !directory.path.chars().any(char::is_control)).then_some((source, directory))
+}
+
+/// 从第 `from` 个参数起，用 `;` 拼回去（解析器按 `;` 切开了）。不是 UTF-8 时是 `None`。
+pub(super) fn joined(params: &[&[u8]], from: usize) -> Option<String> {
+    params
+        .get(from..)
+        .unwrap_or_default()
+        .iter()
+        .map(|param| std::str::from_utf8(param).ok())
+        .collect::<Option<Vec<_>>>()
+        .map(|parts| parts.join(";"))
+}
+
+/// `7;file://主机/编码过的路径`，或 kitty 的 `7;kitty-shell-cwd://主机/路径`（路径不编码）。
+fn osc_7(url: &str) -> Option<ReportedDirectory> {
+    let (url, encoded) = match strip_prefix_ignore_case(url, "file://") {
+        Some(url) => (url, true),
+        None => (strip_prefix_ignore_case(url, "kitty-shell-cwd://")?, false),
+    };
+    let slash = url.find('/')?;
+    let (host, path) = url.split_at(slash);
+    let path = if encoded {
+        percent_decode_str(path).decode_utf8().ok()?.into_owned()
+    } else {
+        path.to_string()
+    };
+    let host =
+        (!host.is_empty() && !host.eq_ignore_ascii_case("localhost")).then(|| host.to_string());
+    Some(ReportedDirectory { host, path })
+}
+
+fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = text.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &text[prefix.len()..])
+}
+
+/// `C:\x`、`C:/x`。
+fn is_windows_absolute(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+}
+
+/// OSC 3008 的 `键=值` 字段（第一个参数是 `3008`）。同名的取第一个。
+pub(super) fn context_fields<'a>(params: &[&'a [u8]]) -> HashMap<&'a str, &'a str> {
+    let mut fields = HashMap::new();
+    for param in params.get(1..).unwrap_or_default() {
+        let Ok(param) = std::str::from_utf8(param) else {
+            continue;
+        };
+        if let Some((key, value)) = param.split_once('=') {
+            fields.entry(key).or_insert(value);
+        }
+    }
+    fields
+}
+
+/// 反转义 VS Code（OSC 633）和 OSC 3008 的值：两个反斜杠是一个，`\xNN` 是一个字节；
+/// 结果要是 UTF-8。
+pub(super) fn unescape(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'\\' {
+            if bytes.get(at + 1) == Some(&b'\\') {
+                out.push(b'\\');
+                at += 2;
+                continue;
+            }
+            if bytes.get(at + 1) == Some(&b'x')
+                && let Some(hex) = value.get(at + 2..at + 4)
+                && let Ok(byte) = u8::from_str_radix(hex, 16)
+            {
+                out.push(byte);
+                at += 4;
+                continue;
+            }
+        }
+        out.push(bytes[at]);
+        at += 1;
+    }
+    String::from_utf8(out).ok()
 }
 
 #[cfg(test)]
@@ -80,8 +208,74 @@ mod tests {
     use super::*;
 
     fn parse(sequence: &str) -> Option<ReportedDirectory> {
+        source_of(sequence).map(|(_, directory)| directory)
+    }
+
+    fn source_of(sequence: &str) -> Option<(DirectorySource, ReportedDirectory)> {
         let params: Vec<&[u8]> = sequence.split(';').map(str::as_bytes).collect();
         reported_directory(&params)
+    }
+
+    #[test]
+    fn kitty_names_the_host_and_a_raw_path() {
+        assert_eq!(
+            parse("7;kitty-shell-cwd://web-01/srv/a%20b"),
+            at(Some("web-01"), "/srv/a%20b")
+        );
+        assert_eq!(
+            source_of("7;kitty-shell-cwd://web-01/srv").unwrap().0,
+            DirectorySource::Osc7
+        );
+    }
+
+    #[test]
+    fn vs_code_reports_an_escaped_path() {
+        assert_eq!(
+            parse(r"633;P;Cwd=/srv/a\x3bb\\c"),
+            at(None, r"/srv/a;b\c")
+        );
+        // Windows 上的 pwsh。
+        assert_eq!(parse(r"633;P;Cwd=C:\\Users\\qi"), at(None, r"C:\Users\qi"));
+        assert_eq!(parse("633;P;IsWindows=True"), None);
+        assert_eq!(parse("633;A"), None);
+    }
+
+    #[test]
+    fn osc_3008_reports_the_folder_and_the_host_of_a_context() {
+        assert_eq!(
+            parse(r"3008;start=8f1a;type=shell;user=qi;hostname=web-01;cwd=/srv/a\x3bb"),
+            at(Some("web-01"), "/srv/a;b")
+        );
+        assert_eq!(
+            parse("3008;start=1;type=command;cwd=/tmp"),
+            at(None, "/tmp")
+        );
+        // 结束的上下文不带目录；没有 `start=` 的不算。
+        assert_eq!(parse("3008;end=8f1a;exit=success"), None);
+        assert_eq!(parse("3008;type=shell;cwd=/tmp"), None);
+        assert_eq!(parse("3008;start=1;cwd=relative"), None);
+    }
+
+    #[test]
+    fn conemu_reports_a_windows_or_posix_path_quoted_or_not() {
+        assert_eq!(parse(r#"9;9;"C:\Users\qi""#), at(None, r"C:\Users\qi"));
+        assert_eq!(parse(r"9;9;D:\work;x"), at(None, r"D:\work;x"));
+        assert_eq!(parse("9;9;/home/qi"), at(None, "/home/qi"));
+        assert_eq!(parse("9;9;relative"), None);
+        assert_eq!(parse("9;4;1;50"), None);
+    }
+
+    #[test]
+    fn the_sources_rank_as_the_spec_lists_them() {
+        let rank = |sequence| source_of(sequence).unwrap().0;
+        let ranks = [
+            rank("7;file:///a"),
+            rank("1337;CurrentDir=/a"),
+            rank("633;P;Cwd=/a"),
+            rank("3008;start=1;cwd=/a"),
+            rank("9;9;/a"),
+        ];
+        assert!(ranks.windows(2).all(|pair| pair[0] < pair[1]), "{ranks:?}");
     }
 
     fn at(host: Option<&str>, path: &str) -> Option<ReportedDirectory> {

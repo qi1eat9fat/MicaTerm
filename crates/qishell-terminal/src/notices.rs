@@ -7,11 +7,14 @@
 //!
 //! Alacritty drops both OSC sequences, so the parser thread runs the output
 //! through `NoticeScanner` too. The same pass picks up the folder a shell
-//! reports (OSC 7 and 1337, see `directory`), which Alacritty drops as well.
+//! reports (OSC 7, 1337, 633, 3008, 9;9, see `directory`), which Alacritty
+//! drops as well, and what a shell integration says about the command line
+//! (OSC 133, 633, 3008, see `activity`).
 
 use alacritty_terminal::vte::{Parser, Perform};
 
-use super::directory::{ReportedDirectory, reported_directory};
+use super::activity::{ShellCommand, shell_command};
+use super::directory::{DirectorySource, ReportedDirectory, reported_directory};
 
 /// The longest title and body a notification shows, in characters.
 const TITLE_LIMIT: usize = 80;
@@ -62,6 +65,10 @@ pub struct NoticeScanner {
     parser: Parser,
     found: Vec<ProgramNotice>,
     directory: Option<ReportedDirectory>,
+    /// 这条连接上收下过的最可信的目录来源：比它靠后的不再听（工单 17 的目录优先级）。
+    best_source: Option<DirectorySource>,
+    /// shell 集成最近说的命令状态，还没取走的（工单 17）。
+    command: Option<ShellCommand>,
 }
 
 impl Default for NoticeScanner {
@@ -70,6 +77,8 @@ impl Default for NoticeScanner {
             parser: Parser::new(),
             found: Vec::new(),
             directory: None,
+            best_source: None,
+            command: None,
         }
     }
 }
@@ -80,6 +89,8 @@ impl NoticeScanner {
         let mut found = Found {
             notices: &mut self.found,
             directory: &mut self.directory,
+            best_source: &mut self.best_source,
+            command: &mut self.command,
         };
         self.parser.advance(&mut found, bytes);
         std::mem::take(&mut self.found)
@@ -90,19 +101,36 @@ impl NoticeScanner {
     pub fn take_directory(&mut self) -> Option<ReportedDirectory> {
         self.directory.take()
     }
+
+    /// shell 集成最近说的命令状态（OSC 133、633、3008），自上次取走以来的：只有最后的算，
+    /// 同一条命令先报的名字留着（`ShellCommand::after`）。
+    pub fn take_command(&mut self) -> Option<ShellCommand> {
+        self.command.take()
+    }
 }
 
 struct Found<'a> {
     notices: &'a mut Vec<ProgramNotice>,
     directory: &'a mut Option<ReportedDirectory>,
+    best_source: &'a mut Option<DirectorySource>,
+    command: &'a mut Option<ShellCommand>,
 }
 
 impl Perform for Found<'_> {
     fn osc_dispatch(&mut self, params: &[&[u8]], _: bool) {
         if let Some(notice) = program_notice(params) {
             self.notices.push(notice);
-        } else if let Some(directory) = reported_directory(params) {
+            return;
+        }
+        // OSC 3008 同时带目录和命令状态，两样都看。
+        if let Some((source, directory)) = reported_directory(params)
+            && self.best_source.is_none_or(|best| source <= best)
+        {
+            *self.best_source = Some(source);
             *self.directory = Some(directory);
+        }
+        if let Some(command) = shell_command(params) {
+            *self.command = Some(command.after(self.command.as_ref()));
         }
     }
 }
