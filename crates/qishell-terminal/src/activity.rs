@@ -17,8 +17,8 @@
 
 use percent_encoding::percent_decode_str;
 
-use crate::directory::{context_fields, joined, unescape};
 use crate::ReportedDirectory;
+use crate::directory::{context_fields, joined, unescape};
 
 /// shell 集成说的「命令在跑 / 回到提示符」。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,7 +114,9 @@ pub fn command_name(line: &str) -> Option<String> {
         let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
         // 这些前缀的选项里，后面还跟着一个参数的。
         let takes_value: &[&str] = match name {
-            "sudo" => &["-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T", "-R"],
+            "sudo" => &[
+                "-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T", "-R",
+            ],
             "doas" => &["-u", "-C"],
             "env" => &["-u", "-C", "-S", "--unset", "--chdir", "--split-string"],
             "nice" => &["-n", "--adjustment"],
@@ -226,9 +228,8 @@ fn ansi_c_quoted(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, word: &mu
                     })
                     .take(2)
                     .collect();
-                    if let Some(character) = u32::from_str_radix(&hex, 16)
-                        .ok()
-                        .and_then(char::from_u32)
+                    if let Some(character) =
+                        u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
                     {
                         word.push(character);
                     }
@@ -423,9 +424,7 @@ impl ShellActivity {
 
     /// 显示用的目录：序列报告的优先，其次是标题里的。
     pub fn directory(&self) -> Option<&str> {
-        self.reported
-            .as_deref()
-            .or(self.title_directory.as_deref())
+        self.reported.as_deref().or(self.title_directory.as_deref())
     }
 
     /// 能用作 SFTP 和分屏初始目录的：序列报告的；标题里的只有 `/` 或 `~/` 开头才算。
@@ -770,7 +769,10 @@ mod tests {
     fn a_name_reported_first_survives_a_bare_start() {
         let named = ShellCommand::Running(Some("git".into()));
         assert_eq!(ShellCommand::Running(None).after(Some(&named)), named);
-        assert_eq!(ShellCommand::Prompt.after(Some(&named)), ShellCommand::Prompt);
+        assert_eq!(
+            ShellCommand::Prompt.after(Some(&named)),
+            ShellCommand::Prompt
+        );
         assert_eq!(
             ShellCommand::Running(None).after(Some(&ShellCommand::Prompt)),
             ShellCommand::Running(None)

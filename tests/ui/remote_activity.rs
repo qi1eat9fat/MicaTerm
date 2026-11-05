@@ -11,7 +11,13 @@ use qishell_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
-fn open_remote(cx: &mut TestAppContext) -> (WindowHandle<Root>, Entity<Workspace>, Arc<FakeRemoteTerminals>) {
+fn open_remote(
+    cx: &mut TestAppContext,
+) -> (
+    WindowHandle<Root>,
+    Entity<Workspace>,
+    Arc<FakeRemoteTerminals>,
+) {
     let remote = Arc::new(FakeRemoteTerminals::default());
     let services = WorkspaceServices {
         hosts: HostData::seed(),
@@ -96,7 +102,7 @@ fn a_command_the_shell_integration_reports_becomes_the_cards_tile(cx: &mut TestA
     assert!(wait_until(cx, handle, |cx| tile(cx, &workspace) == Some(htop.clone())));
     assert_eq!(
         cx.update(|cx| workspace.read(cx).tab_tiles(TabId(1), cx)),
-        [htop.clone()]
+        std::slice::from_ref(&htop)
     );
 
     // 回到提示符：换回系统徽章。
@@ -107,9 +113,7 @@ fn a_command_the_shell_integration_reports_becomes_the_cards_tile(cx: &mut TestA
 }
 
 #[gpui_kit::test]
-fn a_full_screen_program_with_no_name_keeps_the_badge_and_lights_the_dot(
-    cx: &mut TestAppContext,
-) {
+fn a_full_screen_program_with_no_name_keeps_the_badge_and_lights_the_dot(cx: &mut TestAppContext) {
     let (handle, workspace, remote) = open_remote(cx);
     connect(cx, handle, &workspace);
     remote.factory.print(1, "\x1b[?1049hloading…");
@@ -123,7 +127,9 @@ fn a_full_screen_program_with_no_name_keeps_the_badge_and_lights_the_dot(
 fn a_reported_folder_naming_the_host_shows_once_its_name_is_known(cx: &mut TestAppContext) {
     let (handle, workspace, remote) = open_remote(cx);
     connect(cx, handle, &workspace);
-    remote.factory.print(1, "\x1b]7;file://web-01/srv/app\x07$ ");
+    remote
+        .factory
+        .print(1, "\x1b]7;file://web-01/srv/app\x07$ ");
     // 还没探测出 `uname -n`：带主机名的报告先不信。
     wait_until(cx, handle, |cx| !directory(cx, &workspace).is_empty());
     assert_eq!(directory(cx, &workspace), "");
@@ -158,18 +164,24 @@ fn without_reports_the_folder_comes_from_the_title_which_the_header_tip_shows_in
             let card = workspace.read(cx).card(CardId(1), cx).unwrap().read(cx);
             (
                 card.remote_start_directory().map(str::to_string),
-                card.remote_activity().and_then(|activity| activity.title.clone()),
+                card.remote_activity()
+                    .and_then(|activity| activity.title.clone()),
             )
         })
     };
     // 单独一个 `~` 只用来显示，不能用作 SFTP 的初始目录。
     assert_eq!(card(cx), (None, Some("root@web-01: ~".into())));
 
-    remote.factory.print(1, "\x1b]0;root@web-01: ~/src/app\x07$ ");
+    remote
+        .factory
+        .print(1, "\x1b]0;root@web-01: ~/src/app\x07$ ");
     assert!(wait_until(cx, handle, |cx| directory(cx, &workspace) == "~/src/app"));
     assert_eq!(
         card(cx),
-        (Some("~/src/app".into()), Some("root@web-01: ~/src/app".into()))
+        (
+            Some("~/src/app".into()),
+            Some("root@web-01: ~/src/app".into())
+        )
     );
     // 头部固定是「主机名 + 目录」。
     let header = in_frame(cx, handle, |window, _| {

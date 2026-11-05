@@ -230,10 +230,7 @@ mod tests {
 
     #[test]
     fn vs_code_reports_an_escaped_path() {
-        assert_eq!(
-            parse(r"633;P;Cwd=/srv/a\x3bb\\c"),
-            at(None, r"/srv/a;b\c")
-        );
+        assert_eq!(parse(r"633;P;Cwd=/srv/a\x3bb\\c"), at(None, r"/srv/a;b\c"));
         // Windows 上的 pwsh。
         assert_eq!(parse(r"633;P;Cwd=C:\\Users\\qi"), at(None, r"C:\Users\qi"));
         assert_eq!(parse("633;P;IsWindows=True"), None);
