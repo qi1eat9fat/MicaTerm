@@ -357,7 +357,9 @@ fn a_host_that_gives_one_channel_per_connection_gets_a_new_connection_per_termin
     second.echo("still mine\n");
     second.close();
     third.close();
-    wait_until("都关了，连接都断开", || remote.connection_count() == 0);
+    wait_until("都关了，连接都断开", || {
+        remote.connection_count() == 0
+    });
 }
 
 #[test]

@@ -399,6 +399,10 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let target = self.focus_handle.clone();
+        // 主机栏右侧的绿色数字（工单 16）：开卡片、关卡片、关标签都会让窗口壳重画，这里统一告诉主机列表。
+        let open_cards = self.open_cards_by_host(cx);
+        self.host_list
+            .update(cx, |list, cx| list.set_open_cards(open_cards, cx));
         // 有标签时是在前那个标签的内容，没有时是开始卡片。
         let content = div()
             .flex()
