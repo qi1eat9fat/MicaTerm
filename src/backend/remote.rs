@@ -70,6 +70,9 @@ pub enum RemoteEvent {
         terminal: RemoteTerminalId,
         host: ProbedHost,
     },
+    /// 连接 `connection` 不要了（等它的终端都放手了）：它还没答的问题都作废，窗口壳关掉问答框、
+    /// 不再问排着的。
+    PromptsWithdrawn { connection: ConnectionId },
 }
 
 /// 远程终端的传输从哪里来。生产是 [`SshRemoteTerminals`]，测试注入假的。

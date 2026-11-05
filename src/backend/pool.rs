@@ -401,6 +401,10 @@ impl ConnectionPool {
         };
         let _ = removed.shutdown.send(true);
         removed.broker.cancel_all();
+        // 问答框可能还开着：告诉窗口壳这条连接的问题都作废了。
+        let _ = self
+            .events
+            .try_send(RemoteEvent::PromptsWithdrawn { connection: id });
         if let Link::Up(handle) = &*removed.link.borrow() {
             let handle = handle.clone();
             self.runtime.spawn(async move { hang_up(&handle).await });

@@ -10,18 +10,19 @@ use std::collections::VecDeque;
 use gpui_kit::*;
 
 use crate::backend::{
-    ConnectionPromptKind, ConnectionPromptReply, JumpLogin, LoginRoute, PromptId, RemotePrompt,
-    RemoteTarget,
+    ConnectionId, ConnectionPromptKind, ConnectionPromptReply, JumpLogin, LoginRoute, PromptId,
+    RemotePrompt, RemoteTarget,
 };
 use crate::card::CardId;
 use crate::connect::open_prompt_dialog;
+use crate::ui::DialogLayer;
 use crate::workspace::Workspace;
 
-/// 排着的问题，和正在问的那个。
+/// 排着的问题，和正在问的那个（连同它的问答框那一层）。
 #[derive(Default)]
 pub(in crate::workspace) struct PromptQueue {
     waiting: VecDeque<RemotePrompt>,
-    shown: Option<PromptId>,
+    shown: Option<(PromptId, DialogLayer)>,
 }
 
 impl PromptQueue {
@@ -31,6 +32,26 @@ impl PromptQueue {
 }
 
 impl Workspace {
+    /// 连接 `connection` 的问题都作废了（等它的卡片都关了）：排着的不再问，正在问的关掉问答框
+    /// （不交回答），接着问下一个。
+    pub(super) fn withdraw_prompts(
+        &mut self,
+        connection: ConnectionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompts
+            .waiting
+            .retain(|prompt| prompt.id.connection != connection);
+        if let Some((id, layer)) = &self.prompts.shown
+            && id.connection == connection
+        {
+            layer.close(window, cx);
+            self.prompts.shown = None;
+            self.show_next_prompt(window, cx);
+        }
+    }
+
     /// 没在问别的，就把排着的下一个问题打开。
     pub(super) fn show_next_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.prompts.shown.is_some() {
@@ -53,10 +74,9 @@ impl Workspace {
                 prompt_subtitle(card.name(), &prompt.kind, card.remote_target())
             };
             let id = prompt.id;
-            self.prompts.shown = Some(id);
             let remote = self.services.remote_terminals.clone();
             let workspace = cx.weak_entity();
-            open_prompt_dialog(
+            let layer = open_prompt_dialog(
                 subtitle,
                 prompt.kind,
                 move |reply, window, cx| {
@@ -69,13 +89,14 @@ impl Workspace {
                 window,
                 cx,
             );
+            self.prompts.shown = Some((id, layer));
             return;
         }
     }
 
     /// 正在问的问题，测试用。
     pub fn shown_prompt(&self) -> Option<PromptId> {
-        self.prompts.shown
+        self.prompts.shown.as_ref().map(|(id, _)| *id)
     }
 }
 

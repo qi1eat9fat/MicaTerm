@@ -58,6 +58,10 @@ impl Workspace {
                 self.show_next_prompt(window, cx);
                 return;
             }
+            RemoteEvent::PromptsWithdrawn { connection } => {
+                self.withdraw_prompts(connection, window, cx);
+                return;
+            }
             RemoteEvent::Attached {
                 terminal,
                 connection,
