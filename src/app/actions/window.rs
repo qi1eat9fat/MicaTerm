@@ -11,7 +11,7 @@ gpui_kit::actions!(
         QuickConnect,
         /// 右侧栏「文件」：打开或切换到 SFTP 标签（Ctrl+Shift+U）。在 M3 接上。
         OpenSftp,
-        /// 右侧栏「命令片段」面板（Ctrl+Shift+S）。在 M2（工单 19）接上。
+        /// 展开或收起右侧栏的「命令片段」面板（Ctrl+Shift+S）。
         ShowSnippets,
         /// 右侧栏「凭据」面板。在 M2（工单 14）接上。
         ShowCredentials,

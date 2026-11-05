@@ -7,10 +7,12 @@
 
 mod cards;
 mod settings;
+mod snippets;
 mod tabs;
 mod window;
 
 pub use cards::*;
 pub use settings::*;
+pub use snippets::*;
 pub use tabs::*;
 pub use window::*;
