@@ -289,14 +289,30 @@ fn the_host_menu_edits_copies_and_deletes(cx: &mut TestAppContext) {
 
     assert_eq!(
         menu_labels(cx, handle, 1),
-        ["连接", "编辑…", "创建副本", "复制 IP", "删除"]
+        [
+            "连接",
+            "在右侧分屏打开",
+            "在下方分屏打开",
+            "编辑…",
+            "创建副本",
+            "复制 IP",
+            "删除"
+        ]
     );
     // 右键也选中那一台。
     assert_eq!(selected(cx, &workspace), Some(1));
     // 地址是域名时叫「复制主机名」。
     assert_eq!(
         menu_labels(cx, handle, 7),
-        ["连接", "编辑…", "创建副本", "复制主机名", "删除"]
+        [
+            "连接",
+            "在右侧分屏打开",
+            "在下方分屏打开",
+            "编辑…",
+            "创建副本",
+            "复制主机名",
+            "删除"
+        ]
     );
 }
 

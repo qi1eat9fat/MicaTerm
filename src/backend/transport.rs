@@ -141,7 +141,8 @@ impl RemoteTransport {
         result
     }
 
-    /// 借连接、开 shell 通道。复用的连接开不出通道（只给一个通道的堡垒机）时，改成新建一条连接。
+    /// 借连接、开 shell 通道。复用的连接开不出通道（只给一个通道的堡垒机：拒开通道，
+    /// 或者通道开了却不给终端、不给 shell）时，改成新建一条连接。
     async fn open(
         &self,
         size: TerminalSize,
@@ -150,10 +151,7 @@ impl RemoteTransport {
         let handle = lease.ready().await?;
         match open_shell(&handle, TERM_NAME, pty_size(size)).await {
             Ok(channel) => return Ok((lease, handle, channel)),
-            Err(error)
-                if lease.reused()
-                    && find_cause::<ChannelError>(&error) == Some(&ChannelError::SessionFailed) =>
-            {
+            Err(error) if lease.reused() && refused_another_channel(&error) => {
                 self.pool.mark_single_channel(&self.target);
             }
             Err(error) => return Err(describe_error(&error)),
@@ -166,6 +164,14 @@ impl RemoteTransport {
             .map_err(|error| describe_error(&error))?;
         Ok((lease, handle, channel))
     }
+}
+
+/// 已经开着通道的连接上，服务器不肯再给一个 shell：开通道、要终端、要 shell 哪一步被拒都算。
+fn refused_another_channel(error: &anyhow::Error) -> bool {
+    matches!(
+        find_cause::<ChannelError>(error),
+        Some(ChannelError::SessionFailed | ChannelError::PtyRefused | ChannelError::ShellRefused)
+    )
 }
 
 /// 在 shell 通道和终端之间搬字节，直到 shell 退出、连接断开或终端关掉。
