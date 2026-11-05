@@ -88,3 +88,7 @@ zed-font-kit = { opt-level = 3 }
 # 保险库的 Argon2id：不优化时 64 MiB、3 遍要好几秒（照 shell-rs）。
 argon2 = { opt-level = 3 }
 blake2 = { opt-level = 3 }
+# 凭据对话框「生成新密钥」的 RSA 4096：不优化时找素数要很久（工单 14）。
+rsa = { opt-level = 3 }
+crypto-bigint = { opt-level = 3 }
+crypto-primes = { opt-level = 3 }

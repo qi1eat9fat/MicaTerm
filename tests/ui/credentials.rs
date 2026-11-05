@@ -166,3 +166,287 @@ fn an_unlocked_vault_locks_from_the_bar(cx: &mut TestAppContext) {
         Some("保险库已锁定")
     );
 }
+
+// ---- 凭据对话框：三种凭据的新建 ----
+
+/// 只在内存里的秘密，测试拿着它看存了什么。
+fn open_with_secrets(
+    cx: &mut TestAppContext,
+) -> (
+    WindowHandle<Root>,
+    Entity<Workspace>,
+    Arc<InMemorySecretStore>,
+) {
+    let secrets = Arc::new(InMemorySecretStore::default());
+    let (handle, workspace, _) = open_with(
+        cx,
+        WorkspaceServices {
+            secrets: secrets.clone(),
+            ..fake_services()
+        },
+    );
+    (handle, workspace, secrets)
+}
+
+/// 把字段 `field` 的内容换成 `text`。
+fn fill(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str, text: &str) {
+    let field = gpui_kit::SharedString::from(field.to_owned());
+    in_frame(cx, handle, move |window, cx| window.click(field, cx));
+    in_frame(cx, handle, |window, cx| {
+        window.press("ctrl-a", cx);
+        window.press("backspace", cx);
+        if !text.is_empty() {
+            window.input(text, cx);
+        }
+    });
+}
+
+fn error_of(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str) -> Option<String> {
+    label(
+        cx,
+        handle,
+        gpui_kit::SharedString::from(format!("{field}-error")),
+    )
+}
+
+fn credential_dialog_open(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> bool {
+    present(cx, handle, "credential-dialog")
+}
+
+/// 从凭据面板的「+」打开新建凭据对话框。
+fn new_credential(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
+    dispatch(cx, handle, ShowCredentials);
+    click(cx, handle, "credentials-new");
+    assert!(credential_dialog_open(cx, handle));
+}
+
+fn save_credential(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
+    click(cx, handle, "credential-dialog-save");
+}
+
+fn credential(
+    cx: &mut TestAppContext,
+    workspace: &Entity<Workspace>,
+    id: u64,
+) -> Option<qishell_hosts::Credential> {
+    cx.update(|cx| {
+        workspace
+            .read(cx)
+            .hosts()
+            .read(cx)
+            .credential(qishell_hosts::CredentialId(id))
+            .cloned()
+    })
+}
+
+fn secret(secrets: &InMemorySecretStore, secret: &SecretRef) -> Option<String> {
+    secrets
+        .get(secret)
+        .unwrap()
+        .map(|value| value.as_str().to_owned())
+}
+
+#[gpui_kit::test]
+fn a_new_password_credential_keeps_its_password_in_the_vault(cx: &mut TestAppContext) {
+    let (handle, workspace, secrets) = open_with_secrets(cx);
+    new_credential(cx, handle);
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(
+            window.find("credential-dialog-title").label(),
+            Some("新建凭据")
+        );
+        assert_eq!(window.find("credential-name").focused(), Some(true));
+    });
+
+    click(cx, handle, ("credential-kind", 0usize));
+    save_credential(cx, handle);
+    // 名称和密码都是必填的；出错时对话框不关。
+    assert!(credential_dialog_open(cx, handle));
+    assert_eq!(
+        error_of(cx, handle, "credential-name").as_deref(),
+        Some("名称不能为空")
+    );
+    assert_eq!(
+        error_of(cx, handle, "credential-password").as_deref(),
+        Some("请输入密码")
+    );
+
+    fill(cx, handle, "credential-name", "跳板密码");
+    fill(cx, handle, "credential-user", "ops");
+    fill(cx, handle, "credential-password", "hunter2");
+    save_credential(cx, handle);
+
+    assert!(!credential_dialog_open(cx, handle));
+    let saved = credential(cx, &workspace, 5).expect("saved");
+    assert_eq!(saved.name.as_ref(), "跳板密码");
+    assert_eq!(saved.kind, qishell_hosts::CredentialKind::Password);
+    assert_eq!(saved.user.as_ref(), "ops");
+    assert_eq!(
+        secret(&secrets, &saved.password_secret()).as_deref(),
+        Some("hunter2")
+    );
+    assert_eq!(
+        label(cx, handle, row(5)).as_deref(),
+        Some("跳板密码 · 密码 · ops · 未使用")
+    );
+}
+
+#[gpui_kit::test]
+fn a_generated_key_shows_its_public_key_and_goes_into_the_vault(cx: &mut TestAppContext) {
+    let (handle, workspace, secrets) = open_with_secrets(cx);
+    new_credential(cx, handle);
+    // 新建时照原型默认「密钥 · 生成新密钥 · Ed25519」。
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(
+            window.find(("credential-kind", 1usize)).selected(),
+            Some(true)
+        );
+        assert_eq!(
+            window.find(("credential-key-source", 2usize)).selected(),
+            Some(true)
+        );
+        assert_eq!(
+            window.find(("credential-key-algorithm", 0usize)).selected(),
+            Some(true)
+        );
+    });
+    fill(cx, handle, "credential-name", "新服务器密钥");
+    fill(cx, handle, "credential-user", "deploy");
+
+    let line = label(cx, handle, "credential-public-key").expect("the public key");
+    assert!(line.starts_with("ssh-ed25519 "), "{line}");
+    assert!(line.ends_with(" 新服务器密钥"), "{line}");
+    click(cx, handle, "credential-copy-public-key");
+    let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert_eq!(copied.as_deref(), Some(line.as_str()));
+
+    fill(cx, handle, "credential-passphrase", "correct horse");
+    save_credential(cx, handle);
+
+    assert!(!credential_dialog_open(cx, handle));
+    let saved = credential(cx, &workspace, 5).expect("saved");
+    assert_eq!(saved.kind, qishell_hosts::CredentialKind::Key);
+    assert_eq!(saved.public_key.as_deref(), Some(line.as_str()));
+    // 私钥用口令加密后存进保险库，口令也存。
+    let text = secret(&secrets, &saved.private_key_secret()).expect("the private key");
+    let pasted = qishell_hosts::PastedKey::parse(&text).unwrap();
+    assert!(pasted.is_encrypted());
+    assert_eq!(
+        secret(&secrets, &saved.passphrase_secret()).as_deref(),
+        Some("correct horse")
+    );
+    assert_eq!(
+        label(cx, handle, row(5)).as_deref(),
+        Some("新服务器密钥 · 密钥 · ED25519 · deploy · 未使用")
+    );
+}
+
+/// 一把没加密的 Ed25519 私钥的文件内容和它的公钥。
+fn plain_key() -> (String, String) {
+    let key = qishell_hosts::GeneratedKey::generate(qishell_hosts::KeyAlgorithm::Ed25519).unwrap();
+    (
+        key.encode("me@laptop", "").unwrap().to_string(),
+        key.public_key_line("me@laptop"),
+    )
+}
+
+#[gpui_kit::test]
+fn a_pasted_key_is_read_for_its_public_key_and_kept_in_the_vault(cx: &mut TestAppContext) {
+    let (handle, workspace, secrets) = open_with_secrets(cx);
+    new_credential(cx, handle);
+    fill(cx, handle, "credential-name", "笔记本的密钥");
+    click(cx, handle, ("credential-key-source", 1usize));
+
+    // 贴进来的是公钥：说清楚要的是私钥。
+    let (text, public) = plain_key();
+    cx.update(|cx| cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(public.clone())));
+    click(cx, handle, "credential-key-text");
+    in_frame(cx, handle, |window, cx| window.press("ctrl-v", cx));
+    save_credential(cx, handle);
+    assert_eq!(
+        error_of(cx, handle, "credential-key-text").as_deref(),
+        Some("这是公钥（放在服务器上的那一半），请粘贴私钥")
+    );
+
+    cx.update(|cx| cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text.clone())));
+    click(cx, handle, "credential-key-text");
+    in_frame(cx, handle, |window, cx| {
+        window.press("ctrl-a", cx);
+        window.press("ctrl-v", cx);
+    });
+    assert_eq!(
+        label(cx, handle, "credential-public-key").as_deref(),
+        Some(public.as_str())
+    );
+    save_credential(cx, handle);
+
+    assert!(!credential_dialog_open(cx, handle));
+    let saved = credential(cx, &workspace, 5).expect("saved");
+    assert_eq!(saved.user.as_ref(), "root", "用户名留空用 root");
+    assert_eq!(saved.public_key.as_deref(), Some(public.as_str()));
+    assert_eq!(
+        secret(&secrets, &saved.private_key_secret()).as_deref(),
+        Some(text.as_str())
+    );
+    // 没加密的私钥没有口令可存。
+    assert_eq!(secret(&secrets, &saved.passphrase_secret()), None);
+}
+
+#[gpui_kit::test]
+fn a_key_file_is_copied_into_the_vault_once(cx: &mut TestAppContext) {
+    let (handle, workspace, secrets) = open_with_secrets(cx);
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("id_ed25519");
+    let (text, public) = plain_key();
+    std::fs::write(&path, text.replace('\n', "\r\n")).unwrap();
+
+    new_credential(cx, handle);
+    fill(cx, handle, "credential-name", "本机私钥");
+    click(cx, handle, ("credential-key-source", 0usize));
+    save_credential(cx, handle);
+    assert_eq!(
+        error_of(cx, handle, "credential-key-file").as_deref(),
+        Some("请选择私钥文件")
+    );
+    fill(
+        cx,
+        handle,
+        "credential-key-file",
+        &folder.path().join("missing").to_string_lossy(),
+    );
+    save_credential(cx, handle);
+    assert_eq!(
+        error_of(cx, handle, "credential-key-file").as_deref(),
+        Some("读不出这个文件")
+    );
+
+    fill(cx, handle, "credential-key-file", &path.to_string_lossy());
+    save_credential(cx, handle);
+
+    assert!(!credential_dialog_open(cx, handle));
+    // 文件只读这一次：删掉它，保险库里的照样在。
+    drop(folder);
+    let saved = credential(cx, &workspace, 5).expect("saved");
+    assert_eq!(saved.public_key.as_deref(), Some(public.as_str()));
+    assert_eq!(
+        secret(&secrets, &saved.private_key_secret()).as_deref(),
+        Some(text.as_str())
+    );
+}
+
+#[gpui_kit::test]
+fn an_agent_credential_keeps_no_secret(cx: &mut TestAppContext) {
+    let (handle, workspace, secrets) = open_with_secrets(cx);
+    new_credential(cx, handle);
+    click(cx, handle, ("credential-kind", 2usize));
+    assert!(present(cx, handle, "credential-agent-hint"));
+    assert!(!present(cx, handle, "credential-passphrase"));
+    fill(cx, handle, "credential-name", "办公室 Agent");
+    fill(cx, handle, "credential-user", "ops");
+    save_credential(cx, handle);
+
+    assert!(!credential_dialog_open(cx, handle));
+    let saved = credential(cx, &workspace, 5).expect("saved");
+    assert_eq!(saved.kind, qishell_hosts::CredentialKind::Agent);
+    assert!(secrets.is_empty());
+}
