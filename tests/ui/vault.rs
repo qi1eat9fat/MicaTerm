@@ -262,6 +262,55 @@ fn a_saved_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestApp
     assert_eq!(host_names(cx, &workspace).len(), 6);
 }
 
+/// 代理密码存过、保险库锁着：和主机密码一样显示「已保存，保险库锁定中」，解开后换回密码框
+/// （工单 13，M2 code review S4）。
+#[gpui_kit::test]
+fn a_saved_proxy_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestAppContext) {
+    use qishell_hosts::{AuthKind, HostDraft, ProxyKind, ProxySettings, Route};
+    let proxy = SecretRef::proxy("me", "127.0.0.1", 1080);
+    let vault = TestVault::unlocked()
+        .with_secret(&proxy, "proxy-secret")
+        .locked();
+    let mut hosts = HostData::seed();
+    hosts.insert_unnotified(
+        HostDraft::new("mysql-01", "10.0.3.11", 22, "root", AuthKind::Password).with_route(
+            Route::Proxy(ProxySettings::new(ProxyKind::Socks5, "127.0.0.1", 1080).with_user("me")),
+        ),
+    );
+    let services = WorkspaceServices {
+        hosts,
+        ..vault.services()
+    };
+    let (handle, _) = open_workspace_with(cx, settings_store(), services);
+    in_frame(cx, handle, |window, _| window.activate_window());
+
+    dispatch(cx, handle, EditHost(qishell_hosts::HostId(7)));
+    reveal(cx, handle, "host-proxy-password-locked");
+    assert_eq!(
+        label(cx, handle, "host-proxy-password-locked").as_deref(),
+        Some("已保存，保险库锁定中 · 解锁后修改")
+    );
+    assert!(!visible(cx, handle, "host-proxy-password"));
+
+    // 只改名字：锁着的代理密码原样留着。
+    fill(cx, handle, "host-name", "mysql-01a");
+    click(cx, handle, "host-dialog-save");
+    assert!(!visible(cx, handle, "host-dialog"));
+    assert_eq!(vault.status(), VaultStatus::Locked);
+
+    // 再编辑，点「解锁…」：解开后换回密码框，填着存的密码。
+    dispatch(cx, handle, EditHost(qishell_hosts::HostId(7)));
+    click(cx, handle, "host-proxy-password-unlock");
+    fill(cx, handle, "vault-unlock-password", MASTER);
+    click(cx, handle, "vault-unlock-confirm");
+    assert!(!visible(cx, handle, "host-proxy-password-locked"));
+    assert!(visible(cx, handle, "host-proxy-password"));
+    fill(cx, handle, "host-proxy-password", "proxy-secret-2");
+    click(cx, handle, "host-dialog-save");
+    assert!(!visible(cx, handle, "host-dialog"));
+    assert_eq!(vault.read(&proxy).as_deref(), Some("proxy-secret-2"));
+}
+
 #[gpui_kit::test]
 fn saving_a_host_while_locked_leaves_its_saved_password_alone(cx: &mut TestAppContext) {
     let vault = TestVault::unlocked()
@@ -311,6 +360,75 @@ fn connecting_unlocks_only_when_a_saved_secret_is_needed(cx: &mut TestAppContext
     dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
     assert!(!visible(cx, handle, "vault-unlock"));
     assert_eq!(connected_hosts(&remote), vec![2, 1, 1]);
+}
+
+/// 解锁在后台算的时候，另一台主机的连接问密码，问答框叠在解锁框上面：解锁算完只关解锁框，
+/// 问答框留着，答了照常交给连接（M2 code review S1）。
+#[gpui_kit::test]
+fn a_question_asked_while_unlocking_stays_open_and_gets_its_answer(cx: &mut TestAppContext) {
+    let vault = TestVault::unlocked()
+        .with_secret(&web01_password(), "hunter2")
+        .locked();
+    let (handle, workspace, remote) = open_with_vault(cx, &vault);
+    // web-02 没存密码，直接连。
+    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(2)));
+    let terminal = remote.targets()[0].0.0;
+
+    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    fill(cx, handle, "vault-unlock-password", MASTER);
+    let prompt = std::cell::Cell::new(None);
+    in_frame(cx, handle, |window, cx| {
+        window.click("vault-unlock-confirm", cx);
+        prompt.set(Some(remote.ask(
+            terminal,
+            qishell::backend::ConnectionPromptKind::authentication(
+                qishell::backend::AuthenticationRequest::Password {
+                    saved_rejected: false,
+                },
+            ),
+        )));
+    });
+    let prompt = prompt.get().unwrap();
+
+    assert_eq!(vault.status(), VaultStatus::Unlocked { remembered: true });
+    assert!(!visible(cx, handle, "vault-unlock"));
+    assert!(visible(cx, handle, "connection-prompt"), "问答框还开着");
+    cx.update(|cx| assert_eq!(workspace.read(cx).shown_prompt(), Some(prompt)));
+
+    in_frame(cx, handle, |window, cx| {
+        window.click(("prompt-field", 0usize), cx)
+    });
+    in_frame(cx, handle, |window, cx| window.input("s3cret", cx));
+    click(cx, handle, "prompt-confirm");
+    assert_eq!(
+        remote.replies(),
+        [(prompt, Answered::Answers(vec!["s3cret".into()]))]
+    );
+    assert!(!visible(cx, handle, "connection-prompt"));
+    cx.update(|cx| assert_eq!(workspace.read(cx).shown_prompt(), None));
+    // web-01 解开后照常连上。
+    assert_eq!(connected_hosts(&remote), vec![2, 1]);
+}
+
+/// 复用已经连着的连接用不到秘密：保险库锁了，分屏那张远程卡片、再双击那台主机都不弹解锁框
+/// （M2 code review S2）。
+#[gpui_kit::test]
+fn reusing_a_live_connection_does_not_ask_to_unlock(cx: &mut TestAppContext) {
+    let vault = TestVault::unlocked().with_secret(&web01_password(), "hunter2");
+    let (handle, _, remote) = open_with_vault(cx, &vault);
+    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    assert_eq!(connected_hosts(&remote), vec![1]);
+    click(cx, handle, "lock-vault");
+    assert_eq!(vault.status(), VaultStatus::Locked);
+
+    dispatch(cx, handle, qishell::app::SplitRight);
+    assert!(!visible(cx, handle, "vault-unlock"));
+    assert_eq!(connected_hosts(&remote), vec![1, 1]);
+
+    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    assert!(!visible(cx, handle, "vault-unlock"));
+    assert_eq!(connected_hosts(&remote), vec![1, 1, 1]);
+    assert_eq!(vault.status(), VaultStatus::Locked);
 }
 
 #[gpui_kit::test]

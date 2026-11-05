@@ -162,6 +162,16 @@ impl ConnectionPool {
         self.lock().entries.len()
     }
 
+    /// 现在 `attach(.., target, false)` 会不会复用已有的连接（不新登录）。
+    pub(super) fn reuses_connection(&self, target: &RemoteTarget) -> bool {
+        let state = self.lock();
+        !state.single_channel.contains(target)
+            && state
+                .entries
+                .iter()
+                .any(|entry| &entry.target == target && entry.reusable())
+    }
+
     /// 终端 `terminal` 借一条到 `target` 的连接：有能复用的就复用，否则新登录一次。
     /// `fresh` 时一定新登录，并且这条连接不给别人复用（单通道的主机）。
     pub(super) fn attach(
@@ -401,6 +411,10 @@ impl ConnectionPool {
         };
         let _ = removed.shutdown.send(true);
         removed.broker.cancel_all();
+        // 问答框可能还开着：告诉窗口壳这条连接的问题都作废了。
+        let _ = self
+            .events
+            .try_send(RemoteEvent::PromptsWithdrawn { connection: id });
         if let Link::Up(handle) = &*removed.link.borrow() {
             let handle = handle.clone();
             self.runtime.spawn(async move { hang_up(&handle).await });

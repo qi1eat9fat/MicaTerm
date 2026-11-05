@@ -6,7 +6,7 @@
 // 主机读哪些秘密由本文件的 `secrets_of` 算，和 login.rs 拼出的登录读的是同一套条目。
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui_shared_string::SharedString;
@@ -56,6 +56,9 @@ pub struct HostData {
     next_host_id: u64,
     /// Hosts in the order they last connected, most recent first.
     recent: Vec<HostId>,
+    /// When each host last connected (Unix seconds), for the start card's
+    /// 「10 分钟前」.
+    connected_at: HashMap<HostId, u64>,
     /// Credentials, in the order the credential list shows them.
     credentials: Vec<Credential>,
     next_credential_id: u64,
@@ -211,6 +214,7 @@ impl HostData {
             hosts: Vec::new(),
             next_host_id: 1,
             recent: Vec::new(),
+            connected_at: HashMap::new(),
             credentials: Vec::new(),
             next_credential_id: 1,
             snippets: Vec::new(),
@@ -235,11 +239,16 @@ impl HostData {
     pub fn load(database: HostDatabase) -> rusqlite::Result<Self> {
         let StoredData {
             mut hosts,
-            mut recent,
+            recent: stored_recent,
             credentials,
             snippets,
         } = database.load()?;
-        recent.truncate(MAX_RECENT);
+        let connected_at: HashMap<HostId, u64> = stored_recent.iter().copied().collect();
+        let recent: Vec<HostId> = stored_recent
+            .into_iter()
+            .map(|(id, _)| id)
+            .take(MAX_RECENT)
+            .collect();
         // A host using a credential has no user name of its own on disk:
         // memory keeps a copy of the credential's, taken here.
         for host in &mut hosts {
@@ -254,6 +263,7 @@ impl HostData {
             next_snippet_id: snippets.iter().map(|s| s.id.0).max().unwrap_or(0) + 1,
             hosts,
             recent,
+            connected_at,
             credentials,
             snippets,
             database: Some(database),
@@ -405,6 +415,7 @@ impl HostData {
             }
         }
         self.recent.retain(|recent| *recent != id);
+        self.connected_at.remove(&id);
         true
     }
 
@@ -642,22 +653,35 @@ impl HostData {
     /// A terminal or SFTP tab of the host connected: the host goes to the
     /// front of the recent list.
     pub fn record_connection(&mut self, id: HostId) {
-        if !self.record_connection_unnotified(id) {
+        let at = now_seconds();
+        if !self.record_connection_at_unnotified(id, at) {
             return;
         }
-        self.persist(Change::Recent, |db| db.touch_connected(id, now_seconds()));
+        self.persist(Change::Recent, |db| db.touch_connected(id, at));
         self.changed();
     }
 
     /// Returns whether it was a saved host's.
     pub fn record_connection_unnotified(&mut self, id: HostId) -> bool {
+        self.record_connection_at_unnotified(id, now_seconds())
+    }
+
+    /// The host connected at `at` (Unix seconds). Returns whether it was a
+    /// saved host's.
+    pub fn record_connection_at_unnotified(&mut self, id: HostId, at: u64) -> bool {
         if self.host(id).is_none() {
             return false;
         }
         self.recent.retain(|recent| *recent != id);
         self.recent.insert(0, id);
         self.recent.truncate(MAX_RECENT);
+        self.connected_at.insert(id, at);
         true
+    }
+
+    /// When the host last connected (Unix seconds); `None` if it never did.
+    pub fn last_connected(&self, id: HostId) -> Option<u64> {
+        self.connected_at.get(&id).copied()
     }
 
     /// Record what a connection found on the host. Called after every
@@ -695,7 +719,7 @@ impl HostData {
     /// background thread. A failure costs persistence, never the edit: it
     /// comes back as [`Failure::Secret`], exactly like a failed database
     /// write.
-    pub fn save_secret(&mut self, secret: SecretRef, value: Option<String>) {
+    pub fn save_secret(&mut self, secret: SecretRef, value: Option<Zeroizing<String>>) {
         let job = self.secret_job(secret, value);
         self.secret_jobs.push(job);
     }
@@ -703,11 +727,11 @@ impl HostData {
     /// The vault write [`Self::save_secret`] queues, for a caller that runs
     /// it itself to know how it went. Hand what it comes to back to
     /// [`Self::secret_done`].
-    pub fn secret_job(&self, secret: SecretRef, value: Option<String>) -> SecretJob {
+    pub fn secret_job(&self, secret: SecretRef, value: Option<Zeroizing<String>>) -> SecretJob {
         SecretJob {
             secrets: self.secrets(),
             secret,
-            value: value.map(Zeroizing::new),
+            value,
         }
     }
 
@@ -1459,7 +1483,26 @@ mod tests {
             store.recent_hosts().map(|s| s.id).collect::<Vec<_>>(),
             [HostId(9)]
         );
+        // 连接时间也读回来了：开始卡片写「10 分钟前」靠它（M2 code review S5）。
+        assert_eq!(store.last_connected(HostId(9)), Some(100));
+        assert_eq!(store.last_connected(HostId(7)), None);
         assert_eq!(store.insert_unnotified(draft("new")), HostId(10));
+    }
+
+    #[test]
+    fn connecting_records_when_and_removing_forgets_it() {
+        let mut store = HostData::load(HostDatabase::in_memory().unwrap()).unwrap();
+        let id = store.insert(draft("web-01"));
+        assert_eq!(store.last_connected(id), None);
+        let before = now_seconds();
+        store.record_connection(id);
+        let at = store.last_connected(id).expect("记下了连接时间");
+        assert!((before..=now_seconds()).contains(&at), "{at}");
+        let reloaded = store.database.as_ref().unwrap().load().unwrap();
+        assert_eq!(reloaded.recent, [(id, at)], "写进数据库的是同一个时间");
+
+        store.remove(id);
+        assert_eq!(store.last_connected(id), None);
     }
 
     #[test]
@@ -1500,7 +1543,7 @@ mod tests {
     fn a_vault_write_waits_for_its_runner_and_says_how_it_went() {
         let mut store = HostData::empty();
         let secret = SecretRef::password(1);
-        store.save_secret(secret.clone(), Some("hunter2".into()));
+        store.save_secret(secret.clone(), Some(Zeroizing::new("hunter2".into())));
         assert!(store.take_events().is_empty(), "nothing written yet");
         let jobs = store.take_secret_jobs();
         assert_eq!(jobs.len(), 1);

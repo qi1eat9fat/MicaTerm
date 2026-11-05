@@ -1,11 +1,12 @@
 //! 表单对话框的通用件，照全部界面原型的样式：分组（`.grp`）、一行字段（`.fr`：左边名称，
-//! 右边控件，出错时下面一行红字写原因）、输入框（`.in`）。主机、凭据、命令片段的对话框共用
+//! 右边控件，出错时下面一行红字写原因）、输入框（`.in`）。主机、凭据、命令片段、保险库的对话框共用
 //! （spec 第 4 节「编辑表单」）。
 
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use zeroize::Zeroizing;
 
 use gpui_kit::component::Icon;
 
@@ -149,6 +150,11 @@ impl FieldNote {
                 .into_any_element(),
         }
     }
+}
+
+/// 输入框里的字，当秘密拿（密码、口令、主密码、验证码）：用完就清零。
+pub fn typed_secret(input: &Entity<InputState>, cx: &App) -> Zeroizing<String> {
+    Zeroizing::new(input.read(cx).value().to_string())
 }
 
 /// 输入框（原型 `.in`）：元素 id 就是字段名，出错时描红。

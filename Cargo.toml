@@ -49,6 +49,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "m
 # 远程终端把连接的事件（问答、延迟、系统）送到窗口壳；测试连接的问答用一次性通道。
 async-channel = "2"
 futures = "0.3"
+# 开始卡片最近连接的「10 分钟前」「今天 09:12」：按本地时区算（gpui 本来就带着它）。
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Windows 可执行文件里的图标与版本信息（build.rs）。
 [target.'cfg(windows)'.build-dependencies]

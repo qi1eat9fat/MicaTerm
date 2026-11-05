@@ -391,6 +391,10 @@ impl RemoteTerminals for Relayed {
     fn respond(&self, prompt: PromptId, reply: ConnectionPromptReply) {
         self.inner.respond(prompt, reply);
     }
+
+    fn reuses_connection(&self, target: &RemoteTarget) -> bool {
+        self.inner.reuses_connection(target)
+    }
 }
 
 thread_local! {

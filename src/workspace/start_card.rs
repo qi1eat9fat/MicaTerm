@@ -246,7 +246,7 @@ impl Workspace {
             .child(list)
     }
 
-    /// 最近连接的一行（原型 `.qi`）：徽章、名称和 `user@地址`。
+    /// 最近连接的一行（原型 `.qi`）：徽章、名称和 `user@地址`，右边是什么时候连的（`.rc`）。
     fn render_recent_row(
         &self,
         host: &Host,
@@ -256,6 +256,11 @@ impl Workspace {
     ) -> impl IntoElement + use<> {
         let id = host.id;
         let hover = tokens.hover;
+        let connected = self
+            .hosts
+            .read(cx)
+            .last_connected(id)
+            .and_then(|at| connected_ago(at, chrono::Local::now()));
         div()
             .id(("start-recent-host", id.0 as usize))
             .test_support()
@@ -312,6 +317,62 @@ impl Workspace {
                             .child(list_address(host)),
                     ),
             )
+            .children(connected.map(|text| {
+                div()
+                    .id(("start-recent-time", id.0 as usize))
+                    .test_support()
+                    .aria_label(text.clone())
+                    .flex_none()
+                    .text_size(px(11.))
+                    .text_color(tokens.faint)
+                    .child(text)
+            }))
+    }
+}
+
+/// 主机在 `at`（Unix 秒）连上过，到 `now` 有多久，中文短格式（原型「10 分钟前」「今天 09:12」
+/// 「昨天」「3 天前」）。按本地时区算日子；时间认不出就不写。
+fn connected_ago(at: u64, now: chrono::DateTime<chrono::Local>) -> Option<SharedString> {
+    use chrono::TimeZone as _;
+    let then = chrono::Local
+        .timestamp_opt(i64::try_from(at).ok()?, 0)
+        .single()?;
+    Some(relative_time(then.naive_local(), now.naive_local()))
+}
+
+/// `then` 到 `now`（都是本地时间）的中文短格式：一分钟内「刚刚」，一小时内「N 分钟前」，
+/// 同一天「今天 HH:MM」，前一天「昨天」，一个月内「N 天前」，再早写日期（不是今年的带上年）。
+fn relative_time(then: chrono::NaiveDateTime, now: chrono::NaiveDateTime) -> SharedString {
+    use chrono::Datelike as _;
+    let elapsed = now.signed_duration_since(then);
+    if elapsed.num_seconds() < 60 {
+        return t!("workspace.start.connected_just_now");
+    }
+    if elapsed.num_minutes() < 60 {
+        return t!(
+            "workspace.start.connected_minutes_ago",
+            count = elapsed.num_minutes()
+        );
+    }
+    let days = now.date().signed_duration_since(then.date()).num_days();
+    match days {
+        0 => t!(
+            "workspace.start.connected_today",
+            time = then.format("%H:%M").to_string()
+        ),
+        1 => t!("workspace.start.connected_yesterday"),
+        2..30 => t!("workspace.start.connected_days_ago", count = days),
+        _ if then.year() == now.year() => t!(
+            "workspace.start.connected_on",
+            month = then.month(),
+            day = then.day()
+        ),
+        _ => t!(
+            "workspace.start.connected_on_year",
+            year = then.year(),
+            month = then.month(),
+            day = then.day()
+        ),
     }
 }
 
@@ -406,4 +467,33 @@ fn big_button(
                         .child(hint),
                 ),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{NaiveDate, NaiveDateTime};
+
+    use super::relative_time;
+
+    fn at(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(year, month, day)
+            .unwrap()
+            .and_hms_opt(hour, minute, 0)
+            .unwrap()
+    }
+
+    #[test]
+    fn recent_connections_read_like_the_prototype() {
+        let now = at(2026, 11, 5, 14, 30);
+        let said = |then| relative_time(then, now).to_string();
+        assert_eq!(said(now), "刚刚");
+        assert_eq!(said(at(2026, 11, 5, 14, 20)), "10 分钟前");
+        assert_eq!(said(at(2026, 11, 5, 9, 12)), "今天 09:12");
+        assert_eq!(said(at(2026, 11, 4, 23, 50)), "昨天");
+        assert_eq!(said(at(2026, 11, 2, 8, 0)), "3 天前");
+        assert_eq!(said(at(2026, 8, 1, 8, 0)), "8 月 1 日");
+        assert_eq!(said(at(2025, 12, 31, 8, 0)), "2025 年 12 月 31 日");
+        // 钟拨回去了（连接时间比现在晚）也不写成负的。
+        assert_eq!(said(at(2026, 11, 5, 15, 0)), "刚刚");
+    }
 }

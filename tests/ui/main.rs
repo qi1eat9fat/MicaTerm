@@ -21,10 +21,12 @@
 //! - `vault`：保险库界面（13）
 //! - `remote_activity`：远程卡片被动解析（17）
 //! - `credentials`：凭据（14）
+//! - `dialogs`：对话框的层（M2 code review）
 
 mod support;
 
 mod credentials;
+mod dialogs;
 mod host_dialog;
 mod hosts;
 mod programs;

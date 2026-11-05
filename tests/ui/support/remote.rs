@@ -124,6 +124,15 @@ impl RemoteTerminals for FakeRemoteTerminals {
             .unwrap_or_else(|error| error.into_inner())
             .push((prompt, answered));
     }
+
+    /// 假的连接不会断：给同一个登录建过终端，就算有能复用的连接。
+    fn reuses_connection(&self, target: &RemoteTarget) -> bool {
+        self.targets
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .any(|(_, seen)| seen == target)
+    }
 }
 
 /// 一次测试的登录：地址、端口、用户名，和表单里的密码。

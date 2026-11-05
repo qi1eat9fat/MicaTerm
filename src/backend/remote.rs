@@ -70,6 +70,9 @@ pub enum RemoteEvent {
         terminal: RemoteTerminalId,
         host: ProbedHost,
     },
+    /// 连接 `connection` 不要了（等它的终端都放手了）：它还没答的问题都作废，窗口壳关掉问答框、
+    /// 不再问排着的。
+    PromptsWithdrawn { connection: ConnectionId },
 }
 
 /// 远程终端的传输从哪里来。生产是 [`SshRemoteTerminals`]，测试注入假的。
@@ -87,6 +90,10 @@ pub trait RemoteTerminals: Send + Sync + 'static {
 
     /// 回答问题 `prompt`。连接已经不等了（取消、关了卡片）就什么都不做。
     fn respond(&self, prompt: PromptId, reply: ConnectionPromptReply);
+
+    /// 现在给 `target` 建终端会不会复用已有的连接（连着的或正在连的）：会就用不到秘密，
+    /// 窗口壳不必先解锁保险库。单通道的主机每次都新建连接，不算。
+    fn reuses_connection(&self, target: &RemoteTarget) -> bool;
 }
 
 pub type SharedRemoteTerminals = Arc<dyn RemoteTerminals>;
@@ -137,5 +144,9 @@ impl RemoteTerminals for SshRemoteTerminals {
 
     fn respond(&self, prompt: PromptId, reply: ConnectionPromptReply) {
         self.pool.respond(prompt, reply);
+    }
+
+    fn reuses_connection(&self, target: &RemoteTarget) -> bool {
+        self.pool.reuses_connection(target)
     }
 }

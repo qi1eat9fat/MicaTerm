@@ -84,6 +84,33 @@ pub(super) struct Answerer {
 
 impl Answerer {
     pub(super) fn start(remote: &Arc<SshRemoteTerminals>, password: Option<&'static str>) -> Self {
+        Self::listen(remote, move |kind| {
+            Some(match kind {
+                ConnectionPromptKind::UnknownHost(_) => ConnectionPromptReply::TrustAndSave,
+                ConnectionPromptKind::Authentication(_) => match password {
+                    Some(password) => {
+                        ConnectionPromptReply::Answers(vec![ConnectionSecret::new(password)])
+                    }
+                    None => ConnectionPromptReply::Cancel,
+                },
+                ConnectionPromptKind::HostKeyChanged(_) => ConnectionPromptReply::Cancel,
+            })
+        })
+    }
+
+    /// 信任主机密钥，问密码时不答（像用户还没填）。
+    fn leaving_passwords(remote: &Arc<SshRemoteTerminals>) -> Self {
+        Self::listen(remote, |kind| match kind {
+            ConnectionPromptKind::UnknownHost(_) => Some(ConnectionPromptReply::TrustAndSave),
+            _ => None,
+        })
+    }
+
+    /// 记下全部事件；问题按 `reply` 答，它给 `None` 就不答。
+    fn listen(
+        remote: &Arc<SshRemoteTerminals>,
+        reply: impl Fn(&ConnectionPromptKind) -> Option<ConnectionPromptReply> + Send + 'static,
+    ) -> Self {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let events = remote.events();
         let remote = Arc::downgrade(remote);
@@ -94,15 +121,8 @@ impl Answerer {
                 let RemoteEvent::Prompt(prompt) = event else {
                     continue;
                 };
-                let reply = match &prompt.kind {
-                    ConnectionPromptKind::UnknownHost(_) => ConnectionPromptReply::TrustAndSave,
-                    ConnectionPromptKind::Authentication(_) => match password {
-                        Some(password) => {
-                            ConnectionPromptReply::Answers(vec![ConnectionSecret::new(password)])
-                        }
-                        None => ConnectionPromptReply::Cancel,
-                    },
-                    ConnectionPromptKind::HostKeyChanged(_) => ConnectionPromptReply::Cancel,
+                let Some(reply) = reply(&prompt.kind) else {
+                    continue;
                 };
                 let Some(remote) = remote.upgrade() else {
                     break;
@@ -211,6 +231,12 @@ impl Terminal {
         self.thread.take().unwrap().join().unwrap()
     }
 
+    /// 像关卡片那样让传输停下，等它结束；返回它的结果。
+    fn finish_after_shutdown(mut self) -> anyhow::Result<()> {
+        let _ = self.commands.send(TerminalTransportCommand::Shutdown);
+        self.thread.take().unwrap().join().unwrap()
+    }
+
     pub(super) fn close(mut self) {
         let _ = self.commands.send(TerminalTransportCommand::Shutdown);
         self.thread.take().unwrap().join().unwrap().unwrap();
@@ -297,9 +323,12 @@ fn a_second_terminal_of_a_connected_host_shares_its_connection_without_logging_i
         fixture.connector(Arc::default()),
     ));
     let answers = Answerer::start(&remote, Some(TEST_PASSWORD));
+    assert!(!remote.reuses_connection(&fixture.target()));
 
     let first = Terminal::open(&remote, 1, &fixture.target());
     first.expect_started();
+    // 连着了：再开一张不登录，窗口壳不必为它解锁保险库（M2 code review S2）。
+    assert!(remote.reuses_connection(&fixture.target()));
     let second = Terminal::open(&remote, 2, &fixture.target());
     second.expect_started();
 
@@ -324,6 +353,7 @@ fn a_second_terminal_of_a_connected_host_shares_its_connection_without_logging_i
     wait_until("最后一张卡片关了，连接断开", || {
         remote.connection_count() == 0
     });
+    assert!(!remote.reuses_connection(&fixture.target()));
 }
 
 /// 只给一个通道的堡垒机：复用的连接开不出 shell 通道，自动改成新建一条连接；之后这台主机的终端直接新建。
@@ -379,6 +409,36 @@ fn terminals_that_open_while_the_host_is_connecting_wait_for_the_same_login() {
     assert_eq!(remote.connection_count(), 1);
     first.close();
     second.close();
+}
+
+/// 问密码的时候，等这条连接的卡片都关了：连接取消，窗口壳收到「问题作废」好关掉问答框
+/// （M2 code review S3）。
+#[test]
+fn closing_the_last_terminal_while_asked_withdraws_the_question() {
+    let fixture = Fixture::start();
+    let remote = Arc::new(SshRemoteTerminals::with_connector(
+        fixture.connector(Arc::default()),
+    ));
+    let answers = Answerer::leaving_passwords(&remote);
+
+    let terminal = Terminal::open(&remote, 1, &fixture.target());
+    let asked = answers.wait_for(|event| match event {
+        RemoteEvent::Prompt(prompt)
+            if matches!(prompt.kind, ConnectionPromptKind::Authentication(_)) =>
+        {
+            Some(prompt.id.connection)
+        }
+        _ => None,
+    });
+    // 关掉卡片：传输结束（连接被取消，结果不管）。
+    let _ = terminal.finish_after_shutdown();
+
+    let withdrawn = answers.wait_for(|event| match event {
+        RemoteEvent::PromptsWithdrawn { connection } => Some(*connection),
+        _ => None,
+    });
+    assert_eq!(withdrawn, asked);
+    wait_until("连接取消了", || remote.connection_count() == 0);
 }
 
 #[test]

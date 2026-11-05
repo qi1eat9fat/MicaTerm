@@ -6,9 +6,9 @@ use gpui_kit::*;
 use qishell_hosts::HostDraft;
 
 use super::HostDialog;
-use super::form::{FieldErrors, FieldNote, form_field, form_group, text_input};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, text_input};
 
 pub const FIELD_NAME: &str = "host-name";
 pub const FIELD_ADDRESS: &str = "host-address";

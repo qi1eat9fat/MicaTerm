@@ -404,6 +404,43 @@ fn a_question_nobody_waits_for_any_more_is_not_asked(cx: &mut TestAppContext) {
     assert_eq!(remote.replies(), [(prompt, Answered::Cancel)]);
 }
 
+/// 问着密码时把卡片关了：连接表说问题作废，问答框跟着关，排着的下一个问题照常问
+/// （M2 code review S3）。
+#[gpui_kit::test]
+fn a_withdrawn_question_closes_its_dialog_and_the_next_one_is_asked(cx: &mut TestAppContext) {
+    let (handle, workspace, remote, _) = open_remote(
+        cx,
+        FakeTerminalFactory::default(),
+        FakeConnectionTester::succeeding(),
+    );
+    connect(cx, handle, &workspace, 1, 1);
+    connect(cx, handle, &workspace, 2, 2);
+    let password = || {
+        ConnectionPromptKind::authentication(AuthenticationRequest::Password {
+            saved_rejected: false,
+        })
+    };
+    let first = remote.ask(1, password());
+    let second = remote.ask(2, password());
+    cx.run_until_parked();
+    cx.update(|cx| assert_eq!(workspace.read(cx).shown_prompt(), Some(first)));
+
+    // 等第一条连接的卡片都关了（连接表的这一半在 backend 的测试里）。
+    remote.emit(RemoteEvent::PromptsWithdrawn {
+        connection: first.connection,
+    });
+    cx.run_until_parked();
+
+    cx.update(|cx| assert_eq!(workspace.read(cx).shown_prompt(), Some(second)));
+    let text = prompt_label(cx, handle).expect("下一个问题接着问");
+    assert!(text.starts_with("输入密码"), "{text}");
+    // 作废的问题不再回答。
+    assert_eq!(remote.replies(), []);
+    in_frame(cx, handle, |window, cx| window.click("prompt-cancel", cx));
+    assert_eq!(remote.replies(), [(second, Answered::Cancel)]);
+    assert_eq!(prompt_label(cx, handle), None);
+}
+
 #[gpui_kit::test]
 fn a_lost_connection_greys_the_card_and_enter_reconnects_in_place(cx: &mut TestAppContext) {
     let (handle, workspace, remote, _) = open_remote(

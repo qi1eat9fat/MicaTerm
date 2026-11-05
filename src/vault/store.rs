@@ -7,9 +7,9 @@ use anyhow::Result;
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task};
 use zeroize::Zeroizing;
 
-use qishell_hosts::secrets::SecretsLocked;
-use qishell_hosts::{SecretRef, Vault, VaultError, VaultStatus};
+use qishell_hosts::{SecretError, SecretRef, Vault, VaultError, VaultStatus};
 
+use crate::host::ErrorMessage as _;
 use crate::i18n::t;
 
 /// 保险库的状态和操作。没有保险库（`vault` 为 `None`）时：秘密只在别处（测试的内存存储，
@@ -229,22 +229,19 @@ impl VaultStore {
     }
 }
 
-/// 保险库操作的失败说给用户听。
+/// 保险库操作的失败说给用户听。锁着、没建、打不开这几种和主机数据写秘密失败共用一套分类
+/// （`SecretError::of`）和文案（`host::ErrorMessage`）；这里只多说保险库自己才有的几种。
 pub(super) fn describe(error: &anyhow::Error) -> SharedString {
-    if let Some(error) = error.downcast_ref::<VaultError>() {
-        return match error {
-            VaultError::WrongPassword => t!("vault.error.wrong_password"),
-            VaultError::KeyLost => t!("host.store.secret.key_lost"),
-            VaultError::NotSetUp => t!("host.store.secret.not_set_up"),
-            VaultError::Damaged(why) => t!("vault.error.damaged", why = why),
-            VaultError::TooNew(format) => t!("vault.error.too_new", format = format),
-            other => t!("vault.error.failed", error = other.to_string()),
-        };
+    match error.downcast_ref::<VaultError>() {
+        Some(VaultError::WrongPassword) => return t!("vault.error.wrong_password"),
+        Some(VaultError::Damaged(why)) => return t!("vault.error.damaged", why = why),
+        Some(VaultError::TooNew(format)) => return t!("vault.error.too_new", format = format),
+        _ => {}
     }
-    if error.downcast_ref::<SecretsLocked>().is_some() {
-        return t!("host.store.secret.locked");
+    match SecretError::of(error) {
+        SecretError::Store(_) => t!("vault.error.failed", error = format!("{error:#}")),
+        known => known.message(),
     }
-    t!("vault.error.failed", error = format!("{error:#}"))
 }
 
 /// 主密码不对。

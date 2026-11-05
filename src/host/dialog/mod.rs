@@ -18,7 +18,6 @@
 
 mod auth;
 mod delete;
-pub mod form;
 mod general;
 mod notes;
 mod route;
@@ -27,7 +26,7 @@ use gpui_kit::component::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{Icon, IconName, Sizable as _, WindowExt as _};
+use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::*;
 
 use futures::FutureExt as _;
@@ -47,7 +46,6 @@ pub use route::{
 };
 
 use self::auth::AuthSection;
-use self::form::FieldErrors;
 use self::general::GeneralSection;
 use self::notes::NotesSection;
 use self::route::RouteSection;
@@ -60,6 +58,8 @@ use crate::backend::{
 use crate::connect::open_prompt_dialog;
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::DialogLayer;
+use crate::ui::form::FieldErrors;
 
 /// 对话框的键上下文。
 pub const HOST_DIALOG_KEY_CONTEXT: &str = "HostDialog";
@@ -86,6 +86,8 @@ pub struct HostDialog {
     testing: Option<Task<()>>,
     /// 上一次测试的结果：成功，或者给用户看的原因。
     tested: Option<Result<(), SharedString>>,
+    /// 对话框是哪一层：保存、取消时只关自己（上面可能叠着问答框、凭据对话框）。
+    layer: DialogLayer,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -146,6 +148,7 @@ impl HostDialog {
             tester,
             testing: None,
             tested: None,
+            layer: DialogLayer::new(),
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -312,11 +315,23 @@ impl HostDialog {
 
     fn save_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.commit(cx) {
-            window.close_dialog(cx);
+            self.close(window, cx);
         }
     }
 
-    fn render_header(&self, tokens: &Tokens) -> impl IntoElement {
+    /// 关掉主机对话框（只关它自己那一层）。
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.forget_secrets(window, cx);
+        self.layer.close(window, cx);
+    }
+
+    /// 对话框要关了：密码框里的明文现在就放掉，不等实体回收。
+    fn forget_secrets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.auth.forget_secrets(window, cx);
+        self.route.forget_secrets(window, cx);
+    }
+
+    fn render_header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
         let (title, subtitle) = match &self.editing_name {
             Some(name) => (t!("host.dialog.title_edit"), name.clone()),
             None => (t!("host.dialog.title_new"), t!("host.dialog.subtitle_new")),
@@ -365,7 +380,7 @@ impl HostDialog {
                     .text_color(tokens.icon)
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover).text_color(text))
-                    .on_click(|_, window, cx| window.close_dialog(cx))
+                    .on_click(cx.listener(|this, _, window, cx| this.close(window, cx)))
                     .child(Icon::new(IconName::Close).size(px(16.))),
             )
     }
@@ -412,7 +427,7 @@ impl HostDialog {
                 Button::new("host-dialog-cancel")
                     .label(t!("host.dialog.cancel"))
                     .small()
-                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                    .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
             )
             .child(
                 Button::new("host-dialog-save")
@@ -453,7 +468,7 @@ impl Render for HostDialog {
             .flex_col()
             .size_full()
             .text_color(tokens.text)
-            .child(self.render_header(&tokens))
+            .child(self.render_header(&tokens, cx))
             .child(
                 div()
                     .id("host-dialog-body")
@@ -493,16 +508,28 @@ pub fn open_host_dialog(
 ) {
     let view = cx.new(|cx| HostDialog::new(store, editing, tester, window, cx));
     let name = view.read(cx).general.name.clone();
-    window.open_dialog(cx, move |dialog, window, _| {
-        let height = MAX_HEIGHT.min(window.viewport_size().height - px(40.));
-        dialog
-            .w(WIDTH)
-            .h(height)
-            .p_0()
-            .rounded(px(14.))
-            .close_button(false)
-            .overlay_closable(false)
-            .child(view.clone())
-    });
+    let layer = view.read(cx).layer.clone();
+    let dismissed = view.downgrade();
+    layer.open_dismissable(
+        move |dialog, window, _| {
+            let height = MAX_HEIGHT.min(window.viewport_size().height - px(40.));
+            dialog
+                .w(WIDTH)
+                .h(height)
+                .p_0()
+                .rounded(px(14.))
+                .close_button(false)
+                .overlay_closable(false)
+                .child(view.clone())
+        },
+        // Esc 关掉的：密码框一样现在就清空。
+        move |window, cx| {
+            dismissed
+                .update(cx, |dialog, cx| dialog.forget_secrets(window, cx))
+                .ok();
+        },
+        window,
+        cx,
+    );
     name.update(cx, |name, cx| name.focus(window, cx));
 }

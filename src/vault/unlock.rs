@@ -7,14 +7,13 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::{Disableable as _, Icon, Sizable as _};
 use gpui_kit::*;
-use zeroize::Zeroizing;
 
 use super::reply::{Reply, close_and_reply, open_small_dialog};
 use super::store::{VaultStore, describe};
 use crate::app::CatalogIcon;
-use crate::host::dialog::form::{FieldErrors, text_input};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::form::{FieldErrors, text_input, typed_secret};
 
 pub const FIELD_UNLOCK: &str = "vault-unlock-password";
 
@@ -75,7 +74,7 @@ impl UnlockDialog {
         if self.working.is_some() {
             return;
         }
-        let password = Zeroizing::new(self.password.read(cx).value().to_string());
+        let password = typed_secret(&self.password, cx);
         if password.is_empty() {
             self.errors.set(FIELD_UNLOCK, t!("vault.setup.empty"));
             cx.notify();

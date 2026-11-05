@@ -3,7 +3,7 @@
 //! 登录要用的秘密（密码、私钥和口令、跳板和代理的密码，见 `vault::login_secrets`）在保险库里存着
 //! 而保险库锁着时，先弹解锁小卡片，解开了或者用户取消了都接着连（取消了就现场询问密码，这次运行
 //! 不再自动弹）；保险库是另一台电脑上建的、这里打不开时，问一次要不要重置（工单 13）。
-//! 无密码和 Agent 登录不弹。连接经 `SecretStore`（`WorkspaceServices.secrets`，就是保险库）读秘密，
+//! 无密码和 Agent 登录不弹；复用已经连着（或正在连）的连接时不登录，也不弹。连接经 `SecretStore`（`WorkspaceServices.secrets`，就是保险库）读秘密，
 //! 读不出时连接现场询问。
 
 use gpui_kit::*;
@@ -22,8 +22,10 @@ impl Workspace {
         then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) {
         let secrets = login_secrets(&target.login);
-        // 不用弹框就直接连：同步回调会重入正在更新的窗口壳。
-        if !asks_before_using(&secrets, cx) {
+        // 复用已有的连接不登录、用不到秘密；不用弹框就直接连：同步回调会重入正在更新的窗口壳。
+        if self.services.remote_terminals.reuses_connection(target)
+            || !asks_before_using(&secrets, cx)
+        {
             then(self, window, cx);
             return;
         }

@@ -3,19 +3,27 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
+
+use crate::ui::DialogLayer;
 
 /// 对话框的回答：`true` 是做成了（设好了、解开了、重置了），`false` 是取消（包括 Esc）。
 type Answer = Box<dyn FnOnce(bool, &mut Window, &mut App)>;
 
-/// 对话框的回答只交一次：按钮交了，Esc 关对话框时就不再交。
+/// 对话框的回答只交一次：按钮交了，Esc 关对话框时就不再交。也记着对话框是哪一层：
+/// 后台算完再关时只关自己（上面可能已经叠了连接的问答框）。
 #[derive(Clone)]
-pub(super) struct Reply(Rc<RefCell<Option<Answer>>>);
+pub(super) struct Reply {
+    answer: Rc<RefCell<Option<Answer>>>,
+    layer: DialogLayer,
+}
 
 impl Reply {
     pub(super) fn new(answer: impl FnOnce(bool, &mut Window, &mut App) + 'static) -> Self {
-        Self(Rc::new(RefCell::new(Some(Box::new(answer)))))
+        Self {
+            answer: Rc::new(RefCell::new(Some(Box::new(answer)))),
+            layer: DialogLayer::new(),
+        }
     }
 
     /// 不关心回答。
@@ -23,17 +31,22 @@ impl Reply {
         Self::new(|_, _, _| {})
     }
 
+    /// 对话框是哪一层。
+    pub(super) fn layer(&self) -> &DialogLayer {
+        &self.layer
+    }
+
     pub(super) fn send(&self, done: bool, window: &mut Window, cx: &mut App) {
-        let answer = self.0.borrow_mut().take();
+        let answer = self.answer.borrow_mut().take();
         if let Some(answer) = answer {
             answer(done, window, cx);
         }
     }
 }
 
-/// 关掉最上面那层（就是这个对话框），再交回答。
+/// 关掉这个对话框（只关它自己那一层），再交回答。
 pub(super) fn close_and_reply(reply: &Reply, done: bool, window: &mut Window, cx: &mut App) {
-    window.close_dialog(cx);
+    reply.layer.close(window, cx);
     reply.send(done, window, cx);
 }
 
@@ -46,16 +59,20 @@ pub(super) fn open_small_dialog<V: Render>(
     window: &mut Window,
     cx: &mut App,
 ) {
-    window.open_dialog(cx, move |dialog, _, _| {
-        let reply = reply.clone();
-        dialog
-            .w(width)
-            .p_0()
-            .rounded(px(14.))
-            .close_button(false)
-            .overlay_closable(false)
-            .on_close(move |_, window, cx| reply.send(false, window, cx))
-            .child(view.clone())
-    });
+    let layer = reply.layer.clone();
+    layer.open_dismissable(
+        move |dialog, _, _| {
+            dialog
+                .w(width)
+                .p_0()
+                .rounded(px(14.))
+                .close_button(false)
+                .overlay_closable(false)
+                .child(view.clone())
+        },
+        move |window, cx| reply.send(false, window, cx),
+        window,
+        cx,
+    );
     window.focus(&focus, cx);
 }

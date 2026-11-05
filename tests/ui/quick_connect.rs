@@ -248,6 +248,30 @@ fn without_hosts_quick_connect_says_there_are_none(cx: &mut TestAppContext) {
     });
 }
 
+/// 最近连接每行右边写什么时候连的（原型「10 分钟前」，M2 code review S5）。
+#[gpui_kit::test]
+fn the_start_card_says_when_each_recent_host_connected(cx: &mut TestAppContext) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut hosts = HostData::seed();
+    hosts.record_connection_at_unnotified(qishell_hosts::HostId(1), now - 10 * 60);
+    hosts.record_connection_at_unnotified(qishell_hosts::HostId(4), now);
+    let (handle, _, _) = open_with_hosts(cx, hosts);
+
+    let mut time = |id: u64| {
+        in_frame(cx, handle, move |window, _| {
+            window
+                .find(("start-recent-time", id as usize))
+                .label()
+                .map(str::to_owned)
+        })
+    };
+    assert_eq!(time(4).as_deref(), Some("刚刚"));
+    assert_eq!(time(1).as_deref(), Some("10 分钟前"));
+}
+
 #[gpui_kit::test]
 fn the_start_card_lists_recent_connections_above_the_two_buttons(cx: &mut TestAppContext) {
     let (handle, workspace) = open(cx);
