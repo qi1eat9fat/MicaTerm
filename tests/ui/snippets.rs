@@ -8,6 +8,7 @@ use gpui_kit::{ClipboardItem, InputEvent as _, Modifiers, MouseMoveEvent, Window
 use qishell::app::{EditSnippet, ShowSnippets};
 use qishell::host::{SnippetDraft, SnippetId};
 use qishell::workspace::RightPanel;
+use qishell_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -56,6 +57,12 @@ fn open_snippets(
                 .card_screen_text(CardId(1), cx)
                 .is_some_and(|text| text.contains("会议纪要"))
         }) && factory.last_size().is_some()
+            // 终端要到 `Running` 才收输入，之前发的字丢掉；屏幕上有提示符还不算（见 programs.rs）。
+            && cx.update(|cx| {
+                workspace.read(cx).card(CardId(1), cx).is_some_and(|card| {
+                    card.read(cx).terminal().read(cx).lifecycle(cx) == TerminalLifecycle::Running
+                })
+            })
     });
     assert!(ready, "假 shell 没有打出提示符");
     in_frame(cx, handle, |window, cx| {

@@ -1,21 +1,28 @@
 //! 主机栏（宽 236，可以收起）：顶部是标志和收起按钮，下面是「主机 N」标题加「+」、
 //! 主机列表，底部是设置按钮。
 //!
-//! M1 还没有主机：列表处显示「还没有主机」的引导。搜索框、平铺主机列表、拖动排序、
-//! 「锁定保险库」按钮在 M2（工单 11、13）加上。
+//! 搜索框和平铺主机列表是 `crate::host::HostList`（工单 11），这里只画外框。
+//! 扩展点：底部「锁定保险库」按钮（工单 13）加在设置按钮后面。
 
 use gpui_kit::*;
 
 use super::icon_button::IconButton;
 use super::start_card::logo;
 use crate::app::{CatalogIcon, NewHost, OpenSettings, PRODUCT_NAME, ToggleHostSidebar};
+use crate::host::HostList;
 use crate::i18n::t;
 use crate::theme::{GAP, HOST_SIDEBAR_WIDTH, TITLE_BAR_HEIGHT, Tokens};
 
 /// macOS 上给红绿灯让出的宽度。
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(68.);
 
-pub(super) fn render_host_sidebar(target: &FocusHandle, tokens: &Tokens) -> impl IntoElement {
+/// `count` 是保存的主机数（「主机 N」），`list` 是搜索框加主机列表。
+pub(super) fn render_host_sidebar(
+    count: usize,
+    list: Entity<HostList>,
+    target: &FocusHandle,
+    tokens: &Tokens,
+) -> impl IntoElement {
     div()
         .id("host-sidebar")
         .test_support()
@@ -79,11 +86,14 @@ pub(super) fn render_host_sidebar(target: &FocusHandle, tokens: &Tokens) -> impl
                 .child(t!("workspace.host_sidebar.title"))
                 .child(
                     div()
+                        .id("host-count")
+                        .test_support()
+                        .aria_label(count.to_string())
                         .flex_1()
                         .text_size(px(12.))
                         .font_weight(FontWeight::NORMAL)
                         .text_color(tokens.faint)
-                        .child("0"),
+                        .child(count.to_string()),
                 )
                 .child(
                     IconButton::new(
@@ -95,26 +105,7 @@ pub(super) fn render_host_sidebar(target: &FocusHandle, tokens: &Tokens) -> impl
                     .dispatch(Box::new(NewHost), target, tokens),
                 ),
         )
-        .child(
-            div()
-                .id("host-list")
-                .test_support()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h_0()
-                .items_center()
-                .pt(px(40.))
-                .px(px(14.))
-                .text_size(px(13.))
-                .text_color(tokens.faint)
-                .child(t!("workspace.host_sidebar.empty"))
-                .child(
-                    div()
-                        .text_size(px(11.5))
-                        .child(t!("workspace.host_sidebar.empty_hint")),
-                ),
-        )
+        .child(list)
         .child(
             div()
                 .flex()

@@ -26,6 +26,7 @@ mod login;
 mod mark;
 mod model;
 mod private_key;
+mod search;
 pub mod secrets;
 mod snippet;
 pub mod vault;
@@ -48,3 +49,5 @@ pub use snippet::*;
 pub use vault::{
     DataKey, DataKeyStore, KdfParams, SharedDataKeyStore, Vault, VaultError, VaultStatus,
 };
+// 主机栏和快速连接共用的主机搜索（工单 11）。
+pub use search::host_matches;
