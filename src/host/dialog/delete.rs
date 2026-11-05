@@ -4,9 +4,9 @@
 //! 删除主机的确认（原型「删除被当作跳板的主机」）：写明有几台主机把它当作跳板并列出名字；
 //! 删除后已打开的卡片不受影响。
 
+use gpui_kit::component::Sizable as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -81,9 +81,11 @@ impl Render for DeleteHostDialog {
                             "host.delete.jump_users",
                             count = self.jump_users.len()
                         )))
-                        .children(self.jump_users.iter().map(|name| {
-                            div().pl(px(18.)).child(format!("\u{2022} {name}"))
-                        }))
+                        .children(
+                            self.jump_users
+                                .iter()
+                                .map(|name| div().pl(px(18.)).child(format!("\u{2022} {name}"))),
+                        )
                         .child(paragraph(t!("host.delete.jump_users_after")))
                     })
                     .child(paragraph(t!("host.delete.cards_stay"))),

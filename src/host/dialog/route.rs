@@ -62,7 +62,10 @@ impl RouteSection {
                 None,
                 segmented(
                     ROUTE_CHOICE,
-                    RouteChoice::ALL.iter().map(|choice| choice.label()).collect(),
+                    RouteChoice::ALL
+                        .iter()
+                        .map(|choice| choice.label())
+                        .collect(),
                     RouteChoice::ALL
                         .iter()
                         .position(|candidate| *candidate == choice)
@@ -70,7 +73,9 @@ impl RouteSection {
                     Rc::new(|_, _, _| {}),
                     tokens,
                 ),
-                FieldNote::error_of(ROUTE_CHOICE, errors).into_iter().collect(),
+                FieldNote::error_of(ROUTE_CHOICE, errors)
+                    .into_iter()
+                    .collect(),
                 tokens,
             )],
             tokens,

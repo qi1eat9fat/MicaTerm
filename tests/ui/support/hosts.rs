@@ -2,13 +2,15 @@
 
 use std::sync::Arc;
 
-use gpui_kit::{Entity, TestAppContext, WindowHandle};
 use gpui_kit::component::Root;
+use gpui_kit::{Entity, TestAppContext, WindowHandle};
 use qishell::workspace::{Workspace, WorkspaceServices};
 pub use qishell_hosts::secrets::InMemorySecretStore;
 pub use qishell_hosts::{
-    AuthKind, Host, HostData, HostDatabase, HostDraft, HostId, HostOs, SecretStore as _,
+    AuthKind, Host, HostDatabase, HostDraft, HostId, HostOs, SecretStore as _,
 };
+
+use qishell_hosts::HostData;
 
 use super::{fake_services, open_workspace_with, settings_store};
 
@@ -23,7 +25,7 @@ pub fn open_with_hosts(
 ) {
     let secrets = Arc::new(InMemorySecretStore::default());
     let services = WorkspaceServices {
-        hosts: Ok(data),
+        hosts: data,
         secrets: secrets.clone(),
         ..fake_services()
     };
@@ -53,7 +55,7 @@ pub fn host_names(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> Vec
     cx.update(|cx| {
         workspace
             .read(cx)
-            .host_store()
+            .hosts()
             .read(cx)
             .hosts()
             .iter()
@@ -79,7 +81,7 @@ pub fn saved_host(cx: &mut TestAppContext, workspace: &Entity<Workspace>, id: u6
     cx.update(|cx| {
         workspace
             .read(cx)
-            .host_store()
+            .hosts()
             .read(cx)
             .host(HostId(id))
             .cloned()
@@ -92,7 +94,7 @@ pub fn edit_hosts(
     workspace: &Entity<Workspace>,
     change: impl FnOnce(&mut qishell::host::HostStore, &mut gpui_kit::Context<qishell::host::HostStore>),
 ) {
-    let store = cx.update(|cx| workspace.read(cx).host_store().clone());
+    let store = cx.update(|cx| workspace.read(cx).hosts().clone());
     store.update(cx, change);
     cx.run_until_parked();
 }

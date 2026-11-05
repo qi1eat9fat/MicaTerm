@@ -13,6 +13,7 @@
 //! - `settings`：设置对话框（07）
 //! - `hosts`：主机栏（11）
 //! - `host_dialog`：主机对话框（11）
+//! - `snippets`：命令片段（19）
 
 mod support;
 
@@ -20,6 +21,7 @@ mod host_dialog;
 mod hosts;
 mod programs;
 mod settings;
+mod snippets;
 mod split;
 mod tabs;
 mod terminal_card;

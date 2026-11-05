@@ -3,26 +3,26 @@
 //! 唯一的 UI 级 seam 是注入式构造 `Workspace::new_with_services`：生产代码传真实服务，
 //! 无头 UI 测试传假实现（`tests/ui/support/mod.rs` 的 `fake_services`）。
 
+use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use qishell_hosts::HostData;
 use qishell_hosts::secrets::{InMemorySecretStore, SharedSecretStore};
 use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportProvider};
-
-use crate::host::{HostList, HostStore, HostStoreEvent};
 
 use super::handlers;
 use super::host_sidebar::render_host_sidebar;
 use super::notices::NoticeTimes;
-use super::right_sidebar::render_right_sidebar;
+use super::right_sidebar::{RightPanel, render_right_sidebar};
 use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
 use crate::card::{CardId, StatusDot, TerminalCard};
+use crate::host::{HostData, HostList, HostStore, HostStoreEvent};
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
+use crate::snippets::SnippetPanel;
 use crate::split::NodeId;
 use crate::tabs::{TabId, TabList, TabRail, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
@@ -35,10 +35,12 @@ use crate::theme::{GAP, Tokens};
 pub struct WorkspaceServices {
     /// 本地终端的传输：生产是本机 PTY，测试注入假的。
     pub local_terminals: SharedLocalTerminalTransportProvider,
-    /// 主机数据（工单 11）：生产从数据目录的 `qishell.db` 读，打不开时是给用户看的原因
-    /// （这次运行改用只在内存里的空数据）；测试注入 `HostData::seed()` 或内存数据库。
-    /// 窗口壳构造时把它取走、建成 `HostStore`，之后这里只剩一份空的。
-    pub hosts: Result<HostData, SharedString>,
+    /// 主机、凭据、命令片段：生产是数据目录里的 `qishell.db`，测试是内存里的（`HostData::empty`、`seed`）。
+    /// 窗口壳构造时把它取走、包成 `HostStore` 实体，之后这里只剩一份空的。
+    pub hosts: HostData,
+    /// 数据库打不开时给用户看的原因（这次运行用的是只在内存里的空数据，改动不会保存）。
+    /// 窗口壳打开后弹出错误通知（工单 11）。
+    pub hosts_problem: Option<SharedString>,
     /// 密码、口令、私钥存在哪里（工单 11）：主机数据把秘密写到这里。
     /// 保险库（工单 10、13）接上之前，生产也是只在内存里的存储；测试注入 `InMemorySecretStore`。
     pub secrets: SharedSecretStore,
@@ -48,9 +50,14 @@ impl WorkspaceServices {
     /// 真实的服务。
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        let (hosts, hosts_problem) = match crate::host::load_hosts() {
+            Ok(hosts) => (hosts, None),
+            Err(problem) => (HostData::empty(), Some(problem)),
+        };
         Self {
             local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
-            hosts: crate::host::load_hosts(),
+            hosts,
+            hosts_problem,
             secrets: std::sync::Arc::new(InMemorySecretStore::default()),
         }
     }
@@ -80,6 +87,10 @@ pub struct Workspace {
     pub(super) hosts: Entity<HostStore>,
     /// 主机栏里的搜索框和主机列表（工单 11）。
     pub(super) host_list: Entity<HostList>,
+    /// 右侧栏展开的面板。
+    pub(super) right_panel: Option<RightPanel>,
+    /// 命令片段面板（工单 19）。
+    pub(super) snippet_panel: SnippetPanel,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -103,6 +114,7 @@ impl Workspace {
         let focus_handle = cx.focus_handle();
         let (hosts, host_list, host_subscriptions) =
             Self::open_hosts(&mut services, &focus_handle, window, cx);
+        let snippet_panel = SnippetPanel::new(window, cx);
         let mut subscriptions = vec![
             // 设置写不进文件时告诉用户，不静默吞掉。
             cx.subscribe_in(
@@ -132,6 +144,19 @@ impl Workspace {
             cx.observe_self(|this, cx| this.see_cards(cx)),
         ];
         subscriptions.extend(host_subscriptions);
+        subscriptions.push(
+            // 命令片段面板的搜索框。
+            cx.subscribe(
+                snippet_panel.search(),
+                |this, input, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        let query = input.read(cx).value().to_string();
+                        this.snippet_panel.set_query(query);
+                        cx.notify();
+                    }
+                },
+            ),
+        );
         apply(&settings.read(cx).settings(), window, cx);
         // 点终端的系统通知，回到那张卡片。
         Self::listen_for_notice_clicks(window, cx);
@@ -151,6 +176,8 @@ impl Workspace {
             window_active: window.is_window_active(),
             hosts,
             host_list,
+            right_panel: None,
+            snippet_panel,
             _subscriptions: subscriptions,
         }
     }
@@ -163,16 +190,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Entity<HostStore>, Entity<HostList>, Vec<Subscription>) {
-        let data = match std::mem::replace(&mut services.hosts, Ok(HostData::empty())) {
-            Ok(data) => data,
-            Err(problem) => {
-                // 窗口还没挂上 `Root`，等下一帧再弹。
-                window.defer(cx, move |window, cx| {
-                    window.push_notification(Notification::error(problem), cx);
-                });
-                HostData::empty()
-            }
-        };
+        let data = std::mem::replace(&mut services.hosts, HostData::empty());
+        if let Some(problem) = services.hosts_problem.take() {
+            // 窗口还没挂上 `Root`，等下一帧再弹。
+            window.defer(cx, move |window, cx| {
+                window.push_notification(Notification::error(problem), cx);
+            });
+        }
         let secrets = services.secrets.clone();
         let hosts = cx.new(|_| HostStore::new(data.with_secrets(secrets)));
         let failures = cx.subscribe_in(
@@ -188,11 +212,6 @@ impl Workspace {
         // 主机栏标题里的「主机 N」跟着变。
         let changes = cx.observe(&hosts, |_, _, cx| cx.notify());
         (hosts, host_list, vec![failures, changes])
-    }
-
-    /// 主机数据（工单 11）。
-    pub fn host_store(&self) -> &Entity<HostStore> {
-        &self.hosts
     }
 
     /// 主机栏里选中的主机。
@@ -218,6 +237,16 @@ impl Workspace {
     /// 主机栏是否显示。
     pub fn is_host_sidebar_open(&self) -> bool {
         self.host_sidebar_open
+    }
+
+    /// 主机、凭据、命令片段。
+    pub fn hosts(&self) -> &Entity<HostStore> {
+        &self.hosts
+    }
+
+    /// 右侧栏展开的面板。
+    pub fn right_panel(&self) -> Option<RightPanel> {
+        self.right_panel
     }
 
     /// 标签，从左到右。
@@ -374,7 +403,12 @@ impl Render for Workspace {
                     .min_h_0()
                     .pb(GAP)
                     .child(content)
-                    .child(render_right_sidebar(&target, &tokens)),
+                    .children(self.right_panel.map(|panel| match panel {
+                        RightPanel::Snippets => self.render_snippet_panel(&tokens, cx),
+                        // 凭据面板在工单 14 接上。
+                        RightPanel::Credentials => div().into_any_element(),
+                    }))
+                    .child(render_right_sidebar(self.right_panel, &target, &tokens)),
             );
         div()
             .id("workspace")
@@ -386,6 +420,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_terminal_actions(root, cx))
             .map(|root| handlers::bind_settings_actions(root, cx))
             .map(|root| handlers::bind_hosts_actions(root, cx))
+            .map(|root| handlers::bind_snippets_actions(root, cx))
             .relative()
             .flex()
             .size_full()

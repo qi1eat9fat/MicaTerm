@@ -32,6 +32,7 @@ pub use gpui_kit::test::TestWindowExt;
 pub use gpui_kit::{
     Action, App, AppContext as _, ElementId, Entity, TestAppContext, WindowHandle, px, size,
 };
+pub use hosts::*;
 pub use qishell::app::{CloseCard, NewLocalTerminalTab, ToggleHostSidebar};
 pub use qishell::card::CardId;
 pub use qishell::settings::AppSettings;
@@ -41,7 +42,6 @@ pub use qishell::theme::Tokens;
 pub use qishell::workspace::{Workspace, WorkspaceServices};
 pub use qishell_terminal::{FixedLocalTerminalTransportProvider, LocalShell, LocalShellInfo};
 pub use qishell_terminal::{RightClick, TerminalColors, TerminalFont, TerminalInteraction};
-pub use hosts::*;
 pub use terminal::*;
 // 卡片分屏（工单 05）。
 pub use gpui_kit::VisualTestContext;
@@ -49,6 +49,8 @@ pub use qishell::app::{CloseFocusedCard, SplitDown, SplitRight, ToggleZoomCard};
 pub use qishell::split::NodeId;
 // 程序图块与状态点（工单 06）。
 pub use qishell::card::StatusDot;
+// 主机数据（工单 09 起）：内存里的，不碰数据目录。
+pub use qishell::host::HostData;
 
 /// 每个夹具都先做的事：QiShell 的全局量（文案、字体、快捷键）。
 pub fn init_app(cx: &mut TestAppContext) {
@@ -67,8 +69,9 @@ pub fn settings_store() -> SettingsStore {
 pub fn fake_services() -> WorkspaceServices {
     WorkspaceServices {
         local_terminals: fake_local_terminals(),
-        // 主机（工单 11）：空的、只在内存里，秘密也只在内存里。
-        hosts: Ok(qishell_hosts::HostData::empty()),
+        hosts: HostData::empty(),
+        hosts_problem: None,
+        // 秘密只在内存里（工单 11）。
         secrets: Arc::new(qishell_hosts::secrets::InMemorySecretStore::default()),
     }
 }

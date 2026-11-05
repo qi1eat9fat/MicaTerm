@@ -120,7 +120,11 @@ impl HostStore {
     }
 
     /// 在后台读一条秘密。读不出（锁着、坏了）和没存过一样是 `None`：调用方只拿它预填表单。
-    pub fn read_secret(&self, secret: SecretRef, cx: &mut Context<Self>) -> Task<Option<Zeroizing<String>>> {
+    pub fn read_secret(
+        &self,
+        secret: SecretRef,
+        cx: &mut Context<Self>,
+    ) -> Task<Option<Zeroizing<String>>> {
         let secrets = self.data.secrets();
         cx.background_spawn(async move { secrets.get(&secret).ok().flatten() })
     }
@@ -200,7 +204,10 @@ mod tests {
         let events = events.borrow();
         assert_eq!(events.len(), 1, "{events:?}");
         let HostStoreEvent::PersistFailed(message) = &events[0];
-        assert!(message.starts_with("新建主机未能保存到本地数据库"), "{message}");
+        assert!(
+            message.starts_with("新建主机未能保存到本地数据库"),
+            "{message}"
+        );
         store.read_with(cx, |store, _| {
             assert!(store.host(kept).is_some() && store.host(failed).is_some());
         });
@@ -234,6 +241,9 @@ mod tests {
             store.write_secret(secret, Some("hunter2".into()), cx)
         });
         let failure = cx.foreground_executor.block_test(write).unwrap_err();
-        assert!(failure.starts_with("密码、口令或私钥未能写入保险库"), "{failure}");
+        assert!(
+            failure.starts_with("密码、口令或私钥未能写入保险库"),
+            "{failure}"
+        );
     }
 }

@@ -17,6 +17,9 @@ pub const DATA_DIR_NAME: &str = "data";
 /// 设置文件名。
 pub const SETTINGS_FILE: &str = "settings.json";
 
+/// 主机、凭据、命令片段的数据库文件名。
+pub const DATABASE_FILE: &str = "qishell.db";
+
 /// 本次运行的数据目录：`QISHELL_DATA_DIR`，否则是可执行文件旁的 `data/`。
 pub fn data_dir() -> io::Result<PathBuf> {
     let exe = std::env::current_exe()?;
@@ -65,9 +68,6 @@ pub fn settings_path() -> io::Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join(SETTINGS_FILE))
 }
-
-/// 主机数据库的文件名（工单 11）：主机、凭据、命令片段，不含任何秘密。
-pub const DATABASE_FILE: &str = "qishell.db";
 
 /// 主机数据库的路径。数据目录还不存在时先建好；建不了就返回错误，由调用方报告。
 pub fn database_path() -> io::Result<PathBuf> {

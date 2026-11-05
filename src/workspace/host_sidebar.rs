@@ -7,9 +7,9 @@
 use gpui_kit::*;
 
 use super::icon_button::IconButton;
-use crate::host::HostList;
 use super::start_card::logo;
 use crate::app::{CatalogIcon, NewHost, OpenSettings, PRODUCT_NAME, ToggleHostSidebar};
+use crate::host::HostList;
 use crate::i18n::t;
 use crate::theme::{GAP, HOST_SIDEBAR_WIDTH, TITLE_BAR_HEIGHT, Tokens};
 

@@ -80,9 +80,10 @@ impl HostDialog {
     ) -> Self {
         let host = editing.and_then(|id| store.read(cx).host(id).cloned());
         let editing = host.as_ref().map(|host| host.id);
-        let draft = host.as_ref().map(|host| host.draft()).unwrap_or_else(|| {
-            HostDraft::new("", "", SSH_PORT, "", AuthKind::Password)
-        });
+        let draft = host
+            .as_ref()
+            .map(|host| host.draft())
+            .unwrap_or_else(|| HostDraft::new("", "", SSH_PORT, "", AuthKind::Password));
         let general = GeneralSection::new(&draft, window, cx);
         let auth = AuthSection::new(
             &draft,
@@ -99,11 +100,14 @@ impl HostDialog {
             .into_iter()
             .chain(auth.inputs())
             .map(|(field, input)| {
-                cx.subscribe(&input, move |this, _: Entity<InputState>, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Change) && this.errors.clear(field) {
-                        cx.notify();
-                    }
-                })
+                cx.subscribe(
+                    &input,
+                    move |this, _: Entity<InputState>, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Change) && this.errors.clear(field) {
+                            cx.notify();
+                        }
+                    },
+                )
             })
             .collect();
         Self {
@@ -235,7 +239,9 @@ impl HostDialog {
             .pl(px(18.))
             .pr(px(14.))
             .when(SHOW_TEST_CONNECTION, |footer| {
-                footer.child(Button::new("host-test-connection").label(t!("host.dialog.test_connection")))
+                footer.child(
+                    Button::new("host-test-connection").label(t!("host.dialog.test_connection")),
+                )
             })
             .child(div().flex_1())
             .child(
@@ -331,4 +337,3 @@ pub fn open_host_dialog(
     });
     name.update(cx, |name, cx| name.focus(window, cx));
 }
-

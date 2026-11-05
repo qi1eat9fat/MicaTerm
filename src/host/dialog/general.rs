@@ -24,7 +24,11 @@ pub(super) struct GeneralSection {
 }
 
 impl GeneralSection {
-    pub(super) fn new(draft: &HostDraft, window: &mut Window, cx: &mut Context<HostDialog>) -> Self {
+    pub(super) fn new(
+        draft: &HostDraft,
+        window: &mut Window,
+        cx: &mut Context<HostDialog>,
+    ) -> Self {
         Self {
             name: cx.new(|cx| {
                 InputState::new(window, cx)
@@ -72,7 +76,13 @@ impl GeneralSection {
             [
                 form_field(
                     Some(t!("host.dialog.name")),
-                    text_input(FIELD_NAME, t!("host.dialog.name"), &self.name, false, tokens),
+                    text_input(
+                        FIELD_NAME,
+                        t!("host.dialog.name"),
+                        &self.name,
+                        false,
+                        tokens,
+                    ),
                     Vec::new(),
                     tokens,
                 ),

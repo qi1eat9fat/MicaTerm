@@ -8,11 +8,13 @@
 mod cards;
 mod hosts;
 mod settings;
+mod snippets;
 mod tabs;
 mod window;
 
 pub use cards::*;
 pub use hosts::*;
 pub use settings::*;
+pub use snippets::*;
 pub use tabs::*;
 pub use window::*;

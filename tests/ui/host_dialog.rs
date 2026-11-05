@@ -5,7 +5,9 @@ use qishell::app::{EditHost, NewHost};
 use crate::support::*;
 
 fn dialog_open(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> bool {
-    in_frame(cx, handle, |window, _| window.try_find("host-dialog").is_some())
+    in_frame(cx, handle, |window, _| {
+        window.try_find("host-dialog").is_some()
+    })
 }
 
 /// 把字段 `field` 的内容换成 `text`。
@@ -22,7 +24,9 @@ fn fill(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str, text: 
 }
 
 fn save(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
-    in_frame(cx, handle, |window, cx| window.click("host-dialog-save", cx));
+    in_frame(cx, handle, |window, cx| {
+        window.click("host-dialog-save", cx)
+    });
 }
 
 fn error_of(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str) -> Option<String> {
@@ -38,14 +42,22 @@ fn error_of(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str) ->
 fn the_plus_after_the_host_count_opens_a_new_host_dialog(cx: &mut TestAppContext) {
     let (handle, _) = open_workspace(cx);
 
-    in_frame(cx, handle, |window, cx| window.click("host-sidebar-new-host", cx));
+    in_frame(cx, handle, |window, cx| {
+        window.click("host-sidebar-new-host", cx)
+    });
 
     assert!(dialog_open(cx, handle));
     in_frame(cx, handle, |window, _| {
         assert_eq!(window.find("host-dialog-title").label(), Some("新建主机"));
         // 焦点先给「名称」。
         assert_eq!(window.find("host-name").focused(), Some(true));
-        for id in ["host-address", "host-port", "host-user", "host-password", "host-notes"] {
+        for id in [
+            "host-address",
+            "host-port",
+            "host-user",
+            "host-password",
+            "host-notes",
+        ] {
             assert!(window.find(id).visible(), "{id}");
         }
         // 本工单的认证只有「密码」，连接方式只有「直接」。
@@ -55,7 +67,9 @@ fn the_plus_after_the_host_count_opens_a_new_host_dialog(cx: &mut TestAppContext
         assert!(window.try_find(("host-route", 1usize)).is_none());
     });
 
-    in_frame(cx, handle, |window, cx| window.click("host-dialog-cancel", cx));
+    in_frame(cx, handle, |window, cx| {
+        window.click("host-dialog-cancel", cx)
+    });
     assert!(!dialog_open(cx, handle));
 }
 
@@ -92,7 +106,10 @@ fn a_new_host_is_saved_named_after_its_address_and_selected(cx: &mut TestAppCont
     assert_eq!(host.user.as_ref(), "ubuntu");
     assert_eq!(host.auth, AuthKind::Password);
     // 最后一个，自动选上。
-    assert_eq!(host_names(cx, &workspace).last().map(String::as_str), Some("10.0.1.21"));
+    assert_eq!(
+        host_names(cx, &workspace).last().map(String::as_str),
+        Some("10.0.1.21")
+    );
     cx.update(|cx| assert_eq!(workspace.read(cx).selected_host(cx), Some(HostId(7))));
     // 密码按主机 id 进保险库。
     assert_eq!(
@@ -129,7 +146,10 @@ fn a_wrong_field_turns_red_says_why_and_keeps_the_dialog_open(cx: &mut TestAppCo
 
     assert!(dialog_open(cx, handle));
     assert!(host_names(cx, &workspace).is_empty());
-    assert_eq!(error_of(cx, handle, "host-address").as_deref(), Some("地址不能为空"));
+    assert_eq!(
+        error_of(cx, handle, "host-address").as_deref(),
+        Some("地址不能为空")
+    );
     assert_eq!(
         error_of(cx, handle, "host-port").as_deref(),
         Some("端口必须是 1 到 65535 之间的数字")
@@ -155,7 +175,9 @@ fn a_wrong_field_turns_red_says_why_and_keeps_the_dialog_open(cx: &mut TestAppCo
 fn editing_a_host_starts_from_what_it_has_and_saves_the_change(cx: &mut TestAppContext) {
     let (handle, workspace, secrets) = open_with_seed(cx);
     let staging = saved_host(cx, &workspace, 4).unwrap();
-    secrets.set(&staging.password_secret(), "old-secret").unwrap();
+    secrets
+        .set(&staging.password_secret(), "old-secret")
+        .unwrap();
 
     dispatch(cx, handle, EditHost(HostId(4)));
     in_frame(cx, handle, |window, _| {

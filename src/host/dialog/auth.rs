@@ -76,10 +76,7 @@ impl AuthSection {
                 .placeholder(t!("host.dialog.password_placeholder"))
         });
         let (saved_password, load) = match password {
-            Some(secret) => (
-                None,
-                Some(load_saved_password(store, secret, window, cx)),
-            ),
+            Some(secret) => (None, Some(load_saved_password(store, secret, window, cx))),
             None => (Some(None), None),
         };
         Self {
@@ -137,7 +134,10 @@ impl AuthSection {
                 None,
                 segmented(
                     AUTH_CHOICE,
-                    AuthChoice::ALL.iter().map(|choice| choice.label()).collect(),
+                    AuthChoice::ALL
+                        .iter()
+                        .map(|choice| choice.label())
+                        .collect(),
                     AuthChoice::ALL
                         .iter()
                         .position(|candidate| *candidate == choice)
@@ -157,7 +157,9 @@ impl AuthSection {
                     errors.get(FIELD_USER).is_some(),
                     tokens,
                 ),
-                FieldNote::error_of(FIELD_USER, errors).into_iter().collect(),
+                FieldNote::error_of(FIELD_USER, errors)
+                    .into_iter()
+                    .collect(),
                 tokens,
             ),
             form_field(

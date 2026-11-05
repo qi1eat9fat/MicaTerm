@@ -56,7 +56,10 @@ impl HostMark {
     pub fn render(&self, id: ElementId, size: Pixels) -> impl IntoElement + use<> {
         let own: Hsla = rgb(mark_color(&self.address)).into();
         let white: Hsla = rgb(MARK_INK).into();
-        let (background, ink) = match self.os.and_then(|os| os.brand_color().zip(os.brand_foreground())) {
+        let (background, ink) = match self
+            .os
+            .and_then(|os| os.brand_color().zip(os.brand_foreground()))
+        {
             Some((background, ink)) => (rgb(background).into(), rgb(ink).into()),
             // 没有系统，或者是单色的标志（Apple）：用地址的颜色，徽章绝不会是灰的。
             None => (own, white),

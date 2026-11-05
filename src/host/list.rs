@@ -148,7 +148,8 @@ impl HostList {
 
     /// 焦点给搜索框（Ctrl+Shift+H）。
     pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search.update(cx, |search, cx| search.focus(window, cx));
+        self.search
+            .update(cx, |search, cx| search.focus(window, cx));
     }
 
     /// 选中一台主机并滚进视野。
@@ -268,7 +269,12 @@ impl HostList {
         }
     }
 
-    fn render_search(&self, tokens: &Tokens, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_search(
+        &self,
+        tokens: &Tokens,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let focused = self.search.focus_handle(cx).is_focused(window);
         let searching = self.searching();
         div()
@@ -610,7 +616,11 @@ impl Render for HostList {
 }
 
 /// 列表里没有行时的那句话（原型 `.noresult`）。
-fn render_empty(text: SharedString, hint: Option<SharedString>, tokens: &Tokens) -> impl IntoElement {
+fn render_empty(
+    text: SharedString,
+    hint: Option<SharedString>,
+    tokens: &Tokens,
+) -> impl IntoElement {
     div()
         .id("host-list-empty")
         .test_support()

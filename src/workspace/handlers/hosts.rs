@@ -35,7 +35,12 @@ impl Workspace {
         open_host_dialog(self.hosts.clone(), None, window, cx);
     }
 
-    fn on_edit_host(&mut self, &EditHost(id): &EditHost, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_edit_host(
+        &mut self,
+        &EditHost(id): &EditHost,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if window.has_active_dialog(cx) || self.hosts.read(cx).host(id).is_none() {
             return;
         }
@@ -84,7 +89,8 @@ impl Workspace {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.hosts.update(cx, |store, cx| store.move_host(host, drop, cx));
+        self.hosts
+            .update(cx, |store, cx| store.move_host(host, drop, cx));
     }
 
     /// 聚焦主机搜索（Ctrl+Shift+H）：主机栏收着时先展开。

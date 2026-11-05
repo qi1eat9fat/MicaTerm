@@ -16,9 +16,8 @@ mod mark;
 pub mod menu;
 mod store;
 
-use gpui_kit::SharedString;
-
-use qishell_hosts::{HostData, HostDatabase};
+// 主机核心的类型都从这里取（命令片段、凭据……），应用的界面不必直接依赖 qishell-hosts。
+pub use qishell_hosts::*;
 
 pub use describe::ErrorMessage;
 pub use dialog::{HostDialog, open_delete_host_dialog, open_host_dialog};
@@ -35,5 +34,6 @@ pub fn load_hosts() -> Result<HostData, SharedString> {
         .map_err(|error| t!("host.store.open_failed", error = error.to_string()))?;
     let database = HostDatabase::open(&path)
         .map_err(|error| t!("host.store.open_failed", error = error.message()))?;
-    HostData::load(database).map_err(|error| t!("host.store.open_failed", error = error.to_string()))
+    HostData::load(database)
+        .map_err(|error| t!("host.store.open_failed", error = error.to_string()))
 }

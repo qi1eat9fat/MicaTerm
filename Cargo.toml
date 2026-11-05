@@ -47,10 +47,10 @@ winresource = "0.1"
 gpui-kit = { version = "0.6.1", features = ["test-support"] }
 # 假终端传输往终端发事件用。
 async-channel = "2"
+# 测试用内存数据库（`HostDatabase::in_memory`）。
+qishell-hosts = { path = "crates/qishell-hosts", features = ["testing"] }
 regex = "1"
 tempfile = "3"
-# 内存数据库夹具 `HostDatabase::in_memory`（工单 11）。
-qishell-hosts = { path = "crates/qishell-hosts", features = ["testing"] }
 
 [profile.release]
 lto = "thin"

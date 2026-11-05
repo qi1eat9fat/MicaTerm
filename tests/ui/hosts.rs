@@ -210,13 +210,27 @@ fn dragging_a_host_puts_it_before_or_after_another(cx: &mut TestAppContext) {
     drag_host(cx, handle, 5, 2, true);
     assert_eq!(
         host_names(cx, &workspace),
-        ["web-01", "qa-runner", "web-02", "db-01", "staging-api", "dev-box"]
+        [
+            "web-01",
+            "qa-runner",
+            "web-02",
+            "db-01",
+            "staging-api",
+            "dev-box"
+        ]
     );
 
     drag_host(cx, handle, 1, 4, false);
     assert_eq!(
         host_names(cx, &workspace),
-        ["qa-runner", "web-02", "db-01", "staging-api", "web-01", "dev-box"]
+        [
+            "qa-runner",
+            "web-02",
+            "db-01",
+            "staging-api",
+            "web-01",
+            "dev-box"
+        ]
     );
     // 列表跟着变。
     in_frame(cx, handle, |window, _| {
@@ -234,13 +248,22 @@ fn dragging_is_paused_while_searching(cx: &mut TestAppContext) {
 
     assert_eq!(
         host_names(cx, &workspace),
-        ["web-01", "web-02", "db-01", "staging-api", "qa-runner", "dev-box"]
+        [
+            "web-01",
+            "web-02",
+            "db-01",
+            "staging-api",
+            "qa-runner",
+            "dev-box"
+        ]
     );
 }
 
 /// 右键菜单里各项的文字，从上到下（分隔线不算）。
 fn menu_labels(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: u64) -> Vec<String> {
-    in_frame(cx, handle, |window, cx| window.right_click(host_row(id), cx));
+    in_frame(cx, handle, |window, cx| {
+        window.right_click(host_row(id), cx)
+    });
     let labels = in_frame(cx, handle, |window, _| {
         let popup = window.within("popup-menu");
         (0..12_usize)
@@ -296,9 +319,7 @@ fn a_copy_goes_right_after_the_original_without_its_password(cx: &mut TestAppCon
     // 副本自动选上。
     assert_eq!(selected(cx, &workspace), Some(7));
     in_frame(cx, handle, |window, _| {
-        assert!(
-            window.find(host_row(7)).bounds().top() < window.find(host_row(2)).bounds().top()
-        );
+        assert!(window.find(host_row(7)).bounds().top() < window.find(host_row(2)).bounds().top());
     });
 }
 
@@ -329,7 +350,9 @@ fn deleting_a_host_asks_first(cx: &mut TestAppContext) {
     assert_eq!(host_names(cx, &workspace).len(), 6);
 
     dispatch(cx, handle, DeleteHost(HostId(1)));
-    in_frame(cx, handle, |window, cx| window.click("host-delete-confirm", cx));
+    in_frame(cx, handle, |window, cx| {
+        window.click("host-delete-confirm", cx)
+    });
 
     assert_eq!(
         host_names(cx, &workspace),
@@ -347,9 +370,8 @@ fn deleting_a_host_asks_first(cx: &mut TestAppContext) {
 fn deleting_a_jump_host_names_the_hosts_that_go_through_it(cx: &mut TestAppContext) {
     let mut data = HostData::seed();
     data.insert_unnotified(
-        HostDraft::new("db-master", "10.0.2.8", 22, "root", AuthKind::Password).with_route(
-            qishell_hosts::Route::Jump(vec![Some(HostId(1))]),
-        ),
+        HostDraft::new("db-master", "10.0.2.8", 22, "root", AuthKind::Password)
+            .with_route(qishell_hosts::Route::Jump(vec![Some(HostId(1))])),
     );
     let (handle, _, _) = open_with_hosts(cx, data);
 
@@ -381,9 +403,8 @@ fn a_change_the_database_refuses_still_shows_and_is_reported(cx: &mut TestAppCon
             .with_credential(credential),
     );
     let (handle, workspace, _) = open_with_hosts(cx, data);
-    let notifications = |cx: &mut TestAppContext| {
-        in_frame(cx, handle, |window, cx| window.notifications(cx).len())
-    };
+    let notifications =
+        |cx: &mut TestAppContext| in_frame(cx, handle, |window, cx| window.notifications(cx).len());
     assert_eq!(notifications(cx), 0);
 
     dispatch(cx, handle, DuplicateHost(HostId(1)));

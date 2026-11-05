@@ -17,7 +17,11 @@ pub(super) struct NotesSection {
 }
 
 impl NotesSection {
-    pub(super) fn new(draft: &HostDraft, window: &mut Window, cx: &mut Context<HostDialog>) -> Self {
+    pub(super) fn new(
+        draft: &HostDraft,
+        window: &mut Window,
+        cx: &mut Context<HostDialog>,
+    ) -> Self {
         Self {
             notes: cx.new(|cx| {
                 TextareaState::new(window, cx)
