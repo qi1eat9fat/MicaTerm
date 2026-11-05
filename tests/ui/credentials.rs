@@ -450,3 +450,194 @@ fn an_agent_credential_keeps_no_secret(cx: &mut TestAppContext) {
     assert_eq!(saved.kind, qishell_hosts::CredentialKind::Agent);
     assert!(secrets.is_empty());
 }
+
+// ---- 编辑：双击、回车、右键菜单 ----
+
+/// 右键凭据 `id`，菜单里各项的文字，从上到下（分隔线不算）；菜单留着开。
+fn menu_labels(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: u64) -> Vec<String> {
+    in_frame(cx, handle, |window, cx| window.right_click(row(id), cx));
+    in_frame(cx, handle, |window, _| {
+        let popup = window.within("popup-menu");
+        (0..8_usize)
+            .filter_map(|item| popup.try_find(item))
+            .filter_map(|item| item.label().map(str::to_owned))
+            .collect::<Vec<_>>()
+    })
+}
+
+fn click_menu_item(cx: &mut TestAppContext, handle: WindowHandle<Root>, item: usize) {
+    in_frame(cx, handle, |window, cx| {
+        window.within("popup-menu").click(item, cx)
+    });
+}
+
+#[gpui_kit::test]
+fn a_double_click_or_enter_edits_a_credential(cx: &mut TestAppContext) {
+    let (handle, _, _) = open(cx);
+    dispatch(cx, handle, ShowCredentials);
+
+    in_frame(cx, handle, |window, cx| window.double_click(row(2), cx));
+    assert!(credential_dialog_open(cx, handle));
+    assert_eq!(
+        label(cx, handle, "credential-dialog-title").as_deref(),
+        Some("编辑凭据")
+    );
+    assert_eq!(
+        label(cx, handle, "credential-dialog-subtitle").as_deref(),
+        Some("运维密码")
+    );
+    in_frame(cx, handle, |window, cx| window.press("escape", cx));
+    assert!(!credential_dialog_open(cx, handle));
+
+    // 单击选中，↓ 移到下一行，回车编辑。
+    click(cx, handle, row(1));
+    in_frame(cx, handle, |window, cx| window.press("down", cx));
+    in_frame(cx, handle, |window, cx| window.press("enter", cx));
+    assert_eq!(
+        label(cx, handle, "credential-dialog-subtitle").as_deref(),
+        Some("运维密码")
+    );
+}
+
+#[gpui_kit::test]
+fn the_menu_edits_copies_a_public_key_and_deletes(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open(cx);
+    dispatch(cx, handle, ShowCredentials);
+
+    assert_eq!(menu_labels(cx, handle, 1), ["编辑…", "复制公钥", "删除"]);
+    click_menu_item(cx, handle, 1);
+    let public_key = credential(cx, &workspace, 1).unwrap().public_key.unwrap();
+    let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert_eq!(copied.as_deref(), Some(public_key.as_ref()));
+
+    // 只有密钥有「复制公钥」。
+    assert_eq!(menu_labels(cx, handle, 2), ["编辑…", "删除"]);
+    click_menu_item(cx, handle, 0);
+    assert_eq!(
+        label(cx, handle, "credential-dialog-subtitle").as_deref(),
+        Some("运维密码")
+    );
+}
+
+#[gpui_kit::test]
+fn renaming_a_credentials_user_renames_every_host_using_it(cx: &mut TestAppContext) {
+    let secrets = Arc::new(InMemorySecretStore::default());
+    let (handle, workspace, _) = open_with(
+        cx,
+        WorkspaceServices {
+            secrets: secrets.clone(),
+            ..fake_services()
+        },
+    );
+    let deploy = credential(cx, &workspace, 1).unwrap();
+    secrets
+        .set(
+            &deploy.private_key_secret(),
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+        )
+        .unwrap();
+    dispatch(cx, handle, qishell::app::EditCredential(deploy.id));
+
+    // 编辑密钥凭据时停在「当前私钥」，显示现在的公钥；写明有几台主机跟着改。
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(
+            window.find(("credential-key-source", 0usize)).label(),
+            Some("当前私钥")
+        );
+        assert_eq!(
+            window.find(("credential-key-source", 0usize)).selected(),
+            Some(true)
+        );
+    });
+    assert_eq!(
+        label(cx, handle, "credential-public-key"),
+        deploy.public_key.as_ref().map(ToString::to_string)
+    );
+    assert_eq!(
+        label(cx, handle, "credential-usage").as_deref(),
+        Some("有 2 台主机在用这条凭据，保存后它们跟着改")
+    );
+
+    fill(cx, handle, "credential-user", "release");
+    save_credential(cx, handle);
+
+    assert!(!credential_dialog_open(cx, handle));
+    for host in [3, 4] {
+        assert_eq!(
+            saved_host(cx, &workspace, host).unwrap().user.as_ref(),
+            "release"
+        );
+    }
+    assert_eq!(saved_host(cx, &workspace, 1).unwrap().user.as_ref(), "root");
+    // 私钥没换：保险库里的还在，公钥也没变。
+    let edited = credential(cx, &workspace, 1).unwrap();
+    assert_eq!(edited.public_key, deploy.public_key);
+    assert_eq!(
+        secret(&secrets, &deploy.private_key_secret()).as_deref(),
+        Some("-----BEGIN OPENSSH PRIVATE KEY-----")
+    );
+}
+
+#[gpui_kit::test]
+fn editing_a_password_credential_starts_from_its_saved_password(cx: &mut TestAppContext) {
+    let secrets = Arc::new(InMemorySecretStore::default());
+    let (handle, workspace, _) = open_with(
+        cx,
+        WorkspaceServices {
+            secrets: secrets.clone(),
+            ..fake_services()
+        },
+    );
+    let ops = credential(cx, &workspace, 2).unwrap();
+    secrets.set(&ops.password_secret(), "old-secret").unwrap();
+
+    dispatch(cx, handle, qishell::app::EditCredential(ops.id));
+    fill(cx, handle, "credential-name", "运维");
+    save_credential(cx, handle);
+
+    assert!(!credential_dialog_open(cx, handle));
+    assert_eq!(credential(cx, &workspace, 2).unwrap().name.as_ref(), "运维");
+    assert_eq!(
+        secret(&secrets, &ops.password_secret()).as_deref(),
+        Some("old-secret")
+    );
+
+    // 改成新的密码。
+    dispatch(cx, handle, qishell::app::EditCredential(ops.id));
+    fill(cx, handle, "credential-password", "new-secret");
+    save_credential(cx, handle);
+    assert_eq!(
+        secret(&secrets, &ops.password_secret()).as_deref(),
+        Some("new-secret")
+    );
+}
+
+#[gpui_kit::test]
+fn a_locked_vault_keeps_a_credentials_password_out_of_the_form(cx: &mut TestAppContext) {
+    let vault = TestVault::unlocked();
+    let (handle, workspace, _) = open_with(cx, vault.services());
+    let ops = credential(cx, &workspace, 2).unwrap();
+    vault
+        .vault
+        .set(&ops.password_secret(), "old-secret")
+        .unwrap();
+    dispatch(cx, handle, qishell::app::LockVault);
+
+    dispatch(cx, handle, qishell::app::EditCredential(ops.id));
+    assert_eq!(
+        label(cx, handle, "credential-password-locked").as_deref(),
+        Some("已保存，保险库锁定中 · 解锁后修改")
+    );
+    assert!(!present(cx, handle, "credential-password"));
+    // 只改名字：不碰密码，也不用解锁。
+    fill(cx, handle, "credential-name", "运维");
+    save_credential(cx, handle);
+    assert!(!credential_dialog_open(cx, handle));
+    assert!(!present(cx, handle, "vault-unlock"));
+    assert_eq!(credential(cx, &workspace, 2).unwrap().name.as_ref(), "运维");
+    vault.vault.unlock(MASTER, false).unwrap();
+    assert_eq!(
+        vault.read(&ops.password_secret()).as_deref(),
+        Some("old-secret")
+    );
+}
