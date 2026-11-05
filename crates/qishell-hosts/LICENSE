@@ -1,5 +1,5 @@
 qishell-hosts 拷自 since2006/shell-rs（https://github.com/since2006/shell-rs）
-commit b2a307a 的 crates/shellrs-hosts，原以 MIT 许可发布，原许可和版权声明
+commit b2a307a77909a6599f6b53d82d42c8200b4026b8 的 crates/shellrs-hosts，原以 MIT 许可发布，原许可和版权声明
 原样保留在下面。QiShell 对它的裁剪和修改随 QiShell 整体以 GPL-3.0-only 发布，
 见 docs/adr/0002-gpl-and-copy-from-shellrs.md。
 

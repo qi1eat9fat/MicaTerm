@@ -376,35 +376,6 @@ fn relative_time(then: chrono::NaiveDateTime, now: chrono::NaiveDateTime) -> Sha
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use chrono::{NaiveDate, NaiveDateTime};
-
-    use super::relative_time;
-
-    fn at(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(year, month, day)
-            .unwrap()
-            .and_hms_opt(hour, minute, 0)
-            .unwrap()
-    }
-
-    #[test]
-    fn recent_connections_read_like_the_prototype() {
-        let now = at(2026, 11, 5, 14, 30);
-        let said = |then| relative_time(then, now).to_string();
-        assert_eq!(said(now), "刚刚");
-        assert_eq!(said(at(2026, 11, 5, 14, 20)), "10 分钟前");
-        assert_eq!(said(at(2026, 11, 5, 9, 12)), "今天 09:12");
-        assert_eq!(said(at(2026, 11, 4, 23, 50)), "昨天");
-        assert_eq!(said(at(2026, 11, 2, 8, 0)), "3 天前");
-        assert_eq!(said(at(2026, 8, 1, 8, 0)), "8 月 1 日");
-        assert_eq!(said(at(2025, 12, 31, 8, 0)), "2025 年 12 月 31 日");
-        // 钟拨回去了（连接时间比现在晚）也不写成负的。
-        assert_eq!(said(at(2026, 11, 5, 15, 0)), "刚刚");
-    }
-}
-
 /// 一台主机都没有时的欢迎语和一句引导（原型 `.start .hello`）。
 fn render_hello(tokens: &Tokens) -> impl IntoElement {
     div()
@@ -496,4 +467,33 @@ fn big_button(
                         .child(hint),
                 ),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{NaiveDate, NaiveDateTime};
+
+    use super::relative_time;
+
+    fn at(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(year, month, day)
+            .unwrap()
+            .and_hms_opt(hour, minute, 0)
+            .unwrap()
+    }
+
+    #[test]
+    fn recent_connections_read_like_the_prototype() {
+        let now = at(2026, 11, 5, 14, 30);
+        let said = |then| relative_time(then, now).to_string();
+        assert_eq!(said(now), "刚刚");
+        assert_eq!(said(at(2026, 11, 5, 14, 20)), "10 分钟前");
+        assert_eq!(said(at(2026, 11, 5, 9, 12)), "今天 09:12");
+        assert_eq!(said(at(2026, 11, 4, 23, 50)), "昨天");
+        assert_eq!(said(at(2026, 11, 2, 8, 0)), "3 天前");
+        assert_eq!(said(at(2026, 8, 1, 8, 0)), "8 月 1 日");
+        assert_eq!(said(at(2025, 12, 31, 8, 0)), "2025 年 12 月 31 日");
+        // 钟拨回去了（连接时间比现在晚）也不写成负的。
+        assert_eq!(said(at(2026, 11, 5, 15, 0)), "刚刚");
+    }
 }
