@@ -24,6 +24,8 @@ pub(super) struct HeaderState {
     pub program: Program,
     /// 目录后面的状态点。
     pub dot: StatusDot,
+    /// 远程卡片没连着（正在连接、已断开）：名称变灰（原型 `.card.off .chead .nm`，工单 12）。
+    pub offline: bool,
 }
 
 pub(super) fn render_header(
@@ -68,6 +70,7 @@ pub(super) fn render_header(
                 .text_size(px(12.5))
                 .font_weight(FontWeight::SEMIBOLD)
                 .whitespace_nowrap()
+                .when(state.offline, |name| name.text_color(tokens.offline))
                 .child(name),
         )
         .child(

@@ -93,6 +93,3 @@ terminal.pty.resize_error:
   zh-CN: 调整 PTY 尺寸失败：%{error}
 terminal.pty.exit_status:
   zh-CN: 无法读取 shell 退出状态
-
-terminal.notice.reconnect_or_close:
-  zh-CN: 按 Enter 重新连接，按 Space 关闭标签页

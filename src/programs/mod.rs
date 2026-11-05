@@ -19,6 +19,18 @@ pub struct Program {
     pub border: bool,
     /// 是 shell（在提示符下）：用终端图块，不亮绿点。
     pub shell: bool,
+    /// 图块上写字而不是画图标：远程卡片还没探测出系统时，系统徽章是主机名称的首字（工单 12）。
+    pub letter: Option<String>,
+    /// 连接断开了（或还没连上）：图块变灰（原型 `.tile i.off`，工单 12）。
+    pub off: bool,
+}
+
+impl Program {
+    /// 同一个图块，变灰。
+    pub fn offline(mut self) -> Self {
+        self.off = true;
+        self
+    }
 }
 
 /// 表里的一项：命令名（小写），显示名，图标，底色，图标色，要不要描边。
@@ -388,6 +400,8 @@ pub fn program_of(name: &str) -> Program {
             tile_fg: *tile_fg,
             border: *border,
             shell: false,
+            letter: None,
+            off: false,
         };
     }
     if SHELLS.contains(&key.as_str()) {
@@ -400,6 +414,8 @@ pub fn program_of(name: &str) -> Program {
         tile_fg: 0xffffff,
         border: false,
         shell: false,
+        letter: None,
+        off: false,
     }
 }
 
@@ -412,6 +428,8 @@ pub fn shell_program(name: &str) -> Program {
         tile_fg: SHELL_FG,
         border: false,
         shell: true,
+        letter: None,
+        off: false,
     }
 }
 

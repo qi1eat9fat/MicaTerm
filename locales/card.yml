@@ -15,3 +15,33 @@ card.dot.busy:
   zh-CN: 有输出
 card.dot.attention:
   zh-CN: 需要注意
+card.remote.connecting:
+  zh-CN: 正在连接
+card.remote.connected:
+  zh-CN: 已连接
+card.remote.disconnected:
+  zh-CN: 已断开
+card.remote.unknown_os:
+  zh-CN: 未探测
+card.remote.exited:
+  zh-CN: shell 已退出（退出码 %{code}）
+card.remote.exited_signal:
+  zh-CN: shell 被信号 %{signal} 结束
+card.remote.stopped:
+  zh-CN: 已断开连接
+card.remote.ended:
+  zh-CN: 连接已断开
+card.remote.ended_label:
+  zh-CN: 连接已断开 · %{reason} · Enter 重新连接 · Space 关闭
+card.remote.reconnect_hint:
+  zh-CN: 重新连接
+card.remote.close_hint:
+  zh-CN: 关闭
+card.menu.copy_ip:
+  zh-CN: 复制 IP
+card.menu.copy_host_name:
+  zh-CN: 复制主机名
+card.menu.reconnect:
+  zh-CN: 重新连接
+card.menu.disconnect:
+  zh-CN: 断开连接

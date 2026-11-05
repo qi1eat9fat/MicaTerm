@@ -101,7 +101,6 @@ pub struct TerminalEngine {
     _interaction_observer: gpui_kit::Subscription,
     /// The folder the shell last reported on this connection.
     directory: Option<ReportedDirectory>,
-    reconnect_on_enter: bool,
     generation: u64,
     size: TerminalSize,
     event_sender: mpsc::Sender<TerminalUiEvent>,
@@ -147,7 +146,6 @@ impl TerminalEngine {
             _theme_observer: theme_observer,
             _interaction_observer: interaction_observer,
             directory: None,
-            reconnect_on_enter: false,
             generation,
             size,
             event_sender,
@@ -222,12 +220,10 @@ impl TerminalEngine {
             TerminalUiEventKind::Title(title) => self.title = sanitize_title(&title),
             TerminalUiEventKind::ResetTitle => self.title = None,
             TerminalUiEventKind::Exited { code, signal } => {
-                self.append_reconnect_hint();
                 self.lifecycle = TerminalLifecycle::Exited { code, signal };
                 self.directory = None;
             }
             TerminalUiEventKind::Failed(error) => {
-                self.append_reconnect_hint();
                 self.lifecycle = TerminalLifecycle::Failed(error);
                 self.directory = None;
             }
@@ -260,19 +256,6 @@ impl TerminalEngine {
             }
         }
         None
-    }
-
-    pub(crate) fn enable_reconnect_on_enter(&mut self) {
-        self.reconnect_on_enter = true;
-    }
-
-    fn append_reconnect_hint(&self) {
-        if self.reconnect_on_enter {
-            append_message(
-                &self.runtime.term,
-                &t!("terminal.notice.reconnect_or_close"),
-            );
-        }
     }
 
     pub fn restart(&mut self, cx: &mut gpui_kit::Context<Self>) {
@@ -318,7 +301,6 @@ impl TerminalEngine {
         self.runtime.shutdown();
         self.directory = None;
         append_message(&self.runtime.term, message);
-        self.append_reconnect_hint();
         self.lifecycle = TerminalLifecycle::Exited {
             code: 0,
             signal: None,
