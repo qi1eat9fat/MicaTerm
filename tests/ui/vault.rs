@@ -313,6 +313,54 @@ fn connecting_unlocks_only_when_a_saved_secret_is_needed(cx: &mut TestAppContext
     assert_eq!(connected_hosts(&remote), vec![2, 1, 1]);
 }
 
+/// 解锁在后台算的时候，另一台主机的连接问密码，问答框叠在解锁框上面：解锁算完只关解锁框，
+/// 问答框留着，答了照常交给连接（M2 code review S1）。
+#[gpui_kit::test]
+fn a_question_asked_while_unlocking_stays_open_and_gets_its_answer(cx: &mut TestAppContext) {
+    let vault = TestVault::unlocked()
+        .with_secret(&web01_password(), "hunter2")
+        .locked();
+    let (handle, workspace, remote) = open_with_vault(cx, &vault);
+    // web-02 没存密码，直接连。
+    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(2)));
+    let terminal = remote.targets()[0].0.0;
+
+    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    fill(cx, handle, "vault-unlock-password", MASTER);
+    let prompt = std::cell::Cell::new(None);
+    in_frame(cx, handle, |window, cx| {
+        window.click("vault-unlock-confirm", cx);
+        prompt.set(Some(remote.ask(
+            terminal,
+            qishell::backend::ConnectionPromptKind::authentication(
+                qishell::backend::AuthenticationRequest::Password {
+                    saved_rejected: false,
+                },
+            ),
+        )));
+    });
+    let prompt = prompt.get().unwrap();
+
+    assert_eq!(vault.status(), VaultStatus::Unlocked { remembered: true });
+    assert!(!visible(cx, handle, "vault-unlock"));
+    assert!(visible(cx, handle, "connection-prompt"), "问答框还开着");
+    cx.update(|cx| assert_eq!(workspace.read(cx).shown_prompt(), Some(prompt)));
+
+    in_frame(cx, handle, |window, cx| {
+        window.click(("prompt-field", 0usize), cx)
+    });
+    in_frame(cx, handle, |window, cx| window.input("s3cret", cx));
+    click(cx, handle, "prompt-confirm");
+    assert_eq!(
+        remote.replies(),
+        [(prompt, Answered::Answers(vec!["s3cret".into()]))]
+    );
+    assert!(!visible(cx, handle, "connection-prompt"));
+    cx.update(|cx| assert_eq!(workspace.read(cx).shown_prompt(), None));
+    // web-01 解开后照常连上。
+    assert_eq!(connected_hosts(&remote), vec![2, 1]);
+}
+
 #[gpui_kit::test]
 fn cancelling_the_unlock_connects_anyway_and_does_not_ask_again(cx: &mut TestAppContext) {
     let vault = TestVault::unlocked()

@@ -3,19 +3,19 @@
 // 参考 since2006/shell-rs @ b2a307a: src/snippets/snippet_dialog.rs（去掉分类和作用域；
 // 校验错误写在字段下面，不弹通知）。
 
-use std::rc::Rc;
-
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, WindowExt as _};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::host::{HostStore, SnippetDraft, SnippetDraftError, SnippetId};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::DialogLayer;
+use crate::ui::confirm::{Confirm, ConfirmLine, open_confirm_dialog};
 
 /// 对话框宽约 500（spec 第 4 节「编辑表单」）。
 const DIALOG_WIDTH: Pixels = px(500.);
@@ -198,47 +198,51 @@ pub fn open_snippet_dialog(
         None => (t!("snippets.dialog.new_title"), None),
     };
     let tokens = Tokens::current(cx);
-    window.open_dialog(cx, {
-        let form = form.clone();
-        move |dialog, _, _| {
-            let commit = form.clone();
-            dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_baseline()
-                        .gap(px(8.))
-                        .child(title.clone())
-                        .children(subtitle.clone().map(|name| {
-                            div()
-                                .text_size(px(12.))
-                                .font_weight(FontWeight::NORMAL)
-                                .text_color(tokens.faint)
-                                .child(name)
-                        })),
-                )
-                .w(DIALOG_WIDTH)
-                .rounded(px(14.))
-                // 只由按钮和 Esc 关，点旁边不关：免得写了一半的命令丢掉。
-                .overlay_closable(false)
-                .child(form.clone())
-                .footer(
-                    DialogFooter::new()
-                        .child(
-                            DialogClose::new()
-                                .trigger(|button| button.label(t!("snippets.dialog.cancel"))),
-                        )
-                        .child(
-                            DialogAction::new().child(
-                                Button::new("snippet-save")
-                                    .primary()
-                                    .label(t!("snippets.dialog.save")),
+    DialogLayer::new().open(
+        {
+            let form = form.clone();
+            move |dialog, _, _| {
+                let commit = form.clone();
+                dialog
+                    .title(
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap(px(8.))
+                            .child(title.clone())
+                            .children(subtitle.clone().map(|name| {
+                                div()
+                                    .text_size(px(12.))
+                                    .font_weight(FontWeight::NORMAL)
+                                    .text_color(tokens.faint)
+                                    .child(name)
+                            })),
+                    )
+                    .w(DIALOG_WIDTH)
+                    .rounded(px(14.))
+                    // 只由按钮和 Esc 关，点旁边不关：免得写了一半的命令丢掉。
+                    .overlay_closable(false)
+                    .child(form.clone())
+                    .footer(
+                        DialogFooter::new()
+                            .child(
+                                DialogClose::new()
+                                    .trigger(|button| button.label(t!("snippets.dialog.cancel"))),
+                            )
+                            .child(
+                                DialogAction::new().child(
+                                    Button::new("snippet-save")
+                                        .primary()
+                                        .label(t!("snippets.dialog.save")),
+                                ),
                             ),
-                        ),
-                )
-                .on_ok(move |_, _, cx| commit.update(cx, |form, cx| form.commit(cx)))
-        }
-    });
+                    )
+                    .on_ok(move |_, _, cx| commit.update(cx, |form, cx| form.commit(cx)))
+            }
+        },
+        window,
+        cx,
+    );
     // 打开就能打字：要在打开的同一次更新里给焦点，否则对话框自己的焦点会抢过去。
     let name = form.read(cx).name.clone();
     name.update(cx, |name, cx| name.focus(window, cx));
@@ -258,27 +262,23 @@ pub fn confirm_delete_snippet(
     else {
         return;
     };
-    let delete: Rc<dyn Fn(&mut App)> = Rc::new(move |cx| {
-        store.update(cx, |store, cx| {
-            store.remove_snippet(id, cx);
-        });
-    });
-    window.open_alert_dialog(cx, move |alert, _, _| {
-        let delete = delete.clone();
-        alert
-            .confirm()
-            .title(t!("snippets.delete.title", name = name))
-            .description(t!("snippets.delete.description"))
-            .button_props(
-                gpui_kit::component::dialog::DialogButtonProps::default()
-                    .ok_text(t!("snippets.delete.ok"))
-                    .ok_variant(gpui_kit::component::button::ButtonVariant::Danger)
-                    .cancel_text(t!("snippets.dialog.cancel"))
-                    .show_cancel(true),
-            )
-            .on_ok(move |_, _, cx| {
-                delete(cx);
-                true
-            })
-    });
+    open_confirm_dialog(
+        Confirm {
+            id: "snippet-delete",
+            title: t!("snippets.delete.title", name = name),
+            lines: vec![ConfirmLine::Text(t!("snippets.delete.description"))],
+            cancel: t!("snippets.dialog.cancel"),
+            confirm: t!("snippets.delete.ok"),
+        },
+        DialogLayer::new(),
+        Box::new(move |_, _, cx| {
+            store.update(cx, |store, cx| {
+                store.remove_snippet(id, cx);
+            });
+            None
+        }),
+        Box::new(|_, _| {}),
+        window,
+        cx,
+    );
 }

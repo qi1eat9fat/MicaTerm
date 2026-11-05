@@ -116,7 +116,7 @@ fn the_vault_bar_says_there_is_no_master_password(cx: &mut TestAppContext) {
         );
         click(cx, handle, "credentials-vault-action");
         assert!(present(cx, handle, "vault-password-dialog"));
-        in_frame(cx, handle, |window, cx| window.close_dialog(cx));
+        click(cx, handle, "vault-password-cancel");
     }
 }
 

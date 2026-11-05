@@ -8,7 +8,6 @@
 //! 对话框不点遮罩关闭、没有右上角的 ×，只能经下面的按钮或 Esc（= 取消）离开，所以每个问题一定有回答。
 
 use gpui_kit::component::Sizable as _;
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -22,6 +21,7 @@ use crate::backend::{
 };
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::DialogLayer;
 
 /// 对话框的宽（原型 `.dlg.small`）。
 const WIDTH: Pixels = px(440.);
@@ -36,6 +36,8 @@ pub struct PromptDialog {
     /// 认证问题的输入框，和服务器给的字段一一对应。
     fields: Vec<(ConnectionPromptField, Entity<InputState>)>,
     answer: Option<Answer>,
+    /// 对话框是哪一层：回答时只关自己。
+    layer: DialogLayer,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -45,6 +47,7 @@ impl PromptDialog {
         subtitle: SharedString,
         kind: ConnectionPromptKind,
         answer: Answer,
+        layer: DialogLayer,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -75,6 +78,7 @@ impl PromptDialog {
             subtitle,
             fields,
             answer: Some(answer),
+            layer,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -85,7 +89,7 @@ impl PromptDialog {
         let Some(answer) = self.answer.take() else {
             return;
         };
-        window.close_dialog(cx);
+        self.layer.close(window, cx);
         answer(reply, window, cx);
     }
 
@@ -357,29 +361,37 @@ impl Render for PromptDialog {
 }
 
 /// 问用户 `kind`，回答交给 `answer`（取消、Esc 也是回答）。`subtitle` 写在标题后面：主机名。
-/// 有输入框时焦点给第一个，否则给对话框（Esc 能用）。
+/// 有输入框时焦点给第一个，否则给对话框（Esc 能用）。返回问答框那一层：问题作废时
+/// （等它的卡片都关了）调用方拿它关掉问答框，不交回答。
 pub fn open_prompt_dialog(
     subtitle: SharedString,
     kind: ConnectionPromptKind,
     answer: impl FnOnce(ConnectionPromptReply, &mut Window, &mut App) + 'static,
     window: &mut Window,
     cx: &mut App,
-) {
-    let view = cx.new(|cx| PromptDialog::new(subtitle, kind, Box::new(answer), window, cx));
+) -> DialogLayer {
+    let layer = DialogLayer::new();
+    let view =
+        cx.new(|cx| PromptDialog::new(subtitle, kind, Box::new(answer), layer.clone(), window, cx));
     let first_field = view.read(cx).fields.first().map(|(_, input)| input.clone());
     let focus = view.read(cx).focus_handle.clone();
-    window.open_dialog(cx, move |dialog, _, _| {
-        dialog
-            .w(WIDTH)
-            .p_0()
-            .rounded(px(14.))
-            .close_button(false)
-            .overlay_closable(false)
-            .keyboard(false)
-            .child(view.clone())
-    });
+    layer.open(
+        move |dialog, _, _| {
+            dialog
+                .w(WIDTH)
+                .p_0()
+                .rounded(px(14.))
+                .close_button(false)
+                .overlay_closable(false)
+                .keyboard(false)
+                .child(view.clone())
+        },
+        window,
+        cx,
+    );
     match first_field {
         Some(input) => input.update(cx, |input, cx| input.focus(window, cx)),
         None => window.focus(&focus, cx),
     }
+    layer
 }

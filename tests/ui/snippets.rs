@@ -407,7 +407,9 @@ fn the_menu_types_copies_edits_and_deletes(cx: &mut TestAppContext) {
     // 删除要确认。
     pick(cx, 4);
     assert_eq!(snippet_names(&workspace, cx).len(), 3);
-    in_frame(cx, handle, |window, cx| window.click("ok", cx));
+    in_frame(cx, handle, |window, cx| {
+        window.click("snippet-delete-confirm", cx)
+    });
     assert_eq!(snippet_names(&workspace, cx), ["Docker 容器", "重启 nginx"]);
     in_frame(cx, handle, |window, _| {
         assert!(!listed(window, DISK));

@@ -22,7 +22,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -41,6 +40,7 @@ use crate::host::{
 use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
 use crate::theme::Tokens;
+use crate::ui::DialogLayer;
 use crate::vault::{VaultStore, asks_before_saving, before_saving_secret};
 
 pub const FIELD_NAME: &str = "credential-name";
@@ -197,6 +197,8 @@ pub struct CredentialDialog {
     errors: FieldErrors,
     /// 正在读私钥文件、加密私钥：保存按钮不能再点。
     saving: Option<Task<()>>,
+    /// 对话框是哪一层：保存、取消时只关自己。
+    layer: DialogLayer,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -343,6 +345,7 @@ impl CredentialDialog {
             hosts,
             errors: FieldErrors::default(),
             saving: None,
+            layer: DialogLayer::new(),
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         };
@@ -681,15 +684,24 @@ impl CredentialDialog {
             }
             Some(id)
         });
-        // 对话框要关了：明文现在就放掉，不等实体回收。
+        self.close(window, cx);
+        if let (Some(id), Some(on_saved)) = (id, self.on_saved.take()) {
+            on_saved(id, window, cx);
+        }
+    }
+
+    /// 关掉凭据对话框（只关它自己那一层）。
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.forget_secrets(window, cx);
+        self.layer.close(window, cx);
+    }
+
+    /// 对话框要关了：明文现在就放掉，不等实体回收。
+    fn forget_secrets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.key_text
             .update(cx, |text, cx| text.set_value("", window, cx));
         self.pasted = None;
         self.generated = None;
-        window.close_dialog(cx);
-        if let (Some(id), Some(on_saved)) = (id, self.on_saved.take()) {
-            on_saved(id, window, cx);
-        }
     }
 
     /// 编辑的凭据有主机在用时的那句话。
@@ -697,7 +709,7 @@ impl CredentialDialog {
         (self.hosts > 0).then(|| t!("credential.dialog.usage", count = self.hosts))
     }
 
-    fn render_header(&self, tokens: &Tokens) -> impl IntoElement + use<> {
+    fn render_header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let (title, subtitle) = match (&self.editing_name, self.stacked) {
             (Some(name), _) => (t!("credential.dialog.title_edit"), name.clone()),
             (None, true) => (
@@ -751,7 +763,7 @@ impl CredentialDialog {
                     .text_color(tokens.icon)
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover).text_color(text))
-                    .on_click(|_, window, cx| window.close_dialog(cx))
+                    .on_click(cx.listener(|this, _, window, cx| this.close(window, cx)))
                     .child(Icon::new(IconName::Close).size(px(16.))),
             )
     }
@@ -1116,7 +1128,7 @@ impl CredentialDialog {
                 Button::new("credential-dialog-cancel")
                     .label(t!("credential.dialog.cancel"))
                     .small()
-                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                    .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
             )
             .child(
                 Button::new("credential-dialog-save")
@@ -1254,7 +1266,7 @@ impl Render for CredentialDialog {
             .flex_col()
             .w_full()
             .text_color(tokens.text)
-            .child(self.render_header(&tokens))
+            .child(self.render_header(&tokens, cx))
             .child(
                 div()
                     .id("credential-dialog-body")
@@ -1286,15 +1298,27 @@ pub fn open_credential_dialog(
     let view = cx.new(|cx| CredentialDialog::new(store, editing, on_saved, window, cx));
     let name = view.read(cx).name.clone();
     let new = view.read(cx).editing.is_none();
-    window.open_dialog(cx, move |dialog, _, _| {
-        dialog
-            .w(WIDTH)
-            .p_0()
-            .rounded(px(14.))
-            .close_button(false)
-            .overlay_closable(false)
-            .child(view.clone())
-    });
+    let layer = view.read(cx).layer.clone();
+    let dismissed = view.downgrade();
+    layer.open_dismissable(
+        move |dialog, _, _| {
+            dialog
+                .w(WIDTH)
+                .p_0()
+                .rounded(px(14.))
+                .close_button(false)
+                .overlay_closable(false)
+                .child(view.clone())
+        },
+        // Esc 关掉的：明文一样现在就放掉。
+        move |window, cx| {
+            dismissed
+                .update(cx, |dialog, cx| dialog.forget_secrets(window, cx))
+                .ok();
+        },
+        window,
+        cx,
+    );
     // 打开就能打字：要在打开的同一次更新里给焦点，否则对话框自己的焦点会抢过去。
     if new {
         name.update(cx, |name, cx| name.focus(window, cx));

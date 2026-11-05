@@ -4,9 +4,7 @@
 //! 分类是一张表（`CATEGORIES`）：以后加「SFTP」「安全」「应用」，只要往表里加一项、
 //! 在 `pages/` 下加一个页面函数。
 
-use gpui_kit::component::{
-    Icon, IconName, WindowExt as _, input::InputState, scroll::ScrollableElement as _,
-};
+use gpui_kit::component::{Icon, IconName, input::InputState, scroll::ScrollableElement as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -18,6 +16,7 @@ use super::pages;
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::DialogLayer;
 
 /// 对话框的键上下文。
 pub const SETTINGS_DIALOG_KEY_CONTEXT: &str = "SettingsDialog";
@@ -65,6 +64,8 @@ pub struct SettingsDialog {
     pub(super) terminal_font_size: Entity<InputState>,
     pub(super) terminal_line_height: Entity<InputState>,
     pub(super) local_shell: Entity<LocalShellEditor>,
+    /// 对话框是哪一层：关闭按钮只关自己。
+    layer: DialogLayer,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
     _font_scan: Task<()>,
@@ -103,6 +104,7 @@ impl SettingsDialog {
             terminal_font_size,
             terminal_line_height,
             local_shell,
+            layer: DialogLayer::new(),
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
             _font_scan: font_scan,
@@ -141,7 +143,7 @@ impl Render for SettingsDialog {
             .flex_col()
             .size_full()
             .text_color(tokens.text)
-            .child(header(&tokens))
+            .child(header(&self.layer, &tokens))
             .child(
                 div()
                     .flex()
@@ -167,7 +169,8 @@ impl Render for SettingsDialog {
 }
 
 /// 标题行：「设置」、一句说明、关闭按钮。
-fn header(tokens: &Tokens) -> impl IntoElement {
+fn header(layer: &DialogLayer, tokens: &Tokens) -> impl IntoElement {
+    let layer = layer.clone();
     let hover = tokens.hover;
     let text = tokens.text;
     div()
@@ -208,7 +211,7 @@ fn header(tokens: &Tokens) -> impl IntoElement {
                 .text_color(tokens.icon)
                 .cursor_pointer()
                 .hover(move |style| style.bg(hover).text_color(text))
-                .on_click(|_, window, cx| window.close_dialog(cx))
+                .on_click(move |_, window, cx| layer.close(window, cx))
                 .child(Icon::new(IconName::Close).size(px(16.))),
         )
 }
@@ -276,18 +279,23 @@ fn navigation(
 /// 打开设置对话框。对话框不点遮罩关闭，用右上角的按钮或 Esc 关。
 pub fn open_settings_dialog(store: Entity<SettingsStore>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| SettingsDialog::new(store, window, cx));
-    window.open_dialog(cx, move |dialog, window, _| {
-        let viewport = window.viewport_size();
-        let width = px(860.).min(viewport.width - px(40.));
-        let height = (viewport.height - px(60.)).max(px(320.));
-        dialog
-            .w(width)
-            .h(height)
-            .margin_top(px(30.))
-            .p_0()
-            .rounded(px(14.))
-            .close_button(false)
-            .overlay_closable(false)
-            .child(view.clone())
-    });
+    let layer = view.read(cx).layer.clone();
+    layer.open(
+        move |dialog, window, _| {
+            let viewport = window.viewport_size();
+            let width = px(860.).min(viewport.width - px(40.));
+            let height = (viewport.height - px(60.)).max(px(320.));
+            dialog
+                .w(width)
+                .h(height)
+                .margin_top(px(30.))
+                .p_0()
+                .rounded(px(14.))
+                .close_button(false)
+                .overlay_closable(false)
+                .child(view.clone())
+        },
+        window,
+        cx,
+    );
 }
