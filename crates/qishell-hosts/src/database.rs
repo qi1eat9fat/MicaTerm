@@ -122,8 +122,9 @@ pub struct StoredData {
     /// credential has no user name of its own here; the store copies the
     /// credential's in.
     pub hosts: Vec<Host>,
-    /// Hosts that have ever connected, most recently connected first.
-    pub recent: Vec<HostId>,
+    /// Hosts that have ever connected, most recently connected first, with
+    /// when they last did (Unix seconds).
+    pub recent: Vec<(HostId, u64)>,
     /// Credentials in the order the credential list shows them.
     pub credentials: Vec<Credential>,
     /// Snippets in id order.
@@ -297,11 +298,13 @@ impl HostDatabase {
         let recent = self
             .connection
             .prepare(
-                "SELECT id FROM hosts WHERE last_connected_at IS NOT NULL \
+                "SELECT id, last_connected_at FROM hosts WHERE last_connected_at IS NOT NULL \
                  ORDER BY last_connected_at DESC, id DESC",
             )?
             .query_map([], |row| {
-                row.get::<_, i64>(0).map(|id| HostId(from_sql(id)))
+                let id: i64 = row.get(0)?;
+                let at: i64 = row.get(1)?;
+                Ok((HostId(from_sql(id)), from_sql(at)))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
@@ -1085,12 +1088,15 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
         // Host 2 never connected and stays out of the list.
         assert_eq!(
             db.load().unwrap().recent,
-            [HostId(3), HostId(1)],
+            [(HostId(3), 300), (HostId(1), 100)],
             "newest connection first"
         );
 
         db.touch_connected(HostId(1), 400).unwrap();
-        assert_eq!(db.load().unwrap().recent, [HostId(1), HostId(3)]);
+        assert_eq!(
+            db.load().unwrap().recent,
+            [(HostId(1), 400), (HostId(3), 300)]
+        );
     }
 
     #[test]
@@ -1135,7 +1141,7 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
         let db = HostDatabase::open(&path).unwrap();
         let data = db.load().unwrap();
         assert_eq!(data.hosts[0].name.as_ref(), "web-01");
-        assert_eq!(data.recent, [HostId(1)]);
+        assert_eq!(data.recent, [(HostId(1), 42)]);
     }
 
     #[test]

@@ -50,6 +50,21 @@ workspace.start.recent:
   zh-CN: 最近连接
 workspace.start.recent_empty:
   zh-CN: 连过的主机会列在这里，双击或回车再连
+# 最近连接每行右边的连接时间（原型「10 分钟前」「今天 09:12」「昨天」「3 天前」）
+workspace.start.connected_just_now:
+  zh-CN: 刚刚
+workspace.start.connected_minutes_ago:
+  zh-CN: "%{count} 分钟前"
+workspace.start.connected_today:
+  zh-CN: "今天 %{time}"
+workspace.start.connected_yesterday:
+  zh-CN: 昨天
+workspace.start.connected_days_ago:
+  zh-CN: "%{count} 天前"
+workspace.start.connected_on:
+  zh-CN: "%{month} 月 %{day} 日"
+workspace.start.connected_on_year:
+  zh-CN: "%{year} 年 %{month} 月 %{day} 日"
 
 # 终端的通知和响铃（工单 03）：标题以卡片名称开头
 workspace.notice.titled:

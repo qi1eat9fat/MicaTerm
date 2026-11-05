@@ -6090,6 +6090,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
+ "chrono",
  "dunce",
  "futures",
  "gpui-kit",
