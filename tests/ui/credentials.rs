@@ -898,3 +898,59 @@ fn a_credential_made_on_top_of_the_host_dialog_is_picked_when_saved(cx: &mut Tes
     assert_eq!(host.credential, Some(qishell_hosts::CredentialId(5)));
     assert_eq!(host.user.as_ref(), "ops");
 }
+
+// ---- 用凭据登录 ----
+
+/// 最后一次连接用的登录。
+fn last_login(remote: &FakeRemoteTerminals) -> qishell_hosts::HostLogin {
+    remote
+        .targets()
+        .last()
+        .map(|(_, target)| target.login.clone())
+        .expect("connected")
+}
+
+#[gpui_kit::test]
+fn a_host_connects_with_its_credential_unlocking_only_for_a_saved_key(cx: &mut TestAppContext) {
+    let vault = TestVault::unlocked();
+    let (handle, workspace, remote) = open_with(cx, vault.services());
+    let deploy = credential(cx, &workspace, 1).unwrap();
+    vault
+        .vault
+        .set(&deploy.private_key_secret(), "-----BEGIN OPENSSH PRIVATE KEY-----")
+        .unwrap();
+    dispatch(cx, handle, qishell::app::LockVault);
+
+    // Agent 凭据什么秘密都不读：不弹解锁，直接连。
+    dispatch(cx, handle, qishell::app::ConnectHost(HostId(5)));
+    assert!(!present(cx, handle, "vault-unlock"));
+    let login = last_login(&remote);
+    assert_eq!(login.method, qishell_hosts::LoginMethod::Agent);
+    assert_eq!(login.user, "ops");
+
+    // 密钥凭据的私钥存在锁着的保险库里：先解锁再连，用凭据的用户名和保险库里的私钥。
+    dispatch(cx, handle, qishell::app::ConnectHost(HostId(3)));
+    assert_eq!(
+        label(cx, handle, "vault-unlock-reason").as_deref(),
+        Some("连接 db-01 要用保存的凭据")
+    );
+    assert_eq!(remote.targets().len(), 1);
+    fill(cx, handle, "vault-unlock-password", MASTER);
+    click(cx, handle, "vault-unlock-confirm");
+    assert!(!present(cx, handle, "vault-unlock"));
+    let login = last_login(&remote);
+    assert_eq!(login.method, qishell_hosts::LoginMethod::Key);
+    assert_eq!(login.user, "deploy");
+    assert_eq!(
+        login.key,
+        Some(qishell_hosts::SavedKey::new(deploy.secret_id.as_str()))
+    );
+
+    // 删了凭据，主机改成「无密码」：再连就依次试 Agent 和默认私钥，用户名保留。
+    dispatch(cx, handle, qishell::app::DeleteCredential(deploy.id));
+    click(cx, handle, "credential-delete-confirm");
+    dispatch(cx, handle, qishell::app::ConnectHost(HostId(3)));
+    let login = last_login(&remote);
+    assert_eq!(login.method, qishell_hosts::LoginMethod::NoPassword);
+    assert_eq!(login.user, "deploy");
+}
