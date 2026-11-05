@@ -223,6 +223,26 @@ pub fn read_public_key(path: &Path) -> Option<String> {
     })
 }
 
+/// 公钥（`authorized_keys` 的一行）是什么算法，凭据面板写在类型后面：`ED25519`、`RSA 4096`、
+/// `ECDSA P-256`。读不出来时是 `None`。
+pub fn key_algorithm(public_key: &str) -> Option<String> {
+    use russh::keys::ssh_key::EcdsaCurve;
+    let key = PublicKey::from_openssh(public_key.trim()).ok()?;
+    Some(match key.algorithm() {
+        Algorithm::Ed25519 => "ED25519".to_string(),
+        Algorithm::Rsa { .. } => match key.key_data().rsa() {
+            Some(rsa) => format!("RSA {}", rsa.key_size()),
+            None => "RSA".to_string(),
+        },
+        Algorithm::Ecdsa { curve } => match curve {
+            EcdsaCurve::NistP256 => "ECDSA P-256".to_string(),
+            EcdsaCurve::NistP384 => "ECDSA P-384".to_string(),
+            EcdsaCurve::NistP521 => "ECDSA P-521".to_string(),
+        },
+        other => other.as_str().to_uppercase(),
+    })
+}
+
 /// A file's text, if it is small enough to be a key. Anything else that was
 /// picked by mistake is not read whole.
 pub fn read_small(path: &Path) -> Option<Zeroizing<String>> {
@@ -336,6 +356,21 @@ mod tests {
         let pasted = PastedKey::parse(&text).unwrap();
         let debug = format!("{pasted:?}");
         assert!(!debug.contains("OPENSSH"), "{debug}");
+    }
+
+    #[test]
+    fn the_algorithm_of_a_public_key_is_named_for_the_credential_list() {
+        assert_eq!(
+            key_algorithm(&ed25519().public_key_line("deploy")).as_deref(),
+            Some("ED25519")
+        );
+        let rsa = GeneratedKey::generate(KeyAlgorithm::Rsa).unwrap();
+        assert_eq!(
+            key_algorithm(&rsa.public_key_line("")).as_deref(),
+            Some("RSA 4096")
+        );
+        assert_eq!(key_algorithm("ssh-ed25519 not-base64"), None);
+        assert_eq!(key_algorithm(""), None);
     }
 
     #[test]

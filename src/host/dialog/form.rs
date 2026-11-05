@@ -7,6 +7,10 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use gpui_kit::component::Icon;
+
+use crate::app::{CatalogIcon, UnlockVault};
+use crate::i18n::t;
 use crate::theme::Tokens;
 
 /// 字段名称那一列的宽度（`.fr` 的 `grid-template-columns: 76px 1fr`）。
@@ -160,4 +164,41 @@ pub fn text_input(
         .aria_label(label)
         .small()
         .when(invalid, |input| input.border_color(tokens.bad))
+}
+
+/// 秘密存过、保险库却锁着时代替输入框的那一行（原型 `.lockedf`）：「已保存，保险库锁定中 · 解锁后修改」，
+/// 右边「解锁…」派发 `UnlockVault`。`row`、`unlock` 是这一行和「解锁…」的元素 id。
+pub fn locked_secret(
+    row: &'static str,
+    unlock: &'static str,
+    tokens: &Tokens,
+) -> impl IntoElement + use<> {
+    let text = t!("vault.field.locked");
+    let accent = tokens.accent;
+    div()
+        .id(row)
+        .test_support()
+        .aria_label(text.clone())
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .h(px(30.))
+        .px(px(10.))
+        .rounded(px(8.))
+        .bg(tokens.field)
+        .text_color(tokens.faint)
+        .text_size(px(12.))
+        .child(Icon::new(CatalogIcon::Lock).size(px(13.)))
+        .child(div().flex_1().min_w_0().truncate().child(text))
+        .child(
+            div()
+                .id(unlock)
+                .test_support()
+                .aria_label(t!("vault.field.unlock"))
+                .flex_none()
+                .text_color(accent)
+                .cursor_pointer()
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(UnlockVault), cx))
+                .child(t!("vault.field.unlock")),
+        )
 }

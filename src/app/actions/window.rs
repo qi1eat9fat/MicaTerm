@@ -13,7 +13,7 @@ gpui_kit::actions!(
         OpenSftp,
         /// 展开或收起右侧栏的「命令片段」面板（Ctrl+Shift+S）。
         ShowSnippets,
-        /// 右侧栏「凭据」面板。在 M2（工单 14）接上。
+        /// 展开或收起右侧栏的「凭据」面板（工单 14）。
         ShowCredentials,
         /// 退出（macOS 的 ⌘Q；Windows 和 Linux 用系统自带的 Alt+F4）。
         Quit,

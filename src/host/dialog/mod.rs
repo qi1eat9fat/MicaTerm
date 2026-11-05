@@ -7,7 +7,7 @@
 //!
 //! 每组一个文件、一个结构，`commit` 依次调它们的 `fill` 把值写进 `HostDraft`、记下出错的字段：
 //! - `general`：名称（留空用地址）、地址、端口；
-//! - `auth`：认证（本工单只有「密码」；13 改密码框的锁定显示，14 加「使用凭据」「无密码」）；
+//! - `auth`：认证：密码 / 使用凭据 / 无密码（13 改密码框的锁定显示，14 加「使用凭据」「无密码」）；
 //! - `route`：连接方式：直接 / SSH 跳板 / 代理（工单 15），代理密码和主机密码一样单独写进保险库；
 //! - `notes`：备注。
 //!
@@ -33,7 +33,10 @@ use gpui_kit::*;
 use futures::FutureExt as _;
 use qishell_hosts::{AuthKind, Host, HostDraft, HostDraftError, HostId, SSH_PORT};
 
-pub use auth::{AUTH_CHOICE, FIELD_PASSWORD, FIELD_USER};
+pub use auth::{
+    AUTH_CHOICE, AUTH_HINT, CREDENTIAL_NEW, CREDENTIAL_OPTION, FIELD_CREDENTIAL, FIELD_PASSWORD,
+    FIELD_USER,
+};
 pub use delete::open_delete_host_dialog;
 pub use general::{FIELD_ADDRESS, FIELD_NAME, FIELD_PORT};
 pub use notes::FIELD_NOTES;
@@ -287,6 +290,26 @@ impl HostDialog {
             )
     }
 
+    /// 「使用凭据」下拉里的「新建凭据…」：在上面叠一层凭据对话框，保存后自动选上新凭据
+    /// （工单 14）。Esc 只关上面那一层。
+    fn new_credential(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let this = cx.entity().downgrade();
+        let on_saved: crate::credential::CredentialSaved = Box::new(move |id, _, cx| {
+            this.update(cx, |dialog, cx| {
+                dialog.auth.choose_credential(id, &mut dialog.errors);
+                cx.notify();
+            })
+            .ok();
+        });
+        crate::credential::open_credential_dialog(
+            self.store.clone(),
+            None,
+            Some(on_saved),
+            window,
+            cx,
+        );
+    }
+
     fn save_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.commit(cx) {
             window.close_dialog(cx);
@@ -446,7 +469,7 @@ impl Render for HostDialog {
                     .border_color(tokens.line)
                     .overflow_y_scrollbar()
                     .child(self.general.render(&self.errors, &tokens))
-                    .child(self.auth.render(&self.errors, &tokens))
+                    .child(self.auth.render(&self.errors, &tokens, cx))
                     .child(self.route.render(
                         &self.errors,
                         &tokens,

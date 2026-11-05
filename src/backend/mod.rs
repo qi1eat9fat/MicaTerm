@@ -11,6 +11,8 @@
 //! - `runtime`：共享的 tokio 运行时。russh 把连接的会话任务放在发起连接的运行时上，
 //!   所以连接一律在这个不属于任何卡片的运行时上建，关掉一张卡片不会断掉同一连接上的其他通道。
 
+#[cfg(test)]
+mod credential_tests;
 mod describe;
 mod pool;
 mod remote;

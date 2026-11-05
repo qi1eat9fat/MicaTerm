@@ -12,11 +12,13 @@
 //! - `remote`：远程卡片的重新连接、断开连接、复制 IP（12）；
 //! - `snippets`：命令片段面板（19）；
 //! - `quick_connect`：快速连接弹层的开关（18）；
-//! - `vault`：保险库的锁定、解锁、主密码、重置（13）。
+//! - `vault`：保险库的锁定、解锁、主密码、重置（13）；
+//! - `credentials`：凭据面板、凭据对话框、删除凭据（14）。
 //!
 //! 处理器里改了状态要 `cx.notify()`；在焦点监听器里改状态要 `defer_in`。
 
 mod cards;
+mod credentials;
 mod hosts;
 mod quick_connect;
 mod remote;
@@ -28,6 +30,7 @@ mod vault;
 mod window;
 
 pub(super) use cards::bind_cards_actions;
+pub(super) use credentials::bind_credentials_actions;
 pub(super) use hosts::bind_hosts_actions;
 pub(super) use quick_connect::bind_quick_connect_actions;
 pub(super) use remote::bind_remote_actions;

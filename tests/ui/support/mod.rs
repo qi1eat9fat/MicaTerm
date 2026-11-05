@@ -21,6 +21,7 @@
 //! 元素要能被查到，需要 `.id(..)` 加 `.test_support()`；`ElementSnapshot` 里没有文字和样式，
 //! 要断言的文字放进 `aria_label`，样式类状态给实体加只读查询方法。
 
+mod credentials;
 mod hosts;
 mod remote;
 mod terminal;
@@ -28,6 +29,7 @@ mod vault;
 
 pub use std::sync::Arc;
 
+pub use credentials::*;
 pub use gpui_kit::component::ActiveTheme as _;
 pub use gpui_kit::component::{Root, WindowExt as _};
 pub use gpui_kit::test::TestWindowExt;
