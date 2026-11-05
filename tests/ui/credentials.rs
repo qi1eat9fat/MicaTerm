@@ -739,3 +739,162 @@ fn deleting_an_unused_credential_just_asks(cx: &mut TestAppContext) {
     click(cx, handle, "credential-delete-confirm");
     assert!(credential(cx, &workspace, 4).is_none());
 }
+
+// ---- 主机对话框：使用凭据、无密码、叠层新建 ----
+
+fn host_dialog_open(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> bool {
+    present(cx, handle, "host-dialog")
+}
+
+fn save_host(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
+    click(cx, handle, "host-dialog-save");
+}
+
+#[gpui_kit::test]
+fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open(cx);
+    dispatch(cx, handle, qishell::app::NewHost);
+    in_frame(cx, handle, |window, _| {
+        let choices: Vec<_> = (0..3usize)
+            .map(|ix| window.find(("host-auth", ix)).label().map(str::to_owned))
+            .collect();
+        assert_eq!(
+            choices,
+            [
+                Some("密码".into()),
+                Some("使用凭据".into()),
+                Some("无密码".into())
+            ]
+        );
+    });
+    fill(cx, handle, "host-address", "10.0.1.33");
+    click(cx, handle, ("host-auth", 1usize));
+    assert!(!present(cx, handle, "host-password"));
+
+    // 没选凭据：描红，不关。
+    save_host(cx, handle);
+    assert!(host_dialog_open(cx, handle));
+    assert_eq!(
+        error_of(cx, handle, "host-credential").as_deref(),
+        Some("请选一条凭据")
+    );
+
+    click(cx, handle, "host-credential");
+    let options: Vec<_> = (1..=4)
+        .filter_map(|id| label(cx, handle, ("host-credential-option", id as usize)))
+        .collect();
+    assert_eq!(
+        options,
+        [
+            "部署密钥（密钥 · deploy）",
+            "运维密码（密码 · root）",
+            "本机 Agent（SSH Agent · ops）",
+            "旧 RSA 密钥（密钥 · admin）"
+        ]
+    );
+    assert_eq!(
+        label(cx, handle, "host-credential-new").as_deref(),
+        Some("新建凭据…")
+    );
+    click(cx, handle, ("host-credential-option", 1usize));
+    assert_eq!(
+        label(cx, handle, "host-credential").as_deref(),
+        Some("部署密钥（密钥 · deploy）")
+    );
+    assert_eq!(
+        label(cx, handle, "host-auth-hint").as_deref(),
+        Some("用户名跟着凭据走：deploy")
+    );
+    assert_eq!(error_of(cx, handle, "host-credential"), None);
+    save_host(cx, handle);
+
+    assert!(!host_dialog_open(cx, handle));
+    let host = saved_host(cx, &workspace, 7).expect("saved");
+    assert_eq!(host.credential, Some(qishell_hosts::CredentialId(1)));
+    assert_eq!(host.user.as_ref(), "deploy");
+    // 凭据面板上的「N 台主机」跟着变。
+    dispatch(cx, handle, ShowCredentials);
+    assert_eq!(
+        label(cx, handle, row(1)).as_deref(),
+        Some("部署密钥 · 密钥 · ED25519 · deploy · 3 台主机")
+    );
+
+    // 编辑时停在「使用凭据」和选的那条。
+    dispatch(cx, handle, qishell::app::EditHost(HostId(7)));
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find(("host-auth", 1usize)).selected(), Some(true));
+    });
+    assert_eq!(
+        label(cx, handle, "host-credential").as_deref(),
+        Some("部署密钥（密钥 · deploy）")
+    );
+}
+
+#[gpui_kit::test]
+fn a_host_without_a_password_tries_the_agent_and_the_default_keys(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open(cx);
+    dispatch(cx, handle, qishell::app::EditHost(HostId(2)));
+    click(cx, handle, ("host-auth", 2usize));
+    assert_eq!(
+        label(cx, handle, "host-auth-hint").as_deref(),
+        Some("依次尝试 SSH Agent 和 ~/.ssh 下的默认私钥")
+    );
+    assert!(!present(cx, handle, "host-password"));
+    fill(cx, handle, "host-user", "admin");
+    save_host(cx, handle);
+
+    let host = saved_host(cx, &workspace, 2).unwrap();
+    assert_eq!(host.auth, AuthKind::NoPassword);
+    assert_eq!(host.credential, None);
+    assert_eq!(host.user.as_ref(), "admin");
+
+    // 用凭据的主机改回「密码」：不再用凭据，用户名照表单。
+    dispatch(cx, handle, qishell::app::EditHost(HostId(1)));
+    click(cx, handle, ("host-auth", 0usize));
+    save_host(cx, handle);
+    let web01 = saved_host(cx, &workspace, 1).unwrap();
+    assert_eq!(web01.credential, None);
+    assert_eq!(web01.auth, AuthKind::Password);
+}
+
+#[gpui_kit::test]
+fn a_credential_made_on_top_of_the_host_dialog_is_picked_when_saved(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open(cx);
+    dispatch(cx, handle, qishell::app::NewHost);
+    fill(cx, handle, "host-name", "api-03");
+    fill(cx, handle, "host-address", "10.0.1.33");
+    click(cx, handle, ("host-auth", 1usize));
+    click(cx, handle, "host-credential");
+    click(cx, handle, "host-credential-new");
+
+    // 叠一层凭据对话框；Esc 只关上面这一层。
+    assert!(host_dialog_open(cx, handle));
+    assert!(credential_dialog_open(cx, handle));
+    assert_eq!(
+        label(cx, handle, "credential-dialog-subtitle").as_deref(),
+        Some("保存后自动选上")
+    );
+    in_frame(cx, handle, |window, cx| window.press("escape", cx));
+    assert!(!credential_dialog_open(cx, handle));
+    assert!(host_dialog_open(cx, handle));
+    assert_eq!(label(cx, handle, "host-credential").as_deref(), Some(""));
+
+    click(cx, handle, "host-credential");
+    click(cx, handle, "host-credential-new");
+    click(cx, handle, ("credential-kind", 2usize));
+    fill(cx, handle, "credential-name", "办公室 Agent");
+    fill(cx, handle, "credential-user", "ops");
+    save_credential(cx, handle);
+
+    assert!(!credential_dialog_open(cx, handle));
+    assert!(host_dialog_open(cx, handle));
+    assert_eq!(
+        label(cx, handle, "host-credential").as_deref(),
+        Some("办公室 Agent（SSH Agent · ops）")
+    );
+    save_host(cx, handle);
+    assert!(!host_dialog_open(cx, handle));
+    let host = saved_host(cx, &workspace, 7).expect("saved");
+    assert_eq!(host.credential, Some(qishell_hosts::CredentialId(5)));
+    assert_eq!(host.user.as_ref(), "ops");
+}

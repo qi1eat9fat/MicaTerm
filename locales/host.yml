@@ -114,6 +114,24 @@ host.dialog.auth:
   zh-CN: 认证
 host.dialog.auth_password:
   zh-CN: 密码
+host.dialog.auth_credential:
+  zh-CN: 使用凭据
+host.dialog.auth_no_password:
+  zh-CN: 无密码
+host.dialog.credential:
+  zh-CN: 凭据
+host.dialog.choose_credential:
+  zh-CN: 选择凭据
+host.dialog.credential_required:
+  zh-CN: 请选一条凭据
+host.dialog.credential_user:
+  zh-CN: 用户名跟着凭据走：%{user}
+host.dialog.credential_option:
+  zh-CN: "%{name}（%{kind} · %{user}）"
+host.dialog.new_credential:
+  zh-CN: 新建凭据…
+host.dialog.no_password_hint:
+  zh-CN: 依次尝试 SSH Agent 和 ~/.ssh 下的默认私钥
 host.dialog.user:
   zh-CN: 用户名
 host.dialog.password:
