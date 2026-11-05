@@ -361,6 +361,27 @@ fn a_question_asked_while_unlocking_stays_open_and_gets_its_answer(cx: &mut Test
     assert_eq!(connected_hosts(&remote), vec![2, 1]);
 }
 
+/// 复用已经连着的连接用不到秘密：保险库锁了，分屏那张远程卡片、再双击那台主机都不弹解锁框
+/// （M2 code review S2）。
+#[gpui_kit::test]
+fn reusing_a_live_connection_does_not_ask_to_unlock(cx: &mut TestAppContext) {
+    let vault = TestVault::unlocked().with_secret(&web01_password(), "hunter2");
+    let (handle, _, remote) = open_with_vault(cx, &vault);
+    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    assert_eq!(connected_hosts(&remote), vec![1]);
+    click(cx, handle, "lock-vault");
+    assert_eq!(vault.status(), VaultStatus::Locked);
+
+    dispatch(cx, handle, qishell::app::SplitRight);
+    assert!(!visible(cx, handle, "vault-unlock"));
+    assert_eq!(connected_hosts(&remote), vec![1, 1]);
+
+    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    assert!(!visible(cx, handle, "vault-unlock"));
+    assert_eq!(connected_hosts(&remote), vec![1, 1, 1]);
+    assert_eq!(vault.status(), VaultStatus::Locked);
+}
+
 #[gpui_kit::test]
 fn cancelling_the_unlock_connects_anyway_and_does_not_ask_again(cx: &mut TestAppContext) {
     let vault = TestVault::unlocked()

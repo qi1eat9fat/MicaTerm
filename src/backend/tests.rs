@@ -323,9 +323,12 @@ fn a_second_terminal_of_a_connected_host_shares_its_connection_without_logging_i
         fixture.connector(Arc::default()),
     ));
     let answers = Answerer::start(&remote, Some(TEST_PASSWORD));
+    assert!(!remote.reuses_connection(&fixture.target()));
 
     let first = Terminal::open(&remote, 1, &fixture.target());
     first.expect_started();
+    // 连着了：再开一张不登录，窗口壳不必为它解锁保险库（M2 code review S2）。
+    assert!(remote.reuses_connection(&fixture.target()));
     let second = Terminal::open(&remote, 2, &fixture.target());
     second.expect_started();
 
@@ -350,6 +353,7 @@ fn a_second_terminal_of_a_connected_host_shares_its_connection_without_logging_i
     wait_until("最后一张卡片关了，连接断开", || {
         remote.connection_count() == 0
     });
+    assert!(!remote.reuses_connection(&fixture.target()));
 }
 
 /// 只给一个通道的堡垒机：复用的连接开不出 shell 通道，自动改成新建一条连接；之后这台主机的终端直接新建。
