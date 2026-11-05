@@ -119,7 +119,10 @@ fn the_chevron_lists_recent_hosts_first_marked_recent_then_the_rest_by_name(
     in_frame(cx, handle, |window, _| {
         assert!(window.find("quick-connect-popup").visible());
         assert_eq!(window.find(row(4)).label(), Some("staging-api"));
-        assert_eq!(window.find(("quick-connect-recent", 4usize)).label(), Some("最近"));
+        assert_eq!(
+            window.find(("quick-connect-recent", 4usize)).label(),
+            Some("最近")
+        );
         assert!(window.try_find(("quick-connect-recent", 1usize)).is_some());
         assert!(window.try_find(("quick-connect-recent", 3usize)).is_none());
         // 第一个高亮，搜索框拿着焦点，直接就能打字。
@@ -238,7 +241,10 @@ fn without_hosts_quick_connect_says_there_are_none(cx: &mut TestAppContext) {
 
     assert_eq!(shown(cx, &workspace), Some(vec![]));
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("quick-connect-empty").label(), Some("还没有主机"));
+        assert_eq!(
+            window.find("quick-connect-empty").label(),
+            Some("还没有主机")
+        );
     });
 }
 
@@ -285,7 +291,9 @@ fn enter_on_the_start_card_connects_the_highlighted_recent_host(cx: &mut TestApp
 fn double_clicking_a_recent_host_connects_it(cx: &mut TestAppContext) {
     let (handle, workspace) = open(cx);
 
-    in_frame(cx, handle, |window, cx| window.double_click(recent_row(1), cx));
+    in_frame(cx, handle, |window, cx| {
+        window.double_click(recent_row(1), cx)
+    });
     wait_running(cx, handle, &workspace, 1);
 
     assert_eq!(card_names(cx, &workspace), [["web-01"]]);

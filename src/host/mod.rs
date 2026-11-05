@@ -25,8 +25,8 @@ pub use describe::ErrorMessage;
 pub use dialog::{HostDialog, open_delete_host_dialog, open_host_dialog};
 pub use list::{HostList, list_address};
 pub use mark::HostMark;
+pub use quick_connect::{QuickChoice, QuickConnectEvent, QuickConnectList, QuickHost, quick_hosts};
 pub use store::{HostStore, HostStoreEvent};
-pub use quick_connect::{QUICK_CONNECT_WIDTH, QuickChoice, QuickConnectEvent, QuickConnectList, QuickHost, quick_hosts};
 
 use crate::i18n::t;
 

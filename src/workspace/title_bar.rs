@@ -96,7 +96,11 @@ pub(super) fn render_title_bar(
                                 t!("workspace.title_bar.quick_connect"),
                             )
                             .size(px(16.), px(10.))
-                            .dispatch(Box::new(QuickConnect), target, tokens),
+                            .dispatch(
+                                Box::new(QuickConnect),
+                                target,
+                                tokens,
+                            ),
                         ),
                 ),
         )

@@ -24,7 +24,7 @@ use crate::i18n::t;
 use crate::theme::Tokens;
 
 /// 弹层宽度（原型 `.qc`）。
-pub const QUICK_CONNECT_WIDTH: Pixels = px(330.);
+const WIDTH: Pixels = px(330.);
 /// 徽章直径（`.qi .badge`）。
 const BADGE: Pixels = px(22.);
 /// 列表最多这么高，再多就滚动（约 8 行）。
@@ -165,31 +165,30 @@ impl QuickConnectList {
     pub fn new(store: Entity<HostStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("quick_connect.search")));
-        let subscriptions = vec![
-            cx.subscribe_in(
-                &search,
-                window,
-                |this, state, event: &InputEvent, _, cx| match event {
-                    InputEvent::Change => {
-                        let query = state.read(cx).value().to_string();
-                        this.choice.search(&query);
-                        this.scroll.scroll_to_item(0);
-                        cx.notify();
-                    }
-                    InputEvent::PressEnter { .. } => {
-                        if let Some(id) = this.choice.highlighted() {
-                            cx.emit(QuickConnectEvent::Connect(id));
+        let subscriptions =
+            vec![
+                cx.subscribe_in(&search, window, |this, state, event: &InputEvent, _, cx| {
+                    match event {
+                        InputEvent::Change => {
+                            let query = state.read(cx).value().to_string();
+                            this.choice.search(&query);
+                            this.scroll.scroll_to_item(0);
+                            cx.notify();
                         }
+                        InputEvent::PressEnter { .. } => {
+                            if let Some(id) = this.choice.highlighted() {
+                                cx.emit(QuickConnectEvent::Connect(id));
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
-            ),
-            // 开着时主机数据变了（比如探测出了系统）：列表跟着变，搜索词不变。
-            cx.observe(&store, |this, store, cx| {
-                this.choice.set_hosts(quick_hosts(store.read(cx)));
-                cx.notify();
-            }),
-        ];
+                }),
+                // 开着时主机数据变了（比如探测出了系统）：列表跟着变，搜索词不变。
+                cx.observe(&store, |this, store, cx| {
+                    this.choice.set_hosts(quick_hosts(store.read(cx)));
+                    cx.notify();
+                }),
+            ];
         let choice = QuickChoice::new(quick_hosts(store.read(cx)));
         Self {
             search,
@@ -397,7 +396,7 @@ impl Render for QuickConnectList {
             .occlude()
             .flex()
             .flex_col()
-            .w(QUICK_CONNECT_WIDTH)
+            .w(WIDTH)
             .p(px(6.))
             .rounded(px(12.))
             .bg(tokens.panel)
