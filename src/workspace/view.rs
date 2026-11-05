@@ -15,9 +15,9 @@ use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportPr
 use super::handlers;
 use super::host_sidebar::render_host_sidebar;
 use super::notices::NoticeTimes;
+use super::quick_connect::{QuickConnectAnchor, QuickConnectPopup};
 use super::remote::PromptQueue;
 use super::right_sidebar::{RightPanel, render_right_sidebar};
-use super::start_card::render_start_card;
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
 use crate::backend::{
@@ -25,11 +25,13 @@ use crate::backend::{
 };
 use crate::card::{CardId, StatusDot, TerminalCard};
 use crate::host::{HostData, HostList, HostStore, HostStoreEvent};
+use crate::i18n::t;
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
 use crate::snippets::SnippetPanel;
 use crate::split::NodeId;
 use crate::tabs::{TabId, TabList, TabRail, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
+use crate::vault::{Vault, VaultStore, VaultStoreEvent};
 
 /// 窗口壳用到的外部服务。生产代码用 `WorkspaceServices::new()` 建真实的，
 /// 测试用 `tests/ui/support` 的 `fake_services()` 建假的。
@@ -46,12 +48,19 @@ pub struct WorkspaceServices {
     /// 窗口壳打开后弹出错误通知（工单 11）。
     pub hosts_problem: Option<SharedString>,
     /// 密码、口令、私钥存在哪里（工单 11）：主机数据把秘密写到这里。
-    /// 保险库（工单 10、13）接上之前，生产也是只在内存里的存储；测试注入 `InMemorySecretStore`。
+    /// 生产是数据目录里的保险库（见下面的 `vault`，打不开时是只在内存里的存储）；测试注入 `InMemorySecretStore`。
     pub secrets: SharedSecretStore,
     /// 远程终端（工单 12）：生产是 backend 的 SSH 连接表（按主机共享连接），测试注入假的。
     pub remote_terminals: SharedRemoteTerminals,
     /// 主机对话框的「测试连接」（工单 12）：生产真的登录一次，测试注入假的。
     pub connection_tester: SharedConnectionTester,
+    /// 数据目录里的保险库（工单 13）：主机栏底部的锁、设置 › 安全、第一次保存秘密时的设置主密码框、
+    /// 用到秘密时的解锁小卡片都看它。有保险库时 `secrets` 和连接、测试连接读写的就是它
+    /// （生产 `WorkspaceServices::new` 三者一起换）；`None` 时秘密只在 `secrets` 里，不弹任何保险库的框
+    /// （测试的默认，和生产上保险库打不开时）。测试注入 `tests/ui/support/vault.rs` 的保险库。
+    pub vault: Option<std::sync::Arc<Vault>>,
+    /// 保险库打不开时给用户看的原因（这次运行的秘密只在内存里）。窗口壳打开后弹出错误通知。
+    pub vault_problem: Option<SharedString>,
 }
 
 impl WorkspaceServices {
@@ -62,8 +71,12 @@ impl WorkspaceServices {
             Ok(hosts) => (hosts, None),
             Err(problem) => (HostData::empty(), Some(problem)),
         };
-        let secrets: SharedSecretStore = std::sync::Arc::new(InMemorySecretStore::default());
-        // 连接读秘密经同一个存储（13 换成保险库时一起换）；主机密钥记在数据目录的 known_hosts。
+        let (vault, vault_problem) = open_vault();
+        let secrets: SharedSecretStore = match &vault {
+            Some(vault) => vault.clone(),
+            None => std::sync::Arc::new(InMemorySecretStore::default()),
+        };
+        // 连接读秘密经同一个存储（保险库，打不开时是内存里的）；主机密钥记在数据目录的 known_hosts。
         let known_hosts = crate::app::known_hosts_path()
             .unwrap_or_else(|_| std::path::PathBuf::from(crate::app::KNOWN_HOSTS_FILE));
         let source = qishell_hosts::secrets::StoreSource::shared(secrets.clone());
@@ -77,6 +90,23 @@ impl WorkspaceServices {
             )),
             connection_tester: std::sync::Arc::new(SshConnectionTester::new(known_hosts, source)),
             secrets,
+            vault,
+            vault_problem,
+        }
+    }
+}
+
+/// 打开数据目录里的保险库。读文件、读钥匙串会阻塞（macOS 上可能弹授权框），放到另一个线程上，
+/// 和读数据库一样在窗口出来之前做完。打不开时返回原因，这次运行的秘密只放在内存里。
+fn open_vault() -> (Option<std::sync::Arc<Vault>>, Option<SharedString>) {
+    let opened = std::thread::spawn(crate::secrets::open_vault)
+        .join()
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("opening the vault panicked")));
+    match opened {
+        Ok(vault) => (Some(vault), None),
+        Err(error) => {
+            let problem = t!("vault.error.open_failed", error = format!("{error:#}"));
+            (None, Some(problem))
         }
     }
 }
@@ -111,8 +141,16 @@ pub struct Workspace {
     pub(super) snippet_panel: SnippetPanel,
     /// 连接表的问题，一次问一个（工单 12）。
     pub(super) prompts: PromptQueue,
+    /// 保险库（工单 13），也装成了全局量，对话框和设置页经 `VaultStore::global` 找到它。
+    pub(super) vault: Entity<VaultStore>,
     /// 一直收连接表的事件（工单 12）。
     _remote_events: Task<()>,
+    /// 开着的快速连接弹层（工单 18）。
+    pub(super) quick_connect: Option<QuickConnectPopup>,
+    /// 「+ ⌄」画在哪里，快速连接弹层挂在它下面（工单 18）。
+    pub(super) quick_connect_anchor: std::rc::Rc<QuickConnectAnchor>,
+    /// 开始卡片的最近连接列表高亮第几行（工单 18）。
+    pub(super) start_highlight: usize,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -166,6 +204,8 @@ impl Workspace {
             cx.observe_self(|this, cx| this.see_cards(cx)),
         ];
         subscriptions.extend(host_subscriptions);
+        let (vault, vault_subscriptions) = Self::open_vault(&mut services, window, cx);
+        subscriptions.extend(vault_subscriptions);
         subscriptions.push(
             // 命令片段面板的搜索框。
             cx.subscribe(
@@ -202,7 +242,11 @@ impl Workspace {
             right_panel: None,
             snippet_panel,
             prompts: PromptQueue::default(),
+            vault,
             _remote_events: remote_events,
+            quick_connect: None,
+            quick_connect_anchor: Default::default(),
+            start_highlight: 0,
             _subscriptions: subscriptions,
         }
     }
@@ -237,6 +281,38 @@ impl Workspace {
         // 主机栏标题里的「主机 N」跟着变。
         let changes = cx.observe(&hosts, |_, _, cx| cx.notify());
         (hosts, host_list, vec![failures, changes])
+    }
+
+    /// 把注入的保险库包成 `VaultStore`、装成全局量；保险库操作没成、保险库打不开时弹出错误通知。
+    /// 主机栏底部的锁按钮跟着保险库的状态变。
+    fn open_vault(
+        services: &mut WorkspaceServices,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<VaultStore>, Vec<Subscription>) {
+        if let Some(problem) = services.vault_problem.take() {
+            window.defer(cx, move |window, cx| {
+                window.push_notification(Notification::error(problem), cx);
+            });
+        }
+        let vault = cx.new(|_| VaultStore::new(services.vault.clone()));
+        VaultStore::install(&vault, cx);
+        let failures = cx.subscribe_in(
+            &vault,
+            window,
+            |_, _, event: &VaultStoreEvent, window, cx| match event {
+                VaultStoreEvent::Failed(message) => {
+                    window.push_notification(Notification::error(message.clone()), cx);
+                }
+            },
+        );
+        let changes = cx.observe(&vault, |_, _, cx| cx.notify());
+        (vault, vec![failures, changes])
+    }
+
+    /// 保险库，测试用：看它的状态。
+    pub fn vault(&self) -> &Entity<VaultStore> {
+        &self.vault
     }
 
     /// 主机栏里选中的主机。
@@ -399,6 +475,10 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let target = self.focus_handle.clone();
+        // 主机栏右侧的绿色数字（工单 16）：开卡片、关卡片、关标签都会让窗口壳重画，这里统一告诉主机列表。
+        let open_cards = self.open_cards_by_host(cx);
+        self.host_list
+            .update(cx, |list, cx| list.set_open_cards(open_cards, cx));
         // 有标签时是在前那个标签的内容，没有时是开始卡片。
         let content = div()
             .flex()
@@ -407,12 +487,7 @@ impl Render for Workspace {
             .when(!self.host_sidebar_open, |content| content.pl(GAP))
             .map(|content| match self.tabs.active_content() {
                 Some(tab) => content.child(tab.content()),
-                None => content.child(render_start_card(
-                    &self.start_card_focus,
-                    &target,
-                    &tokens,
-                    window,
-                )),
+                None => content.child(self.render_start_card(&target, &tokens, window, cx)),
             });
         let main = div()
             .flex()
@@ -421,6 +496,8 @@ impl Render for Workspace {
             .min_w_0()
             .child(render_title_bar(
                 self.host_sidebar_open,
+                self.quick_connect.is_some(),
+                &self.quick_connect_anchor(),
                 self.tab_rail
                     .render(self.tab_snapshots(cx), &target, &tokens),
                 &target,
@@ -453,6 +530,8 @@ impl Render for Workspace {
             .map(|root| handlers::bind_hosts_actions(root, cx))
             .map(|root| handlers::bind_snippets_actions(root, cx))
             .map(|root| handlers::bind_remote_actions(root, cx))
+            .map(|root| handlers::bind_quick_connect_actions(root, cx))
+            .map(|root| handlers::bind_vault_actions(root, cx))
             .relative()
             .flex()
             .size_full()
@@ -467,11 +546,13 @@ impl Render for Workspace {
                 root.child(render_host_sidebar(
                     self.hosts.read(cx).hosts().len(),
                     self.host_list.clone(),
+                    self.vault.read(cx).status(),
                     &target,
                     &tokens,
                 ))
             })
             .child(main)
+            .children(self.render_quick_connect())
             .children(Root::render_sheet_layer(window, cx))
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))

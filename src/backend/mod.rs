@@ -14,6 +14,8 @@
 mod describe;
 mod pool;
 mod remote;
+#[cfg(test)]
+mod route_tests;
 mod runtime;
 mod tester;
 #[cfg(test)]
@@ -38,3 +40,5 @@ pub use qishell_ssh::{
     ConnectionPromptReply, ConnectionSecret, HostKeyChangedPrompt, HostLogin, Latency, ProbedHost,
     UnknownHostPrompt,
 };
+// 跳板和代理的路线（工单 15）。
+pub use qishell_ssh::{JumpLogin, LoginRoute};

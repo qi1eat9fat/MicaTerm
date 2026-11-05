@@ -11,6 +11,7 @@ mod remote;
 mod settings;
 mod snippets;
 mod tabs;
+mod vault;
 mod window;
 
 pub use cards::*;
@@ -19,4 +20,5 @@ pub use remote::*;
 pub use settings::*;
 pub use snippets::*;
 pub use tabs::*;
+pub use vault::*;
 pub use window::*;

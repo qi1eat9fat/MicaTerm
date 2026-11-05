@@ -274,6 +274,32 @@ impl Vault {
         Ok(())
     }
 
+    /// 设置 › 安全的「在本机记住」：`true` 把数据密钥存进本机钥匙串（要先解锁，锁着时是
+    /// [`SecretsLocked`]），`false` 从钥匙串删掉（锁着也行）。只有设了主密码的保险库有这个开关。
+    pub fn remember_here(&self, remember: bool) -> Result<()> {
+        let (vault_id, key) = {
+            let state = self.state();
+            let file = state.file.as_ref().ok_or(VaultError::NotSetUp)?;
+            if file.kdf.is_none() {
+                return Err(VaultError::NoMasterPassword.into());
+            }
+            (file.vault_id.clone(), state.key.clone())
+        };
+        if remember {
+            let key = key.ok_or(SecretsLocked)?;
+            self.remember(&vault_id, &key, true)
+        } else {
+            let result = self
+                .keychain
+                .delete(&vault_id)
+                .context("removing the vault's key from the keychain");
+            if result.is_ok() {
+                self.state().remembered = false;
+            }
+            result
+        }
+    }
+
     /// 给没设主密码的保险库补设主密码：只给同一把数据密钥加一层包裹，已存的秘密不重新加密。
     /// `remember` 为 false 时把钥匙串里的那份删掉（之后只有主密码能打开）。
     pub fn set_master_password(&self, password: &str, remember: bool) -> Result<()> {

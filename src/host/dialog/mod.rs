@@ -8,7 +8,7 @@
 //! 每组一个文件、一个结构，`commit` 依次调它们的 `fill` 把值写进 `HostDraft`、记下出错的字段：
 //! - `general`：名称（留空用地址）、地址、端口；
 //! - `auth`：认证（本工单只有「密码」；13 改密码框的锁定显示，14 加「使用凭据」「无密码」）；
-//! - `route`：连接方式（本工单只有「直接」；15 加跳板和代理）；
+//! - `route`：连接方式：直接 / SSH 跳板 / 代理（工单 15），代理密码和主机密码一样单独写进保险库；
 //! - `notes`：备注。
 //!
 //! 校验：出错的字段描红，下面写原因，保存失败时对话框不关闭。
@@ -37,7 +37,11 @@ pub use auth::{AUTH_CHOICE, FIELD_PASSWORD, FIELD_USER};
 pub use delete::open_delete_host_dialog;
 pub use general::{FIELD_ADDRESS, FIELD_NAME, FIELD_PORT};
 pub use notes::FIELD_NOTES;
-pub use route::ROUTE_CHOICE;
+pub use route::{
+    ADD_JUMP, FIELD_JUMPS, FIELD_PROXY_HOST, FIELD_PROXY_PASSWORD, FIELD_PROXY_PORT,
+    FIELD_PROXY_USER, JUMP_CANDIDATE, JUMP_DOWN, JUMP_REMOVE, JUMP_ROW, JUMP_UP, PROXY_KIND,
+    ROUTE_CHAIN, ROUTE_CHOICE,
+};
 
 use self::auth::AuthSection;
 use self::form::FieldErrors;
@@ -108,13 +112,14 @@ impl HostDialog {
             window,
             cx,
         );
-        let route = RouteSection::new(&draft);
+        let route = RouteSection::new(&draft, editing, &store, window, cx);
         let notes = NotesSection::new(&draft, window, cx);
         // 改了哪个字段，就先收起它的错误。
         let subscriptions = general
             .inputs()
             .into_iter()
             .chain(auth.inputs())
+            .chain(route.inputs())
             .map(|(field, input)| {
                 cx.subscribe(
                     &input,
@@ -189,7 +194,8 @@ impl HostDialog {
         // 新建的主机还没有 id：密码条目随便哪个都行，测试只用表单里的密码。
         let host = Host::new(self.editing.unwrap_or(HostId(0)), draft);
         let login = self.store.read(cx).login_of(&host);
-        let request = LoginTest::new(login, &self.auth.typed_password(cx));
+        let request = LoginTest::new(login, &self.auth.typed_password(cx))
+            .with_proxy_password(&self.route.typed_proxy_password(cx));
         let (questions, asked) = async_channel::unbounded::<TrustQuestion>();
         let trust: TrustAsker = std::sync::Arc::new(move |prompt| {
             let (answer, answered) = futures::channel::oneshot::channel();
@@ -234,6 +240,7 @@ impl HostDialog {
             return false;
         };
         let password = self.auth.password_change(cx);
+        let proxy_password = self.route.proxy_password_change(&draft.route, cx);
         let editing = self.editing;
         self.store.update(cx, |store, cx| {
             let id = match editing {
@@ -248,11 +255,39 @@ impl HostDialog {
             {
                 store.save_secret(secret, change, cx);
             }
+            if let Some((secret, change)) = proxy_password {
+                store.save_secret(secret, change, cx);
+            }
         });
         true
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 要写密码（主机的、代理的）而保险库还收不下（第一次保存、锁着、打不开）：先弹保险库的框，
+        // 好了再保存，取消了对话框照旧开着（工单 13）。
+        if crate::vault::asks_before_saving(cx) && self.writes_secret(cx) {
+            let this = cx.entity().downgrade();
+            crate::vault::before_saving_secret(window, cx, move |window, cx| {
+                this.update(cx, |this, cx| this.save_now(window, cx)).ok();
+            });
+            return;
+        }
+        self.save_now(window, cx);
+    }
+
+    /// 表单校验得过、保存时要往保险库里写秘密（主机密码或代理密码）。
+    fn writes_secret(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(draft) = self.validated_draft(cx) else {
+            return false;
+        };
+        self.auth.writes_password(cx)
+            || matches!(
+                self.route.proxy_password_change(&draft.route, cx),
+                Some((_, Some(_)))
+            )
+    }
+
+    fn save_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.commit(cx) {
             window.close_dialog(cx);
         }
@@ -371,10 +406,9 @@ fn field_of(error: HostDraftError) -> &'static str {
     match error {
         HostDraftError::Address => FIELD_ADDRESS,
         HostDraftError::Port => FIELD_PORT,
-        HostDraftError::NoJumpHosts
-        | HostDraftError::DeletedJumpHost
-        | HostDraftError::ProxyAddress
-        | HostDraftError::ProxyPort => ROUTE_CHOICE,
+        HostDraftError::NoJumpHosts | HostDraftError::DeletedJumpHost => FIELD_JUMPS,
+        HostDraftError::ProxyAddress => FIELD_PROXY_HOST,
+        HostDraftError::ProxyPort => FIELD_PROXY_PORT,
     }
 }
 
@@ -413,7 +447,12 @@ impl Render for HostDialog {
                     .overflow_y_scrollbar()
                     .child(self.general.render(&self.errors, &tokens))
                     .child(self.auth.render(&self.errors, &tokens))
-                    .child(self.route.render(&self.errors, &tokens))
+                    .child(self.route.render(
+                        &self.errors,
+                        &tokens,
+                        self.general.shown_name(cx),
+                        cx,
+                    ))
                     .child(self.notes.render(&self.errors, &tokens)),
             )
             .child(self.render_footer(cx))

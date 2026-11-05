@@ -68,6 +68,21 @@ impl GeneralSection {
         }
     }
 
+    /// 这台主机现在叫什么：名称，留空时是地址（跳板路线的最后一站，工单 15）。
+    pub(super) fn shown_name(&self, cx: &App) -> SharedString {
+        let name = self.name.read(cx).value();
+        let name = name.trim();
+        if name.is_empty() {
+            let address = self.address.read(cx).value();
+            match address.trim() {
+                "" => t!("host.dialog.this_host"),
+                address => address.to_string().into(),
+            }
+        } else {
+            name.to_string().into()
+        }
+    }
+
     pub(super) fn render(&self, errors: &FieldErrors, tokens: &Tokens) -> AnyElement {
         let address_error = errors.get(FIELD_ADDRESS).is_some();
         let port_error = errors.get(FIELD_PORT).is_some();

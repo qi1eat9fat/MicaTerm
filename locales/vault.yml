@@ -1,0 +1,146 @@
+_version: 2
+# 保险库界面（工单 13）：设置主密码、解锁小卡片、锁定、重置、设置 › 安全
+vault.setup.title:
+  zh-CN: 设置主密码
+vault.setup.first_intro:
+  zh-CN: 这是第一次保存密码。主密码用来加密 data/vault.json，防的是数据目录被拷走。
+vault.setup.intro:
+  zh-CN: 主密码用来加密 data/vault.json，防的是数据目录被拷走。已经存的秘密不用重新输入。
+vault.setup.master:
+  zh-CN: 主密码
+vault.setup.again:
+  zh-CN: 再输一次
+vault.setup.again_placeholder:
+  zh-CN: 确认主密码
+vault.setup.remember:
+  zh-CN: 在本机记住
+vault.setup.remember_note:
+  zh-CN: 把保险库的数据密钥存进系统钥匙串，之后在这台电脑上自动解锁。拷到别的电脑要输主密码。
+vault.setup.forget_note:
+  zh-CN: 忘了主密码只能重置保险库：主机和凭据都保留，保存的密码、口令和私钥会清空。
+vault.setup.skip:
+  zh-CN: 不设置
+vault.setup.cancel:
+  zh-CN: 取消
+vault.setup.save:
+  zh-CN: 设置并保存
+vault.setup.confirm:
+  zh-CN: 设置
+vault.setup.working:
+  zh-CN: 设置中…
+vault.setup.empty:
+  zh-CN: 主密码不能为空
+vault.setup.mismatch:
+  zh-CN: 两次输入的主密码不一样
+vault.change.title:
+  zh-CN: 更换主密码
+vault.change.intro:
+  zh-CN: 更换只重新包裹数据密钥，各条秘密不用重新加密。
+vault.change.current:
+  zh-CN: 当前主密码
+vault.change.new:
+  zh-CN: 新主密码
+vault.change.confirm:
+  zh-CN: 更换
+vault.change.working:
+  zh-CN: 更换中…
+vault.unlock.title:
+  zh-CN: 解锁保险库
+vault.unlock.reason:
+  zh-CN: 输入主密码解锁保险库
+vault.unlock.for_host:
+  zh-CN: 连接 %{host} 要用保存的%{secret}
+vault.unlock.secret.password:
+  zh-CN: 密码
+vault.unlock.secret.credential:
+  zh-CN: 凭据
+vault.unlock.secret.proxy:
+  zh-CN: 代理密码
+vault.unlock.for_saving:
+  zh-CN: 保存密码之前要先解锁保险库
+vault.unlock.placeholder:
+  zh-CN: 主密码
+vault.unlock.cancel:
+  zh-CN: 取消
+vault.unlock.confirm:
+  zh-CN: 解锁
+vault.unlock.working:
+  zh-CN: 解锁中…
+vault.error.wrong_password:
+  zh-CN: 主密码不对
+vault.error.failed:
+  zh-CN: 保险库操作失败：%{error}
+vault.error.damaged:
+  zh-CN: 保险库文件已损坏：%{why}
+vault.error.too_new:
+  zh-CN: 保险库文件来自更新版本的 QiShell（格式 %{format}），这个版本打不开
+vault.error.open_failed:
+  zh-CN: 保险库打不开，这次运行保存的密码只在内存里，退出后丢失：%{error}
+vault.reset.title:
+  zh-CN: 重置保险库
+vault.reset.text:
+  zh-CN: 重置后清空所有保存的密码、口令和私钥，主机和凭据都保留，之后连接时现场询问。主密码也一起清除，下次保存秘密时再设。这一步不能撤销。
+vault.reset.cancel:
+  zh-CN: 取消
+vault.reset.confirm:
+  zh-CN: 重置
+vault.key_lost.title:
+  zh-CN: 保险库打不开
+vault.key_lost.text:
+  zh-CN: 这个保险库在另一台电脑上创建、没设主密码，这里打不开。重置后清空所有保存的密码、口令和私钥，主机和凭据都保留；不重置就这次现场输入密码。
+vault.key_lost.save_text:
+  zh-CN: 这个保险库在另一台电脑上创建、没设主密码，这里打不开，要先重置才能保存密码。重置后清空所有保存的密码、口令和私钥，主机和凭据都保留。
+vault.key_lost.keep:
+  zh-CN: 现场输入密码
+vault.key_lost.cancel:
+  zh-CN: 取消
+vault.key_lost.reset:
+  zh-CN: 重置保险库
+vault.sidebar.lock:
+  zh-CN: 锁定保险库
+vault.sidebar.unlock:
+  zh-CN: 解锁保险库
+vault.field.locked:
+  zh-CN: 已保存，保险库锁定中 · 解锁后修改
+vault.field.unlock:
+  zh-CN: 解锁…
+vault.field.first_hint:
+  zh-CN: 第一次保存秘密时会问你要不要设主密码，可以跳过
+settings.category.security:
+  zh-CN: 安全
+settings.security.vault:
+  zh-CN: 保险库
+settings.security.danger:
+  zh-CN: 危险操作
+settings.security.master:
+  zh-CN: 主密码
+settings.security.master_set:
+  zh-CN: 已设置。更换只重新包裹数据密钥，各条秘密不用重新加密
+settings.security.master_unset:
+  zh-CN: 没设主密码：秘密只靠本机钥匙串保护，拷到别的电脑就打不开
+settings.security.master_lost:
+  zh-CN: 这个保险库在另一台电脑上创建、没设主密码，这里打不开；重置后才能再保存秘密
+settings.security.set_master:
+  zh-CN: 设置主密码…
+settings.security.change_master:
+  zh-CN: 更换主密码…
+settings.security.remember:
+  zh-CN: 在本机记住
+settings.security.remember_note:
+  zh-CN: 数据密钥存进系统钥匙串，在这台电脑上自动解锁
+settings.security.lock:
+  zh-CN: 锁定保险库
+settings.security.lock_note:
+  zh-CN: 不会自动锁定；锁定后下次用到秘密时再问主密码
+settings.security.lock_now:
+  zh-CN: 立即锁定
+settings.security.unlock:
+  zh-CN: 解锁…
+settings.security.reset:
+  zh-CN: 重置保险库
+settings.security.reset_note:
+  zh-CN: 忘了主密码只能这样做：主机和凭据都保留，清空所有保存的密码、口令和私钥
+settings.security.reset_button:
+  zh-CN: 重置保险库…
+settings.security.no_vault:
+  zh-CN: 这次运行没有打开保险库，保存的密码只在内存里

@@ -2,7 +2,10 @@
 //!
 //! 扩展点（后续工单只加入口，不改这里的连接逻辑）：
 //! - `open_remote_card(host, ..)`：按主机建一张远程卡片（还没放进标签）。登录一样的卡片自动共用一条连接
-//!   （连接表在 backend），工单 16 的分屏、主机右键「在右侧 / 下方分屏打开」都经它建卡片再 `tab.split`；
+//!   （连接表在 backend）；`open_remote_card_as(host, target, ..)` 按给定的快照和登录建；
+//! - 分屏（工单 16）：`split_remote_card` 用源卡片的快照和登录（复用它的连接），`split_open_host`
+//!   是主机右键「在右侧 / 下方分屏打开」，都经 `place_beside_focused_card` 放进标签；
+//!   `open_cards_by_host` 是主机栏的绿色数字；
 //! - `connect_host(host, ..)`：在新标签里连接一台主机，工单 18 的快速连接、最近连接直接调它
 //!   （或派发 `ConnectHost`）；
 //! - `remote_target(host, ..)`：主机怎么连（含凭据和跳板、代理的路线，`HostData::login_of`），工单 15 不用改这里；
@@ -12,6 +15,8 @@
 mod prompts;
 mod secrets;
 
+use std::collections::HashMap;
+
 use gpui_kit::*;
 
 pub(in crate::workspace) use prompts::PromptQueue;
@@ -19,7 +24,8 @@ pub(in crate::workspace) use prompts::PromptQueue;
 use crate::backend::{RemoteEvent, RemoteTarget, RemoteTerminalId};
 use crate::card::{CardId, RemoteLaunch, RemoteUpdate, TerminalCard};
 use crate::host::{Host, HostId};
-use crate::tabs::TerminalTab;
+use crate::split::Axis;
+use crate::tabs::{TabId, TerminalTab};
 use crate::workspace::Workspace;
 
 impl Workspace {
@@ -110,6 +116,18 @@ impl Workspace {
     ) -> Option<Entity<TerminalCard>> {
         let host = self.hosts.read(cx).host(host)?.clone();
         let target = self.remote_target(&host, cx);
+        Some(self.open_remote_card_as(host, target, window, cx))
+    }
+
+    /// 按给定的主机快照和登录新建一张远程卡片（还没放进任何标签）。分屏一张远程卡片时用它的快照和登录，
+    /// 和它在同一条连接上开 shell 通道（主机后来被编辑、删除也一样）。
+    pub(in crate::workspace) fn open_remote_card_as(
+        &mut self,
+        host: Host,
+        target: RemoteTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TerminalCard> {
         let id = CardId(self.next_card_id);
         self.next_card_id += 1;
         let factory = self
@@ -125,7 +143,78 @@ impl Workspace {
         let card = cx.new(|cx| TerminalCard::remote(id, launch, focus, window, cx));
         // 终端的通知和响铃（工单 03）。
         self.watch_notices(&card, window, cx);
-        Some(card)
+        card
+    }
+
+    /// 分屏一张远程卡片（工单 16）：新卡片用 `source` 的主机快照和登录，复用它的连接、新开 shell 通道，
+    /// 不重新登录；连接只给一个通道时 backend 自动改成新建一条连接。放进 `tab`，挨着它的焦点卡片。
+    pub(in crate::workspace) fn split_remote_card(
+        &mut self,
+        tab: TabId,
+        source: &Entity<TerminalCard>,
+        axis: Axis,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (host, target) = {
+            let source = source.read(cx);
+            let (Some(host), Some(target)) =
+                (source.remote_host_snapshot(), source.remote_target())
+            else {
+                return;
+            };
+            (host.clone(), target.clone())
+        };
+        self.with_login_secrets(&target.clone(), window, cx, move |this, window, cx| {
+            let card = this.open_remote_card_as(host, target, window, cx);
+            this.place_beside_focused_card(tab, axis, card, window, cx);
+        });
+    }
+
+    /// 主机右键菜单「在右侧 / 下方分屏打开」（工单 16）：把主机 `host` 开在在前标签的焦点卡片旁边，
+    /// 本地卡片、远程卡片旁边都行；已经连着就复用连接。没有终端标签（开始卡片）时开在新标签里。
+    pub(in crate::workspace) fn split_open_host(
+        &mut self,
+        host: HostId,
+        axis: Axis,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab) = self.tabs.active() else {
+            self.connect_host(host, window, cx);
+            return;
+        };
+        let Some(saved) = self.hosts.read(cx).host(host).cloned() else {
+            return;
+        };
+        let target = self.remote_target(&saved, cx);
+        self.with_login_secrets(&target, window, cx, move |this, window, cx| {
+            let Some(card) = this.open_remote_card(host, window, cx) else {
+                return;
+            };
+            this.place_beside_focused_card(tab, axis, card, window, cx);
+        });
+    }
+
+    /// 每台主机开着几张远程卡片（不管连没连着、走哪条连接），主机栏右侧的绿色数字。
+    pub(in crate::workspace) fn open_cards_by_host(&self, cx: &App) -> HashMap<HostId, usize> {
+        let mut counts = HashMap::new();
+        for (_, tab) in self.tabs.iter() {
+            for card in tab.cards() {
+                if let Some(host) = card.read(cx).remote_host() {
+                    *counts.entry(host).or_insert(0) += 1;
+                }
+            }
+        }
+        counts
+    }
+
+    /// 主机 `host` 开着几张远程卡片，测试用。
+    pub fn open_cards_of(&self, host: HostId, cx: &App) -> usize {
+        self.open_cards_by_host(cx)
+            .get(&host)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// 在新标签里连接主机 `host`，标签里只有这一张远程卡片（双击、回车、右键菜单「连接」）。

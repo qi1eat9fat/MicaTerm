@@ -24,6 +24,7 @@
 mod hosts;
 mod remote;
 mod terminal;
+mod vault;
 
 pub use std::sync::Arc;
 
@@ -45,6 +46,7 @@ pub use qishell_terminal::{FixedLocalTerminalTransportProvider, LocalShell, Loca
 pub use qishell_terminal::{RightClick, TerminalColors, TerminalFont, TerminalInteraction};
 pub use remote::*;
 pub use terminal::*;
+pub use vault::*;
 // 卡片分屏（工单 05）。
 pub use gpui_kit::VisualTestContext;
 pub use qishell::app::{CloseFocusedCard, SplitDown, SplitRight, ToggleZoomCard};
@@ -78,6 +80,9 @@ pub fn fake_services() -> WorkspaceServices {
         // 远程终端不连网络，测试连接总是成功（工单 12）。
         remote_terminals: Arc::new(FakeRemoteTerminals::default()),
         connection_tester: Arc::new(FakeConnectionTester::succeeding()),
+        // 没有保险库：秘密只在上面的内存存储里，不弹保险库的框（工单 13 的夹具见 `vault.rs`）。
+        vault: None,
+        vault_problem: None,
     }
 }
 

@@ -2,24 +2,29 @@
 //! 主机列表，底部是设置按钮。
 //!
 //! 搜索框和平铺主机列表是 `crate::host::HostList`（工单 11），这里只画外框。
-//! 扩展点：底部「锁定保险库」按钮（工单 13）加在设置按钮后面。
+//! 底部「锁定保险库」按钮（工单 13）在设置按钮后面：没设主密码时不显示；锁着时显示锁、点了解锁。
 
 use gpui_kit::*;
 
 use super::icon_button::IconButton;
 use super::start_card::logo;
-use crate::app::{CatalogIcon, NewHost, OpenSettings, PRODUCT_NAME, ToggleHostSidebar};
+use crate::app::{
+    CatalogIcon, LockVault, NewHost, OpenSettings, PRODUCT_NAME, ToggleHostSidebar, UnlockVault,
+};
 use crate::host::HostList;
 use crate::i18n::t;
 use crate::theme::{GAP, HOST_SIDEBAR_WIDTH, TITLE_BAR_HEIGHT, Tokens};
+use crate::vault::VaultStatus;
 
 /// macOS 上给红绿灯让出的宽度。
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(68.);
 
-/// `count` 是保存的主机数（「主机 N」），`list` 是搜索框加主机列表。
+/// `count` 是保存的主机数（「主机 N」），`list` 是搜索框加主机列表，`vault` 是保险库的状态
+/// （没有保险库时是 `None`）。
 pub(super) fn render_host_sidebar(
     count: usize,
     list: Entity<HostList>,
+    vault: Option<VaultStatus>,
     target: &FocusHandle,
     tokens: &Tokens,
 ) -> impl IntoElement {
@@ -121,6 +126,32 @@ pub(super) fn render_host_sidebar(
                         t!("workspace.host_sidebar.settings"),
                     )
                     .dispatch(Box::new(OpenSettings), target, tokens),
-                ),
+                )
+                .children(vault_button(vault, target, tokens)),
         )
+}
+
+/// 主机栏底部的保险库按钮：解锁着显示开着的锁，点了立即锁定；锁着显示锁，点了弹解锁小卡片。
+/// 没设主密码（或者没有保险库）时不显示：没有锁定这回事。
+fn vault_button(
+    vault: Option<VaultStatus>,
+    target: &FocusHandle,
+    tokens: &Tokens,
+) -> Option<impl IntoElement + use<>> {
+    let button = match vault? {
+        VaultStatus::Unlocked { .. } => IconButton::new(
+            "lock-vault",
+            CatalogIcon::LockOpen,
+            t!("vault.sidebar.lock"),
+        )
+        .dispatch(Box::new(LockVault), target, tokens),
+        VaultStatus::Locked => IconButton::new(
+            "unlock-vault",
+            CatalogIcon::Lock,
+            t!("vault.sidebar.unlock"),
+        )
+        .dispatch(Box::new(UnlockVault), target, tokens),
+        _ => return None,
+    };
+    Some(button)
 }
