@@ -413,3 +413,18 @@ fn a_change_the_database_refuses_still_shows_and_is_reported(cx: &mut TestAppCon
     assert_eq!(host_names(cx, &workspace), ["web-01", "web-01 副本"]);
     assert!(notifications(cx) >= 1);
 }
+
+#[gpui_kit::test]
+fn a_database_that_cannot_be_opened_is_reported_once_the_window_is_up(cx: &mut TestAppContext) {
+    let services = WorkspaceServices {
+        hosts_problem: Some("主机数据库打不开，这次的改动不会保存：disk I/O error".into()),
+        ..fake_services()
+    };
+    let (handle, _) = open_workspace_with(cx, settings_store(), services);
+
+    let shown = in_frame(cx, handle, |window, cx| window.notifications(cx).len());
+    assert_eq!(shown, 1);
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find("host-count").label(), Some("0"));
+    });
+}
