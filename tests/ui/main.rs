@@ -17,6 +17,7 @@
 //! - `remote_card`：密码登录远程卡片（12）
 //! - `quick_connect`：快速连接与最近连接（18）
 //! - `split_remote`：分屏复用连接（16）
+//! - `route`：跳板与代理（15）
 
 mod support;
 
@@ -25,6 +26,7 @@ mod hosts;
 mod programs;
 mod quick_connect;
 mod remote_card;
+mod route;
 mod settings;
 mod snippets;
 mod split;
