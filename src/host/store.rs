@@ -113,6 +113,8 @@ fn describe_failure(failure: &Failure) -> SharedString {
             let error = match error {
                 SecretError::Unavailable => t!("host.store.secrets_unavailable"),
                 SecretError::Locked => t!("host.store.secrets_locked"),
+                SecretError::NotSetUp => t!("host.store.vault_not_set_up"),
+                SecretError::KeyLost => t!("host.store.vault_key_lost"),
                 SecretError::Store(error) => error.clone().into(),
             };
             t!("host.store.secret_not_saved", error = error)
