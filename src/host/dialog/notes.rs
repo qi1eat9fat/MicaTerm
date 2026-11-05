@@ -37,6 +37,7 @@ impl NotesSection {
             t!("host.dialog.notes"),
             [div()
                 .id(FIELD_NOTES)
+                .test_support()
                 .mb(px(10.))
                 .child(
                     Textarea::new(&self.notes)

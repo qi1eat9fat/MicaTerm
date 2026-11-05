@@ -10,8 +10,8 @@ fn dialog_open(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> bool {
 
 /// 把字段 `field` 的内容换成 `text`。
 fn fill(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str, text: &str) {
-    let field = field.to_owned();
-    in_frame(cx, handle, move |window, cx| window.click(field.as_str(), cx));
+    let field = gpui_kit::SharedString::from(field.to_owned());
+    in_frame(cx, handle, move |window, cx| window.click(field, cx));
     in_frame(cx, handle, |window, cx| {
         window.press("ctrl-a", cx);
         window.press("backspace", cx);

@@ -72,8 +72,8 @@ pub fn form_group(
         .into_any_element()
 }
 
-/// 一行字段（原型 `.fr`）：左边名称，右边控件；`error` 有值时下面一行红字（id 是
-/// `<field>-error`，原因写在无障碍名称里，测试靠它断言），否则写 `hint`（灰字）。
+/// 一行字段（原型 `.fr`）：左边名称（分段按钮那一行没有），右边控件，下面是 `notes`：
+/// 出错的原因（红字，id 是 `<field>-error`，原因写在无障碍名称里，测试靠它断言）或提示（灰字）。
 pub fn form_field(
     label: Option<SharedString>,
     control: impl IntoElement,

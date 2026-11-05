@@ -24,6 +24,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Icon, IconName, Sizable as _, WindowExt as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use qishell_hosts::{AuthKind, HostDraft, HostDraftError, HostId, SSH_PORT};
@@ -331,4 +332,3 @@ pub fn open_host_dialog(
     name.update(cx, |name, cx| name.focus(window, cx));
 }
 
-use gpui_kit::prelude::FluentBuilder as _;
