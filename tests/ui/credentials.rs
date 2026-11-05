@@ -917,7 +917,10 @@ fn a_host_connects_with_its_credential_unlocking_only_for_a_saved_key(cx: &mut T
     let deploy = credential(cx, &workspace, 1).unwrap();
     vault
         .vault
-        .set(&deploy.private_key_secret(), "-----BEGIN OPENSSH PRIVATE KEY-----")
+        .set(
+            &deploy.private_key_secret(),
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+        )
         .unwrap();
     dispatch(cx, handle, qishell::app::LockVault);
 
@@ -953,4 +956,58 @@ fn a_host_connects_with_its_credential_unlocking_only_for_a_saved_key(cx: &mut T
     let login = last_login(&remote);
     assert_eq!(login.method, qishell_hosts::LoginMethod::NoPassword);
     assert_eq!(login.user, "deploy");
+}
+
+// ---- 凭据对话框和保险库 ----
+
+#[gpui_kit::test]
+fn the_first_saved_key_asks_for_a_master_password_before_it_is_kept(cx: &mut TestAppContext) {
+    let vault = TestVault::absent();
+    let (handle, workspace, _) = open_with(cx, vault.services());
+    new_credential(cx, handle);
+    fill(cx, handle, "credential-name", "新服务器密钥");
+    save_credential(cx, handle);
+
+    // 还没建保险库：先问要不要设主密码，凭据对话框还开着，凭据还没存。
+    assert!(present(cx, handle, "vault-password-dialog"));
+    assert!(credential_dialog_open(cx, handle));
+    assert!(credential(cx, &workspace, 5).is_none());
+
+    click(cx, handle, "vault-password-skip");
+    assert!(!present(cx, handle, "vault-password-dialog"));
+    assert!(!credential_dialog_open(cx, handle));
+    let saved = credential(cx, &workspace, 5).expect("saved");
+    assert_eq!(vault.status(), VaultStatus::Unprotected);
+    let text = vault.read(&saved.private_key_secret()).expect("the key");
+    assert!(
+        text.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"),
+        "{text}"
+    );
+}
+
+#[gpui_kit::test]
+fn a_new_password_credential_while_locked_unlocks_before_it_is_saved(cx: &mut TestAppContext) {
+    let vault = TestVault::unlocked().locked();
+    let (handle, workspace, _) = open_with(cx, vault.services());
+    new_credential(cx, handle);
+    click(cx, handle, ("credential-kind", 0usize));
+    fill(cx, handle, "credential-name", "跳板密码");
+    fill(cx, handle, "credential-password", "hunter2");
+    save_credential(cx, handle);
+
+    assert!(present(cx, handle, "vault-unlock"));
+    // 取消解锁：凭据对话框照旧开着，什么都没存。
+    click(cx, handle, "vault-unlock-cancel");
+    assert!(credential_dialog_open(cx, handle));
+    assert!(credential(cx, &workspace, 5).is_none());
+
+    save_credential(cx, handle);
+    fill(cx, handle, "vault-unlock-password", MASTER);
+    click(cx, handle, "vault-unlock-confirm");
+    assert!(!credential_dialog_open(cx, handle));
+    let saved = credential(cx, &workspace, 5).expect("saved");
+    assert_eq!(
+        vault.read(&saved.password_secret()).as_deref(),
+        Some("hunter2")
+    );
 }
