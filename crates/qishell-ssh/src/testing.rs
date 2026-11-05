@@ -1,6 +1,7 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/testing.rs
 // 裁剪：本 crate 自己的测试也用它（`cfg(test)`）。
-// 改造：也接受公钥登录（`TestServer::authorize`），给私钥登录的测试用。
+// 改造：也接受公钥登录（`TestServer::authorize`），给私钥登录的测试用；
+// 也能当跳板（转发 direct-tcpip 通道，记在 `Seen::forwards`），给跳板的测试用（工单 15）。
 //! A real SSH server in the test's own process, for this crate's tests and
 //! those of what is built on it: a password login, a login with the keys it
 //! is told to accept, a shell that echoes what is typed, commands, and SFTP through this machine's OpenSSH
@@ -62,6 +63,8 @@ pub struct Seen {
     /// last window change.
     pub size: Option<(u32, u32)>,
     pub commands: Vec<String>,
+    /// 当作跳板时，每个 direct-tcpip 通道要去的 `(host, port)`，按顺序（工单 15）。
+    pub forwards: Vec<(String, u32)>,
 }
 
 impl TestServer {
@@ -198,6 +201,37 @@ impl server::Handler for Handler {
     ) -> anyhow::Result<()> {
         self.channels.insert(channel.id(), channel);
         reply.accept().await;
+        Ok(())
+    }
+
+    /// 当作跳板：连到要去的地方，把通道和那个 socket 接起来；连不上就拒绝通道（工单 15）。
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: russh::Channel<server::Msg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        _: &str,
+        _: u32,
+        reply: server::ChannelOpenHandle,
+        _: &mut server::Session,
+    ) -> anyhow::Result<()> {
+        lock(&self.seen)
+            .forwards
+            .push((host_to_connect.to_string(), port_to_connect));
+        let Ok(port) = u16::try_from(port_to_connect) else {
+            reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+            return Ok(());
+        };
+        match tokio::net::TcpStream::connect((host_to_connect, port)).await {
+            Ok(mut socket) => {
+                reply.accept().await;
+                tokio::spawn(async move {
+                    let mut stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+                });
+            }
+            Err(_) => reply.reject(russh::ChannelOpenFailure::ConnectFailed).await,
+        }
         Ok(())
     }
 

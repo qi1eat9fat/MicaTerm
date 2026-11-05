@@ -23,7 +23,7 @@ const WAIT: Duration = Duration::from_secs(10);
 
 /// 内存里的秘密。
 #[derive(Default)]
-struct Secrets(Mutex<Vec<(SecretRef, String)>>);
+pub(super) struct Secrets(pub(super) Mutex<Vec<(SecretRef, String)>>);
 
 impl SecretSource for Secrets {
     fn secret(&self, secret: &SecretRef) -> anyhow::Result<Option<Zeroizing<String>>> {
@@ -77,13 +77,13 @@ fn target(port: u16) -> RemoteTarget {
 }
 
 /// 连接问的问题怎么答：信任主机密钥，问密码答 `password`（`None` 就取消）。记下问过的问题和别的事件。
-struct Answerer {
+pub(super) struct Answerer {
     seen: Arc<Mutex<Vec<RemoteEvent>>>,
     _thread: JoinHandle<()>,
 }
 
 impl Answerer {
-    fn start(remote: &Arc<SshRemoteTerminals>, password: Option<&'static str>) -> Self {
+    pub(super) fn start(remote: &Arc<SshRemoteTerminals>, password: Option<&'static str>) -> Self {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let events = remote.events();
         let remote = Arc::downgrade(remote);
@@ -117,7 +117,7 @@ impl Answerer {
     }
 
     /// 问过的问题，按顺序。
-    fn prompts(&self) -> Vec<ConnectionPromptKind> {
+    pub(super) fn prompts(&self) -> Vec<ConnectionPromptKind> {
         self.seen
             .lock()
             .unwrap()
@@ -137,7 +137,7 @@ impl Answerer {
     }
 
     /// 等到有一个事件让 `found` 返回 `Some`。
-    fn wait_for<T>(&self, found: impl Fn(&RemoteEvent) -> Option<T>) -> T {
+    pub(super) fn wait_for<T>(&self, found: impl Fn(&RemoteEvent) -> Option<T>) -> T {
         let started = Instant::now();
         loop {
             if let Some(value) = self.seen.lock().unwrap().iter().find_map(&found) {
@@ -150,14 +150,14 @@ impl Answerer {
 }
 
 /// 在自己的线程上跑一个远程终端的传输，像终端引擎那样。
-struct Terminal {
+pub(super) struct Terminal {
     commands: mpsc::Sender<TerminalTransportCommand>,
     events: async_channel::Receiver<TerminalTransportEvent>,
     thread: Option<JoinHandle<anyhow::Result<()>>>,
 }
 
 impl Terminal {
-    fn open(remote: &SshRemoteTerminals, id: u64, target: &RemoteTarget) -> Self {
+    pub(super) fn open(remote: &SshRemoteTerminals, id: u64, target: &RemoteTarget) -> Self {
         let factory = remote.factory_for(RemoteTerminalId(id), target);
         let (commands, receiver) = mpsc::channel();
         let (sender, events) = async_channel::unbounded();
@@ -185,7 +185,7 @@ impl Terminal {
         }
     }
 
-    fn expect_started(&self) {
+    pub(super) fn expect_started(&self) {
         match self.next() {
             TerminalTransportEvent::Started => {}
             other => panic!("没有连上：{other:?}"),
@@ -193,7 +193,7 @@ impl Terminal {
     }
 
     /// 打一行字，等它回显回来。
-    fn echo(&self, text: &str) {
+    pub(super) fn echo(&self, text: &str) {
         self.commands
             .send(TerminalTransportCommand::Write(text.as_bytes().to_vec()))
             .unwrap();
@@ -207,11 +207,11 @@ impl Terminal {
     }
 
     /// 传输自己结束时的结果（连接失败是 `Err`）。
-    fn finish(mut self) -> anyhow::Result<()> {
+    pub(super) fn finish(mut self) -> anyhow::Result<()> {
         self.thread.take().unwrap().join().unwrap()
     }
 
-    fn close(mut self) {
+    pub(super) fn close(mut self) {
         let _ = self.commands.send(TerminalTransportCommand::Shutdown);
         self.thread.take().unwrap().join().unwrap().unwrap();
     }
@@ -404,7 +404,7 @@ fn a_password_the_server_refuses_every_time_fails_the_login() {
     assert!(error.to_string().starts_with("认证失败"), "{error}");
 }
 
-fn trusting(trusted: bool) -> TrustAsker {
+pub(super) fn trusting(trusted: bool) -> TrustAsker {
     Arc::new(move |_| async move { trusted }.boxed())
 }
 

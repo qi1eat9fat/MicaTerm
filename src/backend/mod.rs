@@ -14,6 +14,8 @@
 mod describe;
 mod pool;
 mod remote;
+#[cfg(test)]
+mod route_tests;
 mod runtime;
 mod tester;
 #[cfg(test)]
