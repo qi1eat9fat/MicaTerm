@@ -86,6 +86,16 @@ pub fn vault_path() -> io::Result<PathBuf> {
     Ok(dir.join(VAULT_FILE))
 }
 
+/// QiShell 自己的主机密钥记录文件名（不碰 `~/.ssh/known_hosts`）。
+pub const KNOWN_HOSTS_FILE: &str = "known_hosts";
+
+/// 主机密钥记录 `known_hosts` 的路径（工单 12）。数据目录还不存在时先建好；建不了就返回错误。
+pub fn known_hosts_path() -> io::Result<PathBuf> {
+    let dir = data_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(KNOWN_HOSTS_FILE))
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;

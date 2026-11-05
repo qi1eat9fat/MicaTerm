@@ -1,0 +1,237 @@
+_version: 2
+# 连接的错误和问题（backend 的 describe、tester、transport）。
+# 来自 since2006/shell-rs @ b2a307a: locales/ssh.yml、connection.yml（只留简体中文；私钥改成保险库里的说法）。
+ssh.agent.empty:
+  zh-CN: SSH Agent 中没有密钥，请先用 ssh-add 添加
+ssh.agent.hash:
+  zh-CN: 无法协商 SSH Agent 签名算法
+ssh.agent.missing_socket:
+  zh-CN: "%{path} 不存在"
+ssh.agent.no_response:
+  zh-CN: 没有响应
+ssh.agent.no_socket:
+  zh-CN: 没有设置 SSH_AUTH_SOCK
+ssh.agent.service_not_running:
+  zh-CN: OpenSSH Authentication Agent 服务没有运行
+ssh.agent.unreachable:
+  zh-CN: 无法连接 SSH Agent：%{reason}
+ssh.agent.unsigned:
+  zh-CN: SSH Agent 拒绝了签名请求
+ssh.agent.unsupported:
+  zh-CN: 这个平台不支持
+ssh.auth.agent_no_publickey:
+  zh-CN: 服务器不接受公钥登录，无法使用 SSH Agent
+ssh.auth.agent_rejected:
+  zh-CN: 服务器未接受 SSH Agent 中的密钥
+ssh.auth.cancelled:
+  zh-CN: 认证已取消
+ssh.auth.code_title:
+  zh-CN: "输入验证码"
+ssh.auth.enter_password:
+  zh-CN: 请输入登录密码
+ssh.auth.failed:
+  zh-CN: 认证失败：服务器未接受可用的认证方式
+ssh.auth.invalid_reply:
+  zh-CN: 认证回复无效
+ssh.auth.key_failed:
+  zh-CN: 私钥认证失败
+ssh.auth.key_rejected:
+  zh-CN: 服务器未接受指定的私钥
+ssh.auth.keyboard_cancelled:
+  zh-CN: 交互式认证已取消
+ssh.auth.keyboard_failed:
+  zh-CN: 交互式认证失败
+ssh.auth.keyboard_interactive:
+  zh-CN: "服务器要求键盘交互认证（密码已自动回答）："
+ssh.auth.keyboard_start_failed:
+  zh-CN: 无法开始交互式认证
+ssh.auth.methods_unknown:
+  zh-CN: 无法查询服务器支持的认证方式
+ssh.auth.no_key_accepted:
+  zh-CN: 服务器未接受 SSH Agent 和 ~/.ssh 中的任何私钥
+ssh.auth.password_failed:
+  zh-CN: 密码认证失败
+ssh.auth.password_field:
+  zh-CN: 密码
+ssh.auth.prompt_title:
+  zh-CN: "输入密码"
+ssh.auth.rsa_hash:
+  zh-CN: 无法协商 RSA 签名算法
+ssh.auth.saved_password_rejected:
+  zh-CN: 已保存的密码被服务器拒绝，请重新输入
+ssh.connect.cancelled:
+  zh-CN: 连接已取消
+ssh.connect.failed:
+  zh-CN: 无法建立 SSH 连接，请检查地址、端口和主机密钥
+ssh.error.connect_failed:
+  zh-CN: 无法连接：%{error}
+ssh.error.no_common.cipher:
+  zh-CN: 无法建立 SSH 连接：和服务器没有共同的加密算法，服务器支持的是 %{theirs}
+ssh.error.no_common.compression:
+  zh-CN: 无法建立 SSH 连接：和服务器没有共同的压缩算法，服务器支持的是 %{theirs}
+ssh.error.no_common.host_key:
+  zh-CN: 无法建立 SSH 连接：和服务器没有共同的主机密钥算法，服务器支持的是 %{theirs}
+ssh.error.no_common.kex:
+  zh-CN: 无法建立 SSH 连接：和服务器没有共同的密钥交换算法，服务器支持的是 %{theirs}
+ssh.error.no_common.mac:
+  zh-CN: 无法建立 SSH 连接：和服务器没有共同的消息校验（MAC）算法，服务器支持的是 %{theirs}
+ssh.error.refused:
+  zh-CN: 连接被拒绝，该端口上没有服务在监听
+ssh.error.timeout:
+  zh-CN: 连接超时
+ssh.error.unreachable:
+  zh-CN: 主机不可达
+ssh.exec.channel_failed:
+  zh-CN: 无法打开 SSH 通道
+ssh.exec.refused:
+  zh-CN: 服务器拒绝执行命令
+ssh.exec.send_failed:
+  zh-CN: 无法发送命令
+ssh.exec.timeout:
+  zh-CN: 命令超时
+ssh.host_key_changed.lead:
+  zh-CN: "服务器 %{host}:%{port} 的密钥和记下的不一致。可能是重装了系统、换了密钥，也可能是有人冒充。"
+ssh.jump.deleted:
+  zh-CN: 第 %{number} 台跳板主机已被删除，请编辑这台主机的连接方式
+ssh.jump.failed:
+  zh-CN: 跳板主机「%{name}」：%{reason}
+ssh.jump.forward.channel_failed:
+  zh-CN: 跳板主机「%{name}」无法连接到 %{host}:%{port}：无法打开转发通道
+ssh.jump.forward.connect_failed:
+  zh-CN: 跳板主机「%{name}」无法连接到 %{host}:%{port}：连接失败
+ssh.jump.forward.prohibited:
+  zh-CN: 跳板主机「%{name}」无法连接到 %{host}:%{port}：服务器不允许端口转发
+ssh.jump.forward.timed_out:
+  zh-CN: 跳板主机「%{name}」无法连接到 %{host}:%{port}：连接超时
+ssh.jump.none:
+  zh-CN: 没有可用的跳板主机
+ssh.jump_host.instructions:
+  zh-CN: 跳板主机「%{name}」
+ssh.jump_host.with_instructions:
+  zh-CN: 跳板主机「%{name}」：%{instructions}
+ssh.key.enter_passphrase:
+  zh-CN: "请输入%{key}的口令"
+ssh.key.missing:
+  zh-CN: "保险库里没有这把私钥（可能已删除，或者保险库是从别的电脑拷来的），请重新导入"
+ssh.key.not_chosen:
+  zh-CN: 私钥认证需要选择私钥文件
+ssh.key.passphrase_field:
+  zh-CN: 口令
+ssh.key.prompt_title:
+  zh-CN: "输入私钥口令"
+ssh.key.saved_name:
+  zh-CN: "保存的私钥"
+ssh.key.saved_passphrase_rejected:
+  zh-CN: "已保存的口令无法解开%{key}，请重新输入"
+ssh.key.too_many_attempts:
+  zh-CN: 私钥口令错误次数过多
+ssh.key.unreadable:
+  zh-CN: "无法读取%{key}"
+ssh.known_hosts.changed_while_saving:
+  zh-CN: 保存主机密钥时发现信任文件已发生变化
+ssh.known_hosts.corrupt:
+  zh-CN: 主机信任文件已损坏：%{path}
+ssh.known_hosts.read_failed:
+  zh-CN: 无法读取主机信任文件：%{path}
+ssh.known_hosts.unreadable:
+  zh-CN: 主机信任文件已损坏或无法读取：%{path}
+ssh.known_hosts.write_failed:
+  zh-CN: 无法写入主机信任文件：%{path}
+ssh.latency.ms:
+  zh-CN: "%{ms} ms"
+ssh.latency.timed_out:
+  zh-CN: "超时"
+ssh.list.separator:
+  zh-CN: "、"
+ssh.missing.keyboard_interactive:
+  zh-CN: 服务器要求键盘交互式认证，无法在测试中完成
+ssh.missing.passphrase:
+  zh-CN: 私钥已加密，未填写口令
+ssh.missing.passphrase_rejected:
+  zh-CN: 私钥口令错误
+ssh.missing.password:
+  zh-CN: 未填写密码
+ssh.missing.password_rejected:
+  zh-CN: 用户名或密码错误
+ssh.password_wanted:
+  zh-CN: 服务器要求密码，「无密码」不会询问；请改用「密码」或「使用凭据」
+ssh.prompt.request_cancelled:
+  zh-CN: 认证请求已取消
+ssh.prompt.view_closed:
+  zh-CN: 连接视图已关闭
+ssh.proxy.auth_required:
+  zh-CN: 代理服务器要求认证，请填写代理的用户名和密码
+ssh.proxy.bad_credentials:
+  zh-CN: 代理服务器拒绝了用户名或密码
+ssh.proxy.closed:
+  zh-CN: 代理服务器没有回复就关闭了连接
+ssh.proxy.connect_failed:
+  zh-CN: 无法连接代理服务器 %{host}:%{port}：%{reason}
+ssh.proxy.forbidden:
+  zh-CN: 代理服务器不允许连接到 %{target}
+ssh.proxy.http.bad_gateway:
+  zh-CN: 代理服务器无法连接到 %{target}：连接失败（HTTP 502）
+ssh.proxy.http.gateway_timeout:
+  zh-CN: 代理服务器无法连接到 %{target}：连接超时（HTTP 504）
+ssh.proxy.http.refused:
+  zh-CN: 代理服务器拒绝了连接：%{status}
+ssh.proxy.http.unrecognized:
+  zh-CN: 代理服务器的回复无法识别，请确认它是 HTTP 代理
+ssh.proxy.reply_too_long:
+  zh-CN: 代理服务器的回复过长
+ssh.proxy.socks.address_type:
+  zh-CN: 代理服务器不支持这种地址类型
+ssh.proxy.socks.credentials_too_long:
+  zh-CN: 代理的用户名或密码太长，SOCKS5 最多 255 个字节
+ssh.proxy.socks.host_too_long:
+  zh-CN: 主机名太长，SOCKS5 最多 255 个字节
+ssh.proxy.socks.host_unreachable:
+  zh-CN: 代理服务器无法连接到 %{target}：主机不可达
+ssh.proxy.socks.internal:
+  zh-CN: 代理服务器无法连接到 %{target}：代理服务器内部错误
+ssh.proxy.socks.network_unreachable:
+  zh-CN: 代理服务器无法连接到 %{target}：网络不可达
+ssh.proxy.socks.no_connect:
+  zh-CN: 代理服务器不支持 CONNECT 命令
+ssh.proxy.socks.no_password_auth:
+  zh-CN: 代理服务器不接受用户名和密码认证
+ssh.proxy.socks.refused:
+  zh-CN: 代理服务器无法连接到 %{target}：连接被拒绝
+ssh.proxy.socks.rules_forbid:
+  zh-CN: 代理服务器的规则不允许连接到 %{target}
+ssh.proxy.socks.timeout:
+  zh-CN: 代理服务器无法连接到 %{target}：连接超时
+ssh.proxy.socks.unrecognized:
+  zh-CN: 代理服务器的回复无法识别，请确认它是 SOCKS5 代理
+ssh.route.connect_failed:
+  zh-CN: 无法连接到 %{host}:%{port}
+ssh.terminal.card_closed:
+  zh-CN: "卡片已关闭"
+ssh.terminal.connection_lost:
+  zh-CN: "连接已断开"
+ssh.terminal.pty_refused:
+  zh-CN: 服务器拒绝创建终端
+ssh.terminal.resize_failed:
+  zh-CN: 调整远程终端尺寸失败
+ssh.terminal.session_failed:
+  zh-CN: 无法创建 SSH 会话通道
+ssh.terminal.sftp_refused:
+  zh-CN: 服务器没有开启 SFTP
+ssh.terminal.sftp_timeout:
+  zh-CN: 打开 SFTP 超时
+ssh.terminal.shell_only:
+  zh-CN: 这个终端经由堡垒机打开，只能使用终端本身，不能另外执行命令
+ssh.terminal.shell_only_sftp:
+  zh-CN: 这个终端经由堡垒机打开，只能使用终端本身，不能另外打开文件
+ssh.terminal.shell_refused:
+  zh-CN: 服务器拒绝启动 Shell
+ssh.terminal.write_failed:
+  zh-CN: 向远程终端写入失败
+ssh.test.host_key_changed:
+  zh-CN: 主机密钥与已保存的不一致，已阻止连接。请先核实服务器身份
+ssh.test.host_key_declined:
+  zh-CN: 未信任该主机的密钥
+ssh.test.unresolved:
+  zh-CN: 无法解析主机 %{host}
+ssh.unknown_host.lead:
+  zh-CN: "第一次连接 %{host}:%{port}，请核对服务器的主机密钥："

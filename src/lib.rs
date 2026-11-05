@@ -1,6 +1,7 @@
 //! QiShell：以 SSH 主机管理为核心的桌面终端，Rex 风格的卡片分屏。
 //!
 //! 模块按能力划分，功能模块不依赖窗口壳（`workspace`），也不碰彼此的内部：
+//! - `backend`：包装 SSH 核心的类型（远程终端、连接表、测试连接），把错误翻成文案；界面只认它的类型；
 //! - `app`：全部 action（`app/actions/` 按领域分文件）、快捷键表、数据目录、图标与字体资源；
 //! - `settings`：设置模型与 `settings.json` 的读写；
 //! - `theme`：原型里 `.win.light` / `.win.dark` 两组颜色 token 和尺寸常量；
@@ -16,6 +17,7 @@
 //! - `workspace`：窗口壳，持有全部 action 的处理器（`workspace/handlers/` 按领域分文件）。
 
 pub mod app;
+pub mod backend;
 pub mod card;
 pub mod host;
 pub mod i18n;
