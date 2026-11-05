@@ -6,16 +6,20 @@
 //!
 //! 扩展点：
 //! - 工单 16（分屏复用连接）：`connection()` 是卡片所在的连接，分屏时据此复用；
-//! - 工单 17（被动解析）：`RemoteActivity` 放解析出的程序、目录、标题，`badge` 之前先看它；
-//!   `hostname()` 用来核对目录报告。
+//! - 工单 17（被动解析）：终端 crate 的 `ShellActivity` 把远程报告的目录、命令、窗口标题和
+//!   全屏状态合起来（优先级、主机名核对都在那里），结果放进 `RemoteActivity`；拿不到程序名时
+//!   图块用 `badge`。SFTP 标签和分屏回到原目录用 `RemoteActivity::start_directory`。
 
 use gpui_kit::SharedString;
 use qishell_hosts::{Host, HostOs, mark_color};
-use qishell_terminal::{ReportedDirectory, SharedTerminalTransportFactory, TerminalLifecycle};
+use qishell_terminal::{
+    ReportedDirectory, SharedTerminalTransportFactory, ShellActivity, ShellCommand,
+    TerminalLifecycle,
+};
 
 use crate::backend::{ConnectionId, Latency, ProbedHost, RemoteTarget, latency_label};
 use crate::i18n::t;
-use crate::programs::{Program, TERMINAL_GLYPH};
+use crate::programs::{Program, TERMINAL_GLYPH, program_of};
 
 /// 新开一张远程卡片要的东西：窗口壳按主机建好。
 pub struct RemoteLaunch {
@@ -36,9 +40,32 @@ pub enum RemoteUpdate {
     Probed(ProbedHost),
 }
 
-/// 远程卡片被动解析出的东西（工单 17 填：程序、目录、标题）。
+/// 远程卡片被动解析出的东西（工单 17）：只读远程自己发出的信息，不往远程写，也不另开通道。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RemoteActivity {}
+pub struct RemoteActivity {
+    /// 正在跑的程序的命令名（可能是个 shell）；拿不到名字时是 `None`。
+    pub program: Option<String>,
+    /// 有程序在跑：知道名字的、shell 集成说在跑的，或者在全屏里的。
+    pub running: bool,
+    /// 显示用的目录：远程报告的（OSC 7 等）优先，其次是窗口标题里的。
+    pub directory: Option<String>,
+    /// 能用作 SFTP 标签和分屏初始目录的：报告的；标题里的只有 `/` 或 `~/` 开头才算。
+    pub start_directory: Option<String>,
+    /// 现在的窗口标题：悬停卡片头部时显示完整的。
+    pub title: Option<String>,
+}
+
+impl RemoteActivity {
+    fn of(shell: &ShellActivity) -> Self {
+        Self {
+            program: shell.program().map(str::to_string),
+            running: shell.running(),
+            directory: shell.directory().map(str::to_string),
+            start_directory: shell.start_directory().map(str::to_string),
+            title: shell.title().map(str::to_string),
+        }
+    }
+}
 
 /// 远程卡片现在的连接状态，从终端的生命周期看出来。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,10 +84,11 @@ pub(super) struct RemoteCard {
     hostname: Option<String>,
     latency: Option<Latency>,
     connection: Option<ConnectionId>,
-    /// 远程 shell 报告的目录（OSC 7 等，核对过主机名）。
-    directory: Option<String>,
+    /// 被动解析的状态（终端 crate 的纯状态，一条连接一份）。
+    shell: ShellActivity,
     /// 用户点了「断开连接」：断开的原因就是它，不是 shell 退出。
     stopped: bool,
+    /// 上次从 `shell` 取出的结果：变了才告诉窗口壳。
     pub(super) activity: RemoteActivity,
 }
 
@@ -73,7 +101,7 @@ impl RemoteCard {
             hostname: None,
             latency: None,
             connection: None,
-            directory: None,
+            shell: ShellActivity::default(),
             stopped: false,
             activity: RemoteActivity::default(),
         }
@@ -112,7 +140,8 @@ impl RemoteCard {
         self.target = target;
         self.latency = None;
         self.connection = None;
-        self.directory = None;
+        self.shell = ShellActivity::default();
+        self.activity = RemoteActivity::default();
         self.stopped = false;
     }
 
@@ -137,16 +166,65 @@ impl RemoteCard {
     }
 
     /// 远程 shell 报告了目录：带主机名的要和 `uname -n` 对得上（在卡片里又 ssh 到别处的不算）。
+    /// 返回解析结果变没变。
     pub(super) fn report_directory(&mut self, directory: &ReportedDirectory) -> bool {
-        if !directory.is_from(self.hostname.as_deref()) {
-            return false;
+        self.shell
+            .report_directory(directory, self.hostname.as_deref());
+        self.refresh()
+    }
+
+    /// shell 集成说命令开始跑了、回到提示符了。返回解析结果变没变。
+    pub(super) fn shell_command(&mut self, command: ShellCommand) -> bool {
+        self.shell.shell_command(command);
+        self.refresh()
+    }
+
+    /// 终端重画了：看看窗口标题和全屏状态。返回解析结果变没变。
+    pub(super) fn observe_screen(&mut self, title: Option<&str>, full_screen: bool) -> bool {
+        if self.shell.title() != title {
+            self.shell.set_title(title, self.hostname.as_deref());
         }
-        self.directory = Some(directory.path.clone());
-        true
+        self.shell.set_full_screen(full_screen);
+        self.refresh()
+    }
+
+    /// 探测出了 `uname -n`：终端记着的最后一次目录报告和现在的标题按它重新核对（之前带主机名的
+    /// 报告一律没信）。返回解析结果变没变。
+    pub(super) fn recheck(
+        &mut self,
+        directory: Option<&ReportedDirectory>,
+        title: Option<&str>,
+    ) -> bool {
+        let hostname = self.hostname.as_deref();
+        if let Some(directory) = directory {
+            self.shell.report_directory(directory, hostname);
+        }
+        self.shell.set_title(title, hostname);
+        self.refresh()
+    }
+
+    fn refresh(&mut self) -> bool {
+        let activity = RemoteActivity::of(&self.shell);
+        let changed = activity != self.activity;
+        self.activity = activity;
+        changed
     }
 
     pub(super) fn directory(&self) -> Option<&str> {
-        self.directory.as_deref()
+        self.activity.directory.as_deref()
+    }
+
+    /// 在跑的程序的图块：知道名字的查程序名表（是 shell 的不算，比如在卡片里又开了 `bash`）；
+    /// 只知道在跑时是系统徽章（图块不变，有输出时照常亮绿点）。在提示符下是 `None`。
+    pub(super) fn running_program(&self) -> Option<Program> {
+        match &self.activity.program {
+            Some(name) => Some(program_of(name)).filter(|program| !program.shell),
+            None if self.activity.running => Some(Program {
+                shell: false,
+                ..self.badge()
+            }),
+            None => None,
+        }
     }
 
     pub(super) fn state(&self, lifecycle: &TerminalLifecycle) -> RemoteState {
@@ -289,6 +367,51 @@ mod tests {
         };
         assert!(card.report_directory(&here));
         assert_eq!(card.directory(), Some("/var/www"));
+    }
+
+    #[test]
+    fn a_named_program_replaces_the_badge_and_an_unnamed_one_keeps_it() {
+        let mut card = card(Some(HostOs::Debian));
+        assert_eq!(card.running_program(), None);
+        assert!(card.shell_command(ShellCommand::Running(Some("htop".into()))));
+        assert_eq!(card.running_program(), Some(program_of("htop")));
+        // 卡片里又开了个 shell：在提示符下一样，用系统徽章。
+        card.shell_command(ShellCommand::Running(Some("bash".into())));
+        assert_eq!(card.running_program(), None);
+        // 只知道在跑：图块还是系统徽章，但算在跑（有输出时亮绿点）。
+        card.shell_command(ShellCommand::Prompt);
+        card.shell_command(ShellCommand::Running(None));
+        let running = card.running_program().unwrap();
+        assert_eq!(running.name, card.badge().name);
+        assert!(!running.shell);
+        assert!(card.shell_command(ShellCommand::Prompt));
+        assert_eq!(card.running_program(), None);
+        // 没变的不算变。
+        assert!(!card.shell_command(ShellCommand::Prompt));
+    }
+
+    #[test]
+    fn the_hostname_probed_later_rechecks_what_was_reported_before() {
+        let mut card = card(None);
+        let report = ReportedDirectory {
+            host: Some("web-01".into()),
+            path: "/srv".into(),
+        };
+        assert!(!card.report_directory(&report));
+        assert!(card.observe_screen(Some("root@web-01: ~/x"), false));
+        assert_eq!(card.directory(), None);
+        card.apply(RemoteUpdate::Probed(ProbedHost {
+            os: "ubuntu",
+            hostname: Some("web-01".into()),
+        }));
+        assert!(card.recheck(Some(&report), Some("root@web-01: ~/x")));
+        assert_eq!(card.directory(), Some("/srv"));
+        assert_eq!(card.activity.start_directory.as_deref(), Some("/srv"));
+        assert_eq!(card.activity.title.as_deref(), Some("root@web-01: ~/x"));
+        // 重连：上一条连接说的都忘掉。
+        let (host, target) = (card.host().clone(), card.target().clone());
+        card.reconnecting(host, target);
+        assert_eq!(card.activity, RemoteActivity::default());
     }
 
     #[test]

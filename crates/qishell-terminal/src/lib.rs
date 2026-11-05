@@ -14,6 +14,7 @@
 //! 在原处留了 `M2 #12 接回` 的注释。
 
 pub mod actions;
+mod activity;
 mod box_drawing;
 mod directory;
 mod engine;
@@ -39,6 +40,7 @@ mod testing;
 mod theme;
 mod transport;
 
+pub use activity::{ShellActivity, ShellCommand, TitleSays, command_name, read_title, shell_words};
 pub use directory::ReportedDirectory;
 pub use engine::{TerminalCell, TerminalEngine, TerminalEvent, TerminalSnapshot};
 pub use font::{

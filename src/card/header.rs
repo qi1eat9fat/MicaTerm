@@ -26,6 +26,30 @@ pub(super) struct HeaderState {
     pub dot: StatusDot,
     /// 远程卡片没连着（正在连接、已断开）：名称变灰（原型 `.card.off .chead .nm`，工单 12）。
     pub offline: bool,
+    /// 悬停头部时的提示：远程卡片的完整窗口标题（工单 17；头部本身固定显示「主机名 + 目录」）。
+    pub tooltip: Option<SharedString>,
+}
+
+/// 悬停卡片头部时的提示（原型 `.tip`）。
+struct HeaderTooltip(SharedString);
+
+impl Render for HeaderTooltip {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let tokens = Tokens::current(cx);
+        div()
+            .id("card-header-tooltip")
+            .test_support()
+            .aria_label(self.0.clone())
+            .max_w(px(480.))
+            .px(px(9.))
+            .py(px(5.))
+            .rounded(px(7.))
+            .bg(tokens.tooltip)
+            .text_color(tokens.tooltip_text)
+            .text_size(px(11.5))
+            .line_height(relative(1.45))
+            .child(self.0.clone())
+    }
 }
 
 pub(super) fn render_header(
@@ -42,10 +66,14 @@ pub(super) fn render_header(
     } else {
         (CatalogIcon::Maximize2, t!("card.zoom"))
     };
+    let tooltip = state.tooltip.clone();
     div()
         .id(id.element("card-header"))
         .test_support()
         .aria_label(format!("{name} {directory}"))
+        .when_some(tooltip, |header, title| {
+            header.tooltip(move |_, cx| cx.new(|_| HeaderTooltip(title.clone())).into())
+        })
         // 双击头部放大或还原。
         .on_click(move |event, window, cx| {
             if event.click_count() == 2 {

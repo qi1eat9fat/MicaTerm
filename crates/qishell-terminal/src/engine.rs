@@ -250,6 +250,9 @@ impl TerminalEngine {
             TerminalUiEventKind::Notice(notice) => {
                 return Some(TerminalEvent::Notice(notice.cleaned()));
             }
+            TerminalUiEventKind::ShellCommand(command) => {
+                return Some(TerminalEvent::ShellCommand(command));
+            }
             TerminalUiEventKind::Bell => {
                 let line = cursor_line_text(&self.runtime.term.lock());
                 return Some(TerminalEvent::Notice(TerminalNotice::bell(&line)));
@@ -707,6 +710,8 @@ pub enum TerminalEvent {
     ForegroundProgram(Option<String>),
     /// 程序有输出（工单 06 的绿点）。一批输出只发一次，最多每 16ms 一次。
     Output,
+    /// shell 集成（OSC 133、633、3008）说命令开始跑了、回到提示符了（工单 17 的远程卡片用）。
+    ShellCommand(crate::ShellCommand),
 }
 
 struct TerminalRuntime {
@@ -1039,6 +1044,8 @@ enum TerminalUiEventKind {
     /// 程序有输出（工单 06）。
     Output,
     Bell,
+    /// shell 集成说的命令状态（工单 17）。
+    ShellCommand(crate::ShellCommand),
 }
 
 fn append_message(term: &Arc<FairMutex<AlacrittyTerm>>, message: &str) {
@@ -1118,6 +1125,9 @@ impl Parser {
         if let Some(directory) = self.notices.take_directory() {
             self.proxy.send(TerminalUiEventKind::Directory(directory));
         }
+        if let Some(command) = self.notices.take_command() {
+            self.proxy.send(TerminalUiEventKind::ShellCommand(command));
+        }
     }
 }
 
@@ -1153,11 +1163,15 @@ fn select_all(term: &mut AlacrittyTerm) {
     });
 }
 
+/// 标题最多留多少个字符：远程卡片从 `user@host: 目录` 格式的标题里解析目录、悬停头部时显示完整标题
+/// （工单 17），截短了目录就错了，所以留得长一些。
+const TITLE_LIMIT: usize = 512;
+
 fn sanitize_title(title: &str) -> Option<String> {
     let title: String = title
         .chars()
         .filter(|character| !character.is_control())
-        .take(80)
+        .take(TITLE_LIMIT)
         .collect();
     (!title.trim().is_empty()).then_some(title)
 }

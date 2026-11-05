@@ -19,6 +19,7 @@
 //! - `split_remote`：分屏复用连接（16）
 //! - `route`：跳板与代理（15）
 //! - `vault`：保险库界面（13）
+//! - `remote_activity`：远程卡片被动解析（17）
 
 mod support;
 
@@ -26,6 +27,7 @@ mod host_dialog;
 mod hosts;
 mod programs;
 mod quick_connect;
+mod remote_activity;
 mod remote_card;
 mod route;
 mod settings;

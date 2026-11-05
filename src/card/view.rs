@@ -176,8 +176,17 @@ impl TerminalCard {
     ) -> Self {
         let focus = terminal.read(cx).focus_handle();
         let subscriptions = vec![
-            cx.observe(&terminal, |this, _, cx| {
+            cx.observe(&terminal, |this, terminal, cx| {
                 this.refresh_remote_state(cx);
+                // 标题和全屏不单独发事件：每次重画看一眼（工单 17）。
+                if let CardKind::Remote(remote) = &mut this.kind {
+                    let terminal = terminal.read(cx);
+                    let (title, full_screen) = (terminal.title(cx), terminal.is_full_screen(cx));
+                    let was_running = remote.activity.running;
+                    if remote.observe_screen(title.as_deref(), full_screen) {
+                        this.remote_activity_changed(was_running, cx);
+                    }
+                }
                 cx.notify();
             }),
             cx.subscribe(&terminal, Self::on_terminal_event),
@@ -228,6 +237,16 @@ impl TerminalCard {
                     }
                 }
             },
+            // 远程 shell 集成说的命令状态（工单 17）；本地卡片看本机的前台进程，不用它。
+            TerminalEvent::ShellCommand(command) => {
+                if let CardKind::Remote(remote) = &mut self.kind {
+                    let was_running = remote.activity.running;
+                    if remote.shell_command(command.clone()) {
+                        self.remote_activity_changed(was_running, cx);
+                    }
+                }
+                return;
+            }
             TerminalEvent::WorkingDirectory(folder) => {
                 self.working_directory = Some(folder.clone());
             }
@@ -277,16 +296,36 @@ impl TerminalCard {
         }
     }
 
-    /// 前台在跑的程序（shell 以外的）。
+    /// 远程卡片被动解析出的东西变了（工单 17）：程序跑完回到提示符时，卡片看不见就要亮橙点；
+    /// 图块、目录、状态点跟着变。
+    fn remote_activity_changed(&mut self, was_running: bool, cx: &mut Context<Self>) {
+        let running = self
+            .remote_part()
+            .is_some_and(|remote| remote.activity.running);
+        if was_running && !running {
+            cx.emit(CardEvent::WantsAttention);
+        }
+        self.refresh_dot(cx);
+        cx.emit(CardEvent::Changed);
+        cx.notify();
+    }
+
+    /// 前台在跑的程序（shell 以外的）：本地卡片是本机看到的前台进程；远程卡片是被动解析出的
+    /// （只知道在跑、不知道是谁时是系统徽章）。
     fn running_program(&self) -> Option<Program> {
-        self.program
-            .as_deref()
-            .map(program_of)
-            .filter(|program| !program.shell)
+        match &self.kind {
+            CardKind::Local { .. } => self
+                .program
+                .as_deref()
+                .map(program_of)
+                .filter(|program| !program.shell),
+            CardKind::Remote(remote) => remote.running_program(),
+        }
     }
 
     /// 图块上显示的程序：前台程序；shell 在提示符下时，本地卡片是 shell 的终端图块，
-    /// 远程卡片是主机的系统徽章。远程卡片没连着时图块变灰。
+    /// 远程卡片是主机的系统徽章（拿不到程序名时也是它，还没探测出系统时是名称首字；被动解析出
+    /// 程序名后换成程序图块，工单 17）。远程卡片没连着时图块变灰。
     pub fn tile_program(&self) -> Program {
         match &self.kind {
             CardKind::Local { .. } => self
@@ -448,7 +487,7 @@ impl TerminalCard {
         self.remote_part().and_then(RemoteCard::latency)
     }
 
-    /// 远程卡片被动解析出的东西（工单 17 填）。
+    /// 远程卡片被动解析出的东西（工单 17）：程序、目录、标题。
     pub fn remote_activity(&self) -> Option<&super::RemoteActivity> {
         self.remote_part().map(|remote| &remote.activity)
     }
@@ -468,13 +507,31 @@ impl TerminalCard {
 
     /// 收下窗口壳转来的连接事件（工单 12）；返回探测出的系统，窗口壳把它记进主机数据。
     pub fn apply_remote(&mut self, update: RemoteUpdate, cx: &mut Context<Self>) -> Option<HostOs> {
+        let probed = matches!(update, RemoteUpdate::Probed(_));
+        let (directory, title) = if probed {
+            let terminal = self.terminal.read(cx);
+            (terminal.directory(cx), terminal.title(cx))
+        } else {
+            (None, None)
+        };
         let CardKind::Remote(remote) = &mut self.kind else {
             return None;
         };
         let os = remote.apply(update);
+        // 知道了 `uname -n`：之前带主机名、没信的目录报告和标题重新核对（工单 17）。
+        if probed {
+            remote.recheck(directory.as_ref(), title.as_deref());
+        }
         cx.emit(CardEvent::Changed);
         cx.notify();
         os
+    }
+
+    /// 远程卡片能用作 SFTP 标签和分屏初始目录的远程目录（工单 17）：远程报告的；从窗口标题解析的
+    /// 只有 `/` 或 `~/` 开头才算。本地卡片和不知道时是 `None`（从主目录开始）。
+    pub fn remote_start_directory(&self) -> Option<&str> {
+        self.remote_part()
+            .and_then(|remote| remote.activity.start_directory.as_deref())
     }
 
     /// 原地重连：用 `host` 现在的样子和 `target`（编辑过就是新的）建新的传输。
@@ -533,8 +590,8 @@ impl TerminalCard {
             .or_else(|| self.launch_directory.clone())
     }
 
-    /// 头部和标签上显示的目录：本地卡片主目录下的写成 `~` 开头；远程卡片是远程 shell 报告的目录，
-    /// 没报告过时是空的。
+    /// 头部和标签上显示的目录：本地卡片主目录下的写成 `~` 开头；远程卡片是远程报告的目录，
+    /// 没有时是窗口标题里的（工单 17），都没有时是空的。
     pub fn directory_label(&self) -> String {
         if let Some(remote) = self.remote_part() {
             return remote.directory().unwrap_or_default().to_string();
@@ -753,6 +810,10 @@ impl Render for TerminalCard {
                     offline: state
                         .as_ref()
                         .is_some_and(|state| *state != RemoteState::Connected),
+                    tooltip: self
+                        .remote_part()
+                        .and_then(|remote| remote.activity.title.clone())
+                        .map(SharedString::from),
                 },
                 &self.target,
                 &tokens,
