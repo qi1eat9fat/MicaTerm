@@ -5,6 +5,7 @@
 //! 主机栏里的搜索框和平铺主机列表（原型 `.search`、`.slist`、`.host`）。
 //!
 //! - 每行是系统徽章、名称，下一行 `user@地址[:端口]`；悬停提示 `用户@地址:端口` 和备注；
+//!   开着远程卡片的主机，右侧用绿色数字显示张数（工单 16，窗口壳经 `set_open_cards` 告诉列表）；
 //! - 单击选中，双击或选中后回车连接（派发 `ConnectHost`）；选中项和悬停项是胶囊形底色；
 //! - 搜索按名称、地址、用户名，空格隔开的几个词都要匹配；自动高亮第一个，↑↓ 移动，回车连接
 //!   高亮的那台，Esc 清空；
@@ -14,7 +15,7 @@
 //! 主机数据在 `HostStore`，这里只持有界面状态（搜索词、选中、高亮、拖动、开着的菜单），
 //! 观察 store 变化：新建或复制出来的主机自动选上。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use gpui_kit::base::POPUP_PRIORITY;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
@@ -57,6 +58,8 @@ pub struct HostList {
     drag: Option<DragState>,
     menu: Option<OpenMenu>,
     scroll: ScrollHandle,
+    /// 每台主机开着几张远程卡片（工单 16）：窗口壳每次重画时告诉列表，行右侧显示绿色数字。
+    open_cards: HashMap<HostId, usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -118,7 +121,16 @@ impl HostList {
             drag: None,
             menu: None,
             scroll: ScrollHandle::new(),
+            open_cards: HashMap::new(),
             _subscriptions: subscriptions,
+        }
+    }
+
+    /// 窗口壳告诉列表每台主机开着几张远程卡片；变了才重画。
+    pub fn set_open_cards(&mut self, open_cards: HashMap<HostId, usize>, cx: &mut Context<Self>) {
+        if self.open_cards != open_cards {
+            self.open_cards = open_cards;
+            cx.notify();
         }
     }
 
@@ -242,7 +254,15 @@ impl HostList {
             |this, menu: &Entity<PopupMenu>, _: &DismissEvent, window, cx| {
                 if this.menu.as_ref().is_some_and(|open| &open.view == menu) {
                     this.menu = None;
-                    window.focus(&this.focus_handle, cx);
+                    // 菜单项把焦点交给了别处（分屏打开的新卡片、对话框）就不抢回来。
+                    let elsewhere = window.focused(cx).is_some_and(|focused| {
+                        focused != this.target
+                            && focused != this.focus_handle
+                            && !menu.focus_handle(cx).contains_focused(window, cx)
+                    });
+                    if !elsewhere {
+                        window.focus(&this.focus_handle, cx);
+                    }
                 }
                 cx.notify();
             },
@@ -383,6 +403,7 @@ impl HostList {
         let shadow = tokens.shadow;
         let mark = HostMark::of(host);
         let address = list_address(host);
+        let open_cards = self.open_cards.get(&id).copied().filter(|count| *count > 0);
         let tooltip = HostTooltip {
             endpoint: host.endpoint().into(),
             notes: host.notes.clone(),
@@ -516,6 +537,21 @@ impl HostList {
                             .child(address),
                     ),
             )
+            .children(open_cards.map(|count| {
+                // 原型 `.host .cnt`：绿色数字，底色是 14% 的绿。
+                div()
+                    .id(("host-open-cards", id.0 as usize))
+                    .test_support()
+                    .aria_label(count.to_string())
+                    .flex_none()
+                    .px(px(6.))
+                    .py(px(1.))
+                    .rounded_full()
+                    .text_size(px(11.))
+                    .text_color(tokens.busy)
+                    .bg(tokens.busy.opacity(0.14))
+                    .child(count.to_string())
+            }))
             .children(line.map(|before| {
                 div()
                     .id(("host-drop-line", id.0 as usize))

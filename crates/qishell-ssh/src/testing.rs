@@ -10,6 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -47,6 +48,7 @@ pub struct TestServer {
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
     keys: AuthorizedKeys,
+    single_channel: Arc<AtomicBool>,
     task: JoinHandle<()>,
 }
 
@@ -84,11 +86,13 @@ impl TestServer {
         });
         let replies = Replies::default();
         let keys = AuthorizedKeys::default();
+        let single_channel = Arc::new(AtomicBool::new(false));
         let mut server = Listener {
             directory,
             seen: seen.clone(),
             replies: replies.clone(),
             keys: keys.clone(),
+            single_channel: single_channel.clone(),
         };
         let task = tokio::spawn(async move {
             let _ = server.run_on_socket(config, &listener).await;
@@ -98,8 +102,15 @@ impl TestServer {
             seen,
             replies,
             keys,
+            single_channel,
             task,
         })
+    }
+
+    /// From now on every connection opens one session channel only and
+    /// refuses the next ones, as some bastion hosts do.
+    pub fn single_channel(&self) {
+        self.single_channel.store(true, Ordering::SeqCst);
     }
 
     pub fn seen(&self) -> Seen {
@@ -128,6 +139,7 @@ struct Listener {
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
     keys: AuthorizedKeys,
+    single_channel: Arc<AtomicBool>,
 }
 
 impl server::Server for Listener {
@@ -139,6 +151,8 @@ impl server::Server for Listener {
             seen: self.seen.clone(),
             replies: self.replies.clone(),
             keys: self.keys.clone(),
+            single_channel: self.single_channel.clone(),
+            sessions: 0,
             channels: HashMap::new(),
             shells: HashSet::new(),
         }
@@ -150,6 +164,9 @@ struct Handler {
     seen: Arc<Mutex<Seen>>,
     replies: Replies,
     keys: AuthorizedKeys,
+    single_channel: Arc<AtomicBool>,
+    /// The session channels this connection opened.
+    sessions: usize,
     channels: HashMap<ChannelId, russh::Channel<server::Msg>>,
     /// The channels running the shell: russh hands every channel's data to
     /// `data`, SFTP's too.
@@ -199,6 +216,13 @@ impl server::Handler for Handler {
         reply: server::ChannelOpenHandle,
         _: &mut server::Session,
     ) -> anyhow::Result<()> {
+        if self.sessions > 0 && self.single_channel.load(Ordering::SeqCst) {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        }
+        self.sessions += 1;
         self.channels.insert(channel.id(), channel);
         reply.accept().await;
         Ok(())

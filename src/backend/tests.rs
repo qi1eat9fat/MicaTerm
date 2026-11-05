@@ -326,6 +326,42 @@ fn a_second_terminal_of_a_connected_host_shares_its_connection_without_logging_i
     });
 }
 
+/// 只给一个通道的堡垒机：复用的连接开不出 shell 通道，自动改成新建一条连接；之后这台主机的终端直接新建。
+#[test]
+fn a_host_that_gives_one_channel_per_connection_gets_a_new_connection_per_terminal() {
+    let fixture = Fixture::start();
+    fixture.server.single_channel();
+    let remote = Arc::new(SshRemoteTerminals::with_connector(
+        fixture.connector(Arc::default()),
+    ));
+    let answers = Answerer::start(&remote, Some(TEST_PASSWORD));
+
+    let first = Terminal::open(&remote, 1, &fixture.target());
+    first.expect_started();
+    let second = Terminal::open(&remote, 2, &fixture.target());
+    second.expect_started();
+    second.echo("on its own connection\n");
+
+    assert_eq!(answers.auth_prompts(), 2, "回退时新登录了一次");
+    assert_eq!(remote.connection_count(), 2);
+
+    // 记下了「单通道」：第三张卡片不再先试着复用，直接新建（还是能用）。
+    let third = Terminal::open(&remote, 3, &fixture.target());
+    third.expect_started();
+    third.echo("third\n");
+    assert_eq!(answers.auth_prompts(), 3);
+    assert_eq!(remote.connection_count(), 3);
+
+    // 各连各的：关掉第一张，别的照常。
+    first.close();
+    second.echo("still mine\n");
+    second.close();
+    third.close();
+    wait_until("都关了，连接都断开", || {
+        remote.connection_count() == 0
+    });
+}
+
 #[test]
 fn terminals_that_open_while_the_host_is_connecting_wait_for_the_same_login() {
     let fixture = Fixture::start();

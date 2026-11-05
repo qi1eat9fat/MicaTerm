@@ -1,0 +1,16 @@
+_version: 2
+# 快速连接（工单 18）：「⌄」弹出的主机搜索列表
+quick_connect.search:
+  zh-CN: 搜索主机，回车连接
+quick_connect.recent:
+  zh-CN: 最近
+quick_connect.no_hosts:
+  zh-CN: 还没有主机
+quick_connect.no_match:
+  zh-CN: 没有匹配「%{query}」的主机
+quick_connect.keys.move:
+  zh-CN: ↑↓ 选择
+quick_connect.keys.connect:
+  zh-CN: 回车 连接（新标签）
+quick_connect.keys.close:
+  zh-CN: Esc 关闭
