@@ -641,3 +641,101 @@ fn a_locked_vault_keeps_a_credentials_password_out_of_the_form(cx: &mut TestAppC
         Some("old-secret")
     );
 }
+
+// ---- 删除 ----
+
+#[gpui_kit::test]
+fn deleting_a_key_in_use_names_its_hosts_and_leaves_them_without_a_password(
+    cx: &mut TestAppContext,
+) {
+    let secrets = Arc::new(InMemorySecretStore::default());
+    let (handle, workspace, _) = open_with(
+        cx,
+        WorkspaceServices {
+            secrets: secrets.clone(),
+            ..fake_services()
+        },
+    );
+    let deploy = credential(cx, &workspace, 1).unwrap();
+    secrets
+        .set(
+            &deploy.private_key_secret(),
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+        )
+        .unwrap();
+    secrets
+        .set(&deploy.passphrase_secret(), "correct horse")
+        .unwrap();
+    dispatch(cx, handle, ShowCredentials);
+
+    menu_labels(cx, handle, 1);
+    click_menu_item(cx, handle, 3);
+    assert_eq!(
+        label(cx, handle, "credential-delete-text").as_deref(),
+        Some(
+            "确定删除「部署密钥」吗？\n有 2 台主机在用它：\ndb-01\nstaging-api\n\
+             删除后，这些主机的认证改成「无密码」，用户名 deploy 保留。\n\
+             保险库里的私钥和口令一起删除。"
+        )
+    );
+    // 取消就什么都不动。
+    click(cx, handle, "credential-delete-cancel");
+    assert!(credential(cx, &workspace, 1).is_some());
+
+    dispatch(cx, handle, qishell::app::DeleteCredential(deploy.id));
+    click(cx, handle, "credential-delete-confirm");
+
+    assert!(!present(cx, handle, "credential-delete"));
+    assert!(credential(cx, &workspace, 1).is_none());
+    assert!(!present(cx, handle, row(1)));
+    for id in [3, 4] {
+        let host = saved_host(cx, &workspace, id).unwrap();
+        assert_eq!(host.credential, None);
+        assert_eq!(host.auth, AuthKind::NoPassword);
+        assert_eq!(host.user.as_ref(), "deploy");
+    }
+    assert_eq!(secret(&secrets, &deploy.private_key_secret()), None);
+    assert_eq!(secret(&secrets, &deploy.passphrase_secret()), None);
+}
+
+#[gpui_kit::test]
+fn deleting_a_password_credential_in_use_turns_its_hosts_back_to_a_password(
+    cx: &mut TestAppContext,
+) {
+    let (handle, workspace, _) = open(cx);
+    dispatch(
+        cx,
+        handle,
+        qishell::app::DeleteCredential(qishell_hosts::CredentialId(2)),
+    );
+    assert_eq!(
+        label(cx, handle, "credential-delete-text").as_deref(),
+        Some(
+            "确定删除「运维密码」吗？\n有 1 台主机在用它：\nweb-01\n\
+             删除后，这些主机的认证改成「密码」，用户名 root 保留。\n\
+             保险库里的密码一起删除。"
+        )
+    );
+    click(cx, handle, "credential-delete-confirm");
+
+    let web01 = saved_host(cx, &workspace, 1).unwrap();
+    assert_eq!(web01.credential, None);
+    assert_eq!(web01.auth, AuthKind::Password);
+    assert_eq!(web01.user.as_ref(), "root");
+}
+
+#[gpui_kit::test]
+fn deleting_an_unused_credential_just_asks(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open(cx);
+    dispatch(
+        cx,
+        handle,
+        qishell::app::DeleteCredential(qishell_hosts::CredentialId(4)),
+    );
+    assert_eq!(
+        label(cx, handle, "credential-delete-text").as_deref(),
+        Some("确定删除「旧 RSA 密钥」吗？\n保险库里的私钥和口令一起删除。")
+    );
+    click(cx, handle, "credential-delete-confirm");
+    assert!(credential(cx, &workspace, 4).is_none());
+}
