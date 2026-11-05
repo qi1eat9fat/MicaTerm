@@ -118,6 +118,10 @@ pub enum SecretError {
     Unavailable,
     /// 保险库锁着：调用方弹出解锁框，解锁后再写。
     Locked,
+    /// 还没建保险库：调用方先问要不要设主密码（`Vault::set_up`），再写。
+    NotSetUp,
+    /// 没设主密码的保险库是在另一台电脑上建的，这里没有它的数据密钥：用户确认后重置才能再存。
+    KeyLost,
     /// The store's own failure, as it put it.
     Store(String),
 }
@@ -125,10 +129,15 @@ pub enum SecretError {
 impl SecretError {
     /// A store call's failure.
     pub fn of(error: &anyhow::Error) -> Self {
+        use crate::vault::VaultError;
         if error.downcast_ref::<SecretsUnavailable>().is_some() {
             SecretError::Unavailable
         } else if error.downcast_ref::<SecretsLocked>().is_some() {
             SecretError::Locked
+        } else if error.downcast_ref::<VaultError>() == Some(&VaultError::NotSetUp) {
+            SecretError::NotSetUp
+        } else if error.downcast_ref::<VaultError>() == Some(&VaultError::KeyLost) {
+            SecretError::KeyLost
         } else {
             SecretError::Store(error.to_string())
         }
@@ -1556,5 +1565,15 @@ mod tests {
             SecretError::of(&anyhow::anyhow!("disk full")),
             SecretError::Store("disk full".into())
         );
+    }
+
+    /// 保险库的两种「写不进去」要认得出：还没建（先问要不要设主密码）、在这台电脑上打不开。
+    #[test]
+    fn a_vault_that_is_not_set_up_or_lost_says_so() {
+        use crate::vault::VaultError;
+        let not_set_up = anyhow::Error::from(VaultError::NotSetUp).context("saving");
+        assert_eq!(SecretError::of(&not_set_up), SecretError::NotSetUp);
+        let lost = anyhow::Error::from(VaultError::KeyLost).context("saving");
+        assert_eq!(SecretError::of(&lost), SecretError::KeyLost);
     }
 }
