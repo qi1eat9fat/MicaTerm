@@ -4,7 +4,7 @@
 
 //! QiShell 的主机核心：保存的主机（平铺，只有 SSH）、主机共用的凭据、所有主机共用的
 //! 命令片段；它们写穿到的 SQLite 数据库；以及秘密存储的接口 [`secrets::SecretStore`]
-//! （由保险库实现，测试用 [`secrets::InMemorySecretStore`]）。
+//! （由保险库 [`vault::Vault`] 实现，测试用 [`secrets::InMemorySecretStore`]）。
 //!
 //! [`HostData`] holds it all in memory, which is what counts, and writes
 //! each change through to the database. It says nothing in words and
@@ -29,6 +29,7 @@ mod private_key;
 mod search;
 pub mod secrets;
 mod snippet;
+pub mod vault;
 
 pub use credential::*;
 pub use data::{Change, Failure, HostData, HostEvent, SecretError, SecretJob, SecretOutcome};
@@ -45,5 +46,8 @@ pub use private_key::{
 };
 pub use secrets::{SecretRef, SecretStore, SharedSecretStore, StoreSource};
 pub use snippet::*;
+pub use vault::{
+    DataKey, DataKeyStore, KdfParams, SharedDataKeyStore, Vault, VaultError, VaultStatus,
+};
 // 主机栏和快速连接共用的主机搜索（工单 11）。
 pub use search::host_matches;

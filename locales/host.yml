@@ -38,6 +38,10 @@ host.store.secret.unavailable:
   zh-CN: 这台电脑上没有可用的保险库
 host.store.secret.locked:
   zh-CN: 保险库已锁定
+host.store.secret.not_set_up:
+  zh-CN: 还没有设置保险库
+host.store.secret.key_lost:
+  zh-CN: 这个保险库在另一台电脑上创建、没设主密码，这里打不开
 host.store.open_failed:
   zh-CN: 主机数据库打不开，这次的改动不会保存：%{error}
 host.store.newer_database:

@@ -21,6 +21,15 @@ russh = "0.63"
 # `SecretRef`、`ProxyKind` 和把主机拼成的 SSH 登录（`HostLogin`）都是它的类型，和上游一样。
 qishell-ssh = { path = "../qishell-ssh" }
 zeroize = "1"
+# 保险库（vault.json）的加密，写法借自 shellrs-sync 的 MIT 代码：Argon2id 派生包裹密钥，
+# XChaCha20-Poly1305 加密数据密钥和每条秘密。
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc", "zeroize"] }
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 主密码先规范成 NFC：不同系统、键盘打出的同一个密码是同样的字节。
+unicode-normalization = "0.1"
 
 [features]
 # 给依赖本 crate 的测试用的夹具（`HostDatabase::in_memory`）：应用把它放进 dev-dependencies。

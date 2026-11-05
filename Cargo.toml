@@ -38,6 +38,8 @@ zeroize = "1"
 qishell-terminal = { path = "crates/qishell-terminal" }
 # 主机、凭据、命令片段的模型和写穿的数据库（拷自 shell-rs，见 crates/qishell-hosts）。
 qishell-hosts = { path = "crates/qishell-hosts" }
+# 系统钥匙串（Windows 凭据管理器、macOS 钥匙串、Secret Service）：只存保险库的数据密钥。
+keyring = "4"
 
 # Windows 可执行文件里的图标与版本信息（build.rs）。
 [target.'cfg(windows)'.build-dependencies]
@@ -74,3 +76,6 @@ ttf-parser = { opt-level = 3 }
 resvg = { opt-level = 3 }
 usvg = { opt-level = 3 }
 zed-font-kit = { opt-level = 3 }
+# 保险库的 Argon2id：不优化时 64 MiB、3 遍要好几秒（照 shell-rs）。
+argon2 = { opt-level = 3 }
+blake2 = { opt-level = 3 }

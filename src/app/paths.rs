@@ -76,6 +76,16 @@ pub fn database_path() -> io::Result<PathBuf> {
     Ok(dir.join(DATABASE_FILE))
 }
 
+/// 保险库文件名。
+pub const VAULT_FILE: &str = "vault.json";
+
+/// 保险库 `vault.json` 的路径。数据目录还不存在时先建好；建不了就返回错误，由调用方报告。
+pub fn vault_path() -> io::Result<PathBuf> {
+    let dir = data_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(VAULT_FILE))
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;

@@ -36,6 +36,8 @@ impl ErrorMessage for SecretError {
         match self {
             SecretError::Unavailable => t!("host.store.secret.unavailable"),
             SecretError::Locked => t!("host.store.secret.locked"),
+            SecretError::NotSetUp => t!("host.store.secret.not_set_up"),
+            SecretError::KeyLost => t!("host.store.secret.key_lost"),
             SecretError::Store(error) => error.clone().into(),
         }
     }
