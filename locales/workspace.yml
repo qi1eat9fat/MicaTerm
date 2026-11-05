@@ -45,6 +45,11 @@ workspace.start.new_host_hint:
   zh-CN: 保存一台 SSH 主机
 workspace.start.quick_connect:
   zh-CN: 快速连接
+# 开始卡片的最近连接（工单 18）
+workspace.start.recent:
+  zh-CN: 最近连接
+workspace.start.recent_empty:
+  zh-CN: 连过的主机会列在这里，双击或回车再连
 
 # 终端的通知和响铃（工单 03）：标题以卡片名称开头
 workspace.notice.titled:

@@ -8,6 +8,7 @@
 //! - `notices`：终端的通知和响铃送到哪里（系统通知或窗口里的提示）；
 //! - `remote/`：远程卡片（工单 12）：按主机建卡片、开标签、原地重连，连接表事件的分发和问答队列，
 //!   连接前取秘密的钩子（13 接保险库解锁）。
+//! - `quick_connect`：快速连接弹层的开关、位置和焦点（工单 18）。
 //!
 //! 功能模块不依赖窗口壳；窗口壳持有它们、转发 action。
 
@@ -15,6 +16,7 @@ mod handlers;
 mod host_sidebar;
 mod icon_button;
 mod notices;
+mod quick_connect;
 mod remote;
 mod right_sidebar;
 mod start_card;
