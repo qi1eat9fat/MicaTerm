@@ -9,8 +9,8 @@ use gpui_kit::Action;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::prelude::FluentBuilder as _;
 
-use super::{CardSide, NewEntryKind, SftpTabId};
-use crate::app::{SftpAction, SftpTabCommand, ToggleHiddenFiles};
+use super::{CardSide, NewEntryKind};
+use crate::app::{SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
 use crate::i18n::t;
 
 /// 「编辑」：工单 23 接上了 `SftpTabCommand::Edit`。
@@ -20,13 +20,12 @@ pub const SHOW_PREVIEW: bool = false;
 /// 「上传…」「下载…」：工单 22 接上 `SftpTabCommand::Transfer`、`ChooseFiles` 后改成 `true`。
 pub const SHOW_TRANSFER: bool = false;
 /// 「删除」「重命名…」「属性…」「新建文件夹…」「新建文件…」：工单 21 接上后改成 `true`。
-pub const SHOW_FILE_OPERATIONS: bool = false;
+pub const SHOW_FILE_OPERATIONS: bool = true;
 
 /// 菜单要知道的卡片的事，开菜单时读。
 #[derive(Clone, Debug)]
 pub(super) struct CardMenuState {
     pub remote: bool,
-    pub tab: SftpTabId,
     /// 选中的项目（文件命令的对象）。
     pub targets: Vec<String>,
     /// 只选中一个文件时它的完整路径：编辑器可以试着打开它。
@@ -38,11 +37,15 @@ pub(super) struct CardMenuState {
     pub can_transfer: bool,
     /// 这一侧在显示隐藏文件。
     pub show_hidden: bool,
+    /// 这一侧能改权限（Windows 本地不能）。
+    pub has_properties: bool,
 }
 
 impl CardMenuState {
+    /// 菜单项派发和按键同一个 action，菜单才写得出按键（原型的「删除 Delete」）；
+    /// 菜单只在前面的 SFTP 标签上开，所以发给在前的标签就对了。
     fn action(&self, command: SftpTabCommand) -> Box<dyn Action> {
-        Box::new(SftpAction::new(self.tab, command))
+        Box::new(SftpShortcut(command))
     }
 }
 
@@ -103,11 +106,13 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
                 state.action(SftpTabCommand::Rename { remote }),
                 none || state.targets.len() != 1,
             )
-            .menu_with_disabled(
-                t!("sftp_tab.menu.properties"),
-                state.action(SftpTabCommand::Properties { remote }),
-                none,
-            )
+            .when(state.has_properties, |menu| {
+                menu.menu_with_disabled(
+                    t!("sftp_tab.menu.properties"),
+                    state.action(SftpTabCommand::Properties { remote }),
+                    none,
+                )
+            })
     })
 }
 
