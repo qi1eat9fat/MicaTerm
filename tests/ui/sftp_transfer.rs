@@ -215,6 +215,23 @@ fn f5_in_the_local_list_confirms_and_uploads_into_the_remote_folder(cx: &mut Tes
     assert_eq!(requests[0].destination().as_str(), "/home/tester");
 }
 
+/// 七列按原型的百分比摆：进度是最后一列，占一行的 15%，不出界。
+#[gpui_kit::test]
+fn the_queue_columns_fit_the_row(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    start_upload(cx, &fixture, "文件 甲.txt");
+    wait_head(cx, &fixture, "正在扫描");
+    let (row, status) = in_frame(cx, fixture.handle, |window, _| {
+        (
+            window.find(("queue-entry", 1usize)).bounds(),
+            window.find("transfer-status").bounds(),
+        )
+    });
+    assert!(status.right() <= row.right() + px(1.), "{status:?} {row:?}");
+    let share = status.size.width / row.size.width;
+    assert!((share - 0.15).abs() < 0.01, "{share}");
+}
+
 #[gpui_kit::test]
 fn f5_in_the_remote_list_confirms_and_downloads_into_a_chosen_folder(cx: &mut TestAppContext) {
     let fixture = open(cx);
@@ -853,4 +870,45 @@ fn closing_with_a_transfer_running_asks_and_closes_its_dialogs(cx: &mut TestAppC
     click(cx, &fixture, "close-tabs-confirm");
     assert!(cx.update(|cx| fixture.workspace.read(cx).active_sftp_tab().is_none()));
     assert!(!visible(cx, &fixture, "transfer-question"));
+}
+
+/// 退出时停着的一批也算没完成（工单 23 的框读的是同一个数）。
+#[gpui_kit::test]
+fn quitting_with_a_stopped_batch_asks(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    start_upload(cx, &fixture, "文件 甲.txt");
+    wait_head(cx, &fixture, "正在扫描");
+    click(cx, &fixture, "cancel-transfer");
+    wait_head(cx, &fixture, "已停止");
+
+    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    let text = label(cx, &fixture, "quit-confirm-text").unwrap();
+    assert!(text.contains("还有 1 批传输没完成"), "{text}");
+}
+
+/// 编辑器打不开的文件，框里的「下载…」走同一个确认框，目标是本地一侧的当前目录。
+#[gpui_kit::test]
+fn a_file_the_editor_refuses_can_be_downloaded(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    fixture.sftp.files.lock().unwrap().insert(
+        "/home/tester/blob.bin".into(),
+        (vec![0xff, 0xfe, 0x00], 100),
+    );
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::Edit {
+            remote: true,
+            path: Some("/home/tester/blob.bin".into()),
+        },
+    );
+    wait_visible(cx, &fixture, "editor-refused");
+    click(cx, &fixture, "editor-refused-download");
+    wait_visible(cx, &fixture, "download-confirm");
+    assert_eq!(
+        value(cx, &fixture, "download-target").as_deref(),
+        Some(LOCAL_DOWNLOADS)
+    );
+    let summary = label(cx, &fixture, "transfer-summary").unwrap();
+    assert!(summary.ends_with("下载 1 个文件"), "{summary}");
 }

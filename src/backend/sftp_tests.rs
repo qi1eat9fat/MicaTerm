@@ -547,6 +547,7 @@ fn a_forgotten_batch_keeps_its_part_and_is_not_resumed() {
     }
     assert!(part.exists(), "the part stays for next time");
     assert!(!directory.path().join("up.bin").exists());
+}
 
 /// 编辑器的冲突框要的数据：别人改过文件时什么都不写，回答里带着文件现在的样子；
 /// 覆盖就不核对。BOM 和 CRLF 在真协议上也原样来回。

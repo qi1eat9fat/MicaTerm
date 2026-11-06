@@ -328,7 +328,7 @@ impl SftpTab {
             _ => tokens.accent,
         };
         let (faint, hover, selection) = (tokens.faint, tokens.hover, tokens.selection_solid);
-        let bar_tokens = tokens.clone();
+        let bar_tokens = *tokens;
         div()
             .id(("queue-entry", id))
             .test_support()
