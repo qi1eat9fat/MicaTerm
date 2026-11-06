@@ -1,0 +1,40 @@
+_version: 2
+
+# 预览（工单 24）：对话框头部的工具、图片的说明，和预览不了的文件。
+
+preview.info:
+  zh-CN: "%{place} · %{size}"
+preview.info_image:
+  zh-CN: "%{place} · %{size} · %{width}×%{height}"
+preview.place_remote:
+  zh-CN: "%{host}:%{directory}"
+preview.place_local:
+  zh-CN: "%{local} · %{directory}"
+preview.close:
+  zh-CN: 关闭
+preview.edit:
+  zh-CN: 编辑
+preview.download:
+  zh-CN: 下载…
+preview.fit:
+  zh-CN: 适合窗口
+preview.actual_size:
+  zh-CN: 原图
+preview.zoom_in:
+  zh-CN: 放大
+preview.zoom_out:
+  zh-CN: 缩小
+preview.undecodable:
+  zh-CN: 无法显示这张图片
+preview.decoding:
+  zh-CN: 正在显示图片…
+preview.refused.title:
+  zh-CN: 无法预览
+preview.refused.too_large_image:
+  zh-CN: 「%{name}」有 %{size}，图片只预览 %{limit} 以内的。
+preview.refused.too_large_markdown:
+  zh-CN: 「%{name}」有 %{size}，Markdown 只预览 %{limit} 以内的。
+preview.refused.not_text:
+  zh-CN: 「%{name}」不是 UTF-8 文本文件，Markdown 只预览 UTF-8 文本。
+preview.refused.not_file:
+  zh-CN: 「%{name}」不是普通文件，无法预览。

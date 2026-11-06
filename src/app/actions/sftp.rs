@@ -39,7 +39,7 @@ pub enum SftpTabCommand {
     Refresh {
         remote: bool,
     },
-    /// 回车、双击：进光标所在的目录，文件就编辑或预览。
+    /// 回车：进光标所在的目录，文件就编辑。
     Open {
         remote: bool,
     },
@@ -137,6 +137,10 @@ pub enum SftpTabCommand {
     ClearFinishedTransfers,
     /// 重新连接：一条新的 SFTP 连接。批次在跑或停着时不行。
     Reconnect,
+    /// 双击光标所在的项目：和回车一样，只是图片预览（工单 24）。
+    DoubleClick {
+        remote: bool,
+    },
 }
 
 /// 发给 `tab` 的命令。

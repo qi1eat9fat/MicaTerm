@@ -9,14 +9,14 @@ use gpui_kit::Action;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::prelude::FluentBuilder as _;
 
-use super::{CardSide, NewEntryKind};
+use super::{CardSide, NewEntryKind, PreviewKind};
 use crate::app::{SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
 use crate::i18n::t;
 
 /// 「编辑」：工单 23 接上了 `SftpTabCommand::Edit`。
 pub const SHOW_EDIT: bool = true;
-/// 「预览」：工单 24 接上 `SftpTabCommand::Preview` 后改成 `true`。
-pub const SHOW_PREVIEW: bool = false;
+/// 「预览」：工单 24 接上了 `SftpTabCommand::Preview`。
+pub const SHOW_PREVIEW: bool = true;
 /// 「上传…」「下载…」（工单 22）。
 pub const SHOW_TRANSFER: bool = true;
 /// 「删除」「重命名…」「属性…」「新建文件夹…」「新建文件…」：工单 21 接上后改成 `true`。
@@ -53,8 +53,14 @@ impl CardMenuState {
 pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
     let remote = state.remote;
     let none = state.targets.is_empty() || !state.can_modify;
-    let edit = state.edits_file.is_some() && SHOW_EDIT;
-    let preview = state.edits_file.clone().filter(|_| SHOW_PREVIEW);
+    let kind = state.edits_file.as_deref().and_then(PreviewKind::of);
+    // 图片只有「预览」：当文本打开只会被拒绝。Markdown 和 SVG 两项都有。
+    let edit =
+        state.edits_file.is_some() && SHOW_EDIT && !kind.is_some_and(PreviewKind::preview_only);
+    let preview = state
+        .edits_file
+        .clone()
+        .filter(|_| SHOW_PREVIEW && kind.is_some());
     let transfer = if remote {
         t!("sftp_tab.menu.download")
     } else {
