@@ -96,10 +96,19 @@ pub fn terminal_font(settings: &AppSettings, installed: impl Fn(&str) -> bool) -
 
 #[cfg(test)]
 mod tests {
-    use gpui_kit::px;
+    use gpui_kit::{TestAppContext, px};
 
-    use super::terminal_font;
+    use super::{apply_sftp, terminal_font};
     use crate::settings::AppSettings;
+
+    /// 并发数是进程全局量。库的单元测试里只有这里改它；UI 测试并行时互相影响，不在那边断言。
+    #[gpui_kit::test]
+    fn the_parallel_transfer_count_reaches_the_engine(cx: &mut TestAppContext) {
+        let mut settings = AppSettings::default();
+        settings.sftp.parallel = 7;
+        cx.update(|cx| apply_sftp(&settings, cx));
+        assert_eq!(qishell_ssh::sftp::parallel_transfers(), 7);
+    }
 
     #[test]
     fn the_default_terminal_font_is_jetbrains_mono_at_11_6() {

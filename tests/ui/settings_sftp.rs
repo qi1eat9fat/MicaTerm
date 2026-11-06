@@ -154,7 +154,12 @@ fn the_sftp_category_sits_between_terminal_and_security_with_its_defaults(cx: &m
             directory.label(),
             Some(format!("本地默认打开目录，默认 {LOCAL_DOWNLOADS}").as_str())
         );
-        assert!(window.find("sftp-local-directory-choose").visible());
+        // 输入框和「选择…」同一行，都在对话框里。
+        let choose = window.find("sftp-local-directory-choose").bounds();
+        let field = directory.bounds();
+        assert!(field.size.width > px(150.), "{field:?}");
+        assert!(field.right() <= choose.left());
+        assert!(choose.right() <= window.find("settings").bounds().right());
         assert_eq!(
             window.find(("sftp-icon-style", 0_usize)).label(),
             Some("彩色")
