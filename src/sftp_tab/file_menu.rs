@@ -13,8 +13,8 @@ use super::{CardSide, NewEntryKind};
 use crate::app::{SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
 use crate::i18n::t;
 
-/// 「编辑」：工单 23 接上 `SftpTabCommand::Edit` 后改成 `true`。
-pub const SHOW_EDIT: bool = false;
+/// 「编辑」：工单 23 接上了 `SftpTabCommand::Edit`。
+pub const SHOW_EDIT: bool = true;
 /// 「预览」：工单 24 接上 `SftpTabCommand::Preview` 后改成 `true`。
 pub const SHOW_PREVIEW: bool = false;
 /// 「上传…」「下载…」（工单 22）。
@@ -53,20 +53,18 @@ impl CardMenuState {
 pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
     let remote = state.remote;
     let none = state.targets.is_empty() || !state.can_modify;
-    let edit = state.edits_file.clone().filter(|_| SHOW_EDIT);
+    let edit = state.edits_file.is_some() && SHOW_EDIT;
     let preview = state.edits_file.clone().filter(|_| SHOW_PREVIEW);
     let transfer = if remote {
         t!("sftp_tab.menu.download")
     } else {
         t!("sftp_tab.menu.upload")
     };
-    menu.when_some(edit, |menu, path| {
+    // 和 F4 同一个 action，菜单才写得出按键：不带路径，对着只选中的那个文件。
+    menu.when(edit, |menu| {
         menu.menu(
             t!("sftp_tab.menu.edit"),
-            state.action(SftpTabCommand::Edit {
-                remote,
-                path: Some(path),
-            }),
+            state.action(SftpTabCommand::Edit { remote, path: None }),
         )
     })
     .when_some(preview, |menu, path| {

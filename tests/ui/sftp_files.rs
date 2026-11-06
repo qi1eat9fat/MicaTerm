@@ -60,9 +60,16 @@ fn wait_until(
     false
 }
 
+/// SFTP 标签，不一定在前：新建的文件会在编辑器标签里打开（工单 23）。
 fn tab(cx: &mut TestAppContext, fixture: &Fixture) -> Entity<SftpTab> {
-    cx.update(|cx| fixture.workspace.read(cx).active_sftp_tab())
-        .expect("an SFTP tab in front")
+    cx.update(|cx| {
+        let workspace = fixture.workspace.read(cx);
+        workspace
+            .tab_ids()
+            .into_iter()
+            .find_map(|tab| workspace.sftp_tab(tab))
+    })
+    .expect("an SFTP tab")
 }
 
 fn command(cx: &mut TestAppContext, fixture: &Fixture, command: SftpTabCommand) {

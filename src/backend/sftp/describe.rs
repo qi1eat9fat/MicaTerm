@@ -79,7 +79,7 @@ pub fn describe_read_failure(failure: &ReadFailure) -> String {
 /// Why a save did not happen or did not finish, in a sentence.
 pub fn describe_save_failure(failure: &SaveFailure) -> String {
     match failure {
-        SaveFailure::Changed => t!("sftp.edit.changed").into(),
+        SaveFailure::Changed { .. } => t!("sftp.edit.changed").into(),
         SaveFailure::Interrupted(message) | SaveFailure::Failed(message) => message.clone(),
     }
 }
@@ -408,7 +408,7 @@ mod tests {
             "文件不存在"
         );
         assert_eq!(
-            describe_save_failure(&SaveFailure::Changed),
+            describe_save_failure(&SaveFailure::Changed { now: None }),
             "文件在打开后已被修改"
         );
         assert_eq!(

@@ -14,12 +14,14 @@
 //! - `quick_connect`：快速连接弹层的开关（18）；
 //! - `vault`：保险库的锁定、解锁、主密码、重置（13）；
 //! - `credentials`：凭据面板、凭据对话框、删除凭据（14）；
-//! - `sftp`：打开 SFTP 标签的三个入口、发给 SFTP 标签的命令（20）。
+//! - `sftp`：打开 SFTP 标签的三个入口、发给 SFTP 标签的命令（20）；
+//! - `editor`：编辑器标签的打开、保存、重新加载（23）。
 //!
 //! 处理器里改了状态要 `cx.notify()`；在焦点监听器里改状态要 `defer_in`。
 
 mod cards;
 mod credentials;
+mod editor;
 mod hosts;
 mod quick_connect;
 mod remote;
@@ -33,6 +35,7 @@ mod window;
 
 pub(super) use cards::bind_cards_actions;
 pub(super) use credentials::bind_credentials_actions;
+pub(super) use editor::bind_editor_actions;
 pub(super) use hosts::bind_hosts_actions;
 pub(super) use quick_connect::bind_quick_connect_actions;
 pub(super) use remote::bind_remote_actions;

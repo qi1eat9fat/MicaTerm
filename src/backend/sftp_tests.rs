@@ -17,7 +17,7 @@ use qishell_ssh::{LoginMethod, SshConnector};
 use tempfile::TempDir;
 
 use super::sftp::{
-    DownloadRequest, RemotePath, SftpCommand, SftpEvent, SftpTransportProvider as _,
+    DownloadRequest, RemotePath, SaveFailure, SftpCommand, SftpEvent, SftpTransportProvider as _,
     SshSftpTransportProvider, TransferAnswer, TransferChoice, TransferPhase, TransferQuestion,
     TransferQuestionKind, UploadRequest,
 };
@@ -547,4 +547,63 @@ fn a_forgotten_batch_keeps_its_part_and_is_not_resumed() {
     }
     assert!(part.exists(), "the part stays for next time");
     assert!(!directory.path().join("up.bin").exists());
+
+/// 编辑器的冲突框要的数据：别人改过文件时什么都不写，回答里带着文件现在的样子；
+/// 覆盖就不核对。BOM 和 CRLF 在真协议上也原样来回。
+#[test]
+fn a_save_over_someone_elses_change_is_refused_with_what_the_file_is_now() {
+    let Some((served, state)) = directories() else {
+        return;
+    };
+    let on_disk = served.path().join("app.conf");
+    std::fs::write(&on_disk, b"\xEF\xBB\xBFmine\r\n").unwrap();
+    let session = Session::open(served.path(), state.path());
+    let path = session.home.join("app.conf").unwrap();
+
+    session.send(SftpCommand::ReadFile {
+        request_id: 1,
+        path: path.clone(),
+    });
+    let file = loop {
+        if let SftpEvent::FileRead { result, .. } = session.next() {
+            break result.expect("the file reads");
+        }
+    };
+    assert_eq!(file.text(), "mine\n");
+
+    std::fs::write(&on_disk, "someone else's, longer\n").unwrap();
+    let bytes = file.format().encode("mine 2\n");
+    session.send(SftpCommand::WriteFile {
+        request_id: 2,
+        path: path.clone(),
+        bytes: bytes.clone(),
+        expected: Some(file.stamp()),
+    });
+    loop {
+        if let SftpEvent::FileWritten { result, .. } = session.next() {
+            match result {
+                Err(SaveFailure::Changed { now: Some(now) }) => assert_eq!(now.size(), 23),
+                other => panic!("{other:?}"),
+            }
+            break;
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(&on_disk).unwrap(),
+        "someone else's, longer\n"
+    );
+
+    session.send(SftpCommand::WriteFile {
+        request_id: 3,
+        path,
+        bytes,
+        expected: None,
+    });
+    loop {
+        if let SftpEvent::FileWritten { result, .. } = session.next() {
+            result.expect("overwriting does not check");
+            break;
+        }
+    }
+    assert_eq!(std::fs::read(&on_disk).unwrap(), b"\xEF\xBB\xBFmine 2\r\n");
 }

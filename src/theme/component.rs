@@ -34,6 +34,19 @@ pub fn component_theme(mode: ThemeMode, cx: &App) -> Rc<ThemeConfig> {
     config.is_default = false;
     // 界面字号由设置定（`settings::apply`），主题不带字号，免得换主题时把它改回去。
     config.font_size = None;
+    // 代码（编辑器）的字体：随包的 JetBrains Mono，12.5（原型 `.ed.mono`）。
+    config.mono_font_family = Some(SharedString::new_static("JetBrains Mono"));
+    config.mono_font_size = Some(12.5);
+    // 编辑器（原型 `.ed`）：语法颜色用默认主题的，正文、行号栏和当前行换成卡片的颜色。
+    // 不换的话行号栏是默认主题的底色，深色下和卡片差一大截。
+    let mut highlight = config.highlight.take().unwrap_or_default();
+    highlight.editor_background = Some(tokens.card_focused);
+    highlight.editor_gutter_background = Some(tokens.card_focused);
+    highlight.editor_foreground = Some(tokens.terminal);
+    highlight.editor_active_line = Some(tokens.hover);
+    highlight.editor_line_number = Some(tokens.faint);
+    highlight.editor_active_line_number = Some(tokens.text);
+    config.highlight = Some(highlight);
     let hex = |color: Hsla| Some(hex(color));
     let colors = &mut config.colors;
     // 对话框、浮层：`--panel`、`--panel-b`。

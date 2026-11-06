@@ -7,6 +7,7 @@
 
 mod cards;
 mod credentials;
+mod editor;
 mod hosts;
 mod remote;
 mod settings;
@@ -18,6 +19,7 @@ mod window;
 
 pub use cards::*;
 pub use credentials::*;
+pub use editor::*;
 pub use hosts::*;
 pub use remote::*;
 pub use settings::*;
