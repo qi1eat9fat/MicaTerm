@@ -311,7 +311,7 @@ impl FileListing {
                 let _ = card.update(cx, |card, cx| card.click_row(&name, mode, cx));
                 if mode == ClickMode::Replace && event.click_count() == 2 {
                     dispatch.dispatch_sftp_action(
-                        &SftpAction::new(tab, SftpTabCommand::Open { remote }),
+                        &SftpAction::new(tab, SftpTabCommand::DoubleClick { remote }),
                         window,
                         cx,
                     );

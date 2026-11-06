@@ -342,6 +342,7 @@ impl SftpTab {
         }
         self.close_transfer_dialogs(window, cx);
         self.close_operation_dialog(window, cx);
+        self.close_preview(window, cx);
         self.send(SftpCommand::Disconnect);
         self.send(SftpCommand::Shutdown);
     }
@@ -593,14 +594,20 @@ impl SftpTab {
             C::RemoveQueueEntry => self.remove_queue_entry(window, cx),
             C::ClearFinishedTransfers => self.transfers.queue.clear_finished(),
             C::Reconnect => self.reconnect(cx),
+            C::DoubleClick { remote } => self.open_double_clicked(*remote, window, cx),
         }
         self.sync_available(cx);
         cx.emit(SftpTabEvent::Changed);
         cx.notify();
     }
 
-    /// 回车、双击：进光标所在的目录；文件交给编辑器或者预览（工单 23、24 在 `file_open.rs` 里决定）。
-    fn open_cursor_entry(&mut self, remote: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// 回车：进光标所在的目录；文件交给编辑器。
+    pub(super) fn open_cursor_entry(
+        &mut self,
+        remote: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let card = self.card(remote).clone();
         let Some(entry) = card.read(cx).cursor_entry(cx) else {
             return;
@@ -844,6 +851,7 @@ fn needs_connection(command: &SftpTabCommand) -> bool {
         | C::Up { remote }
         | C::Refresh { remote }
         | C::Open { remote }
+        | C::DoubleClick { remote }
         | C::Edit { remote, .. }
         | C::Preview { remote, .. }
         | C::Delete { remote }

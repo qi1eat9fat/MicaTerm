@@ -9,7 +9,8 @@
 //! 后面的工单只填自己的文件，不用改 `tab.rs` 的大 match：
 //! - 工单 21（文件操作）：`operations.rs`（`OperationState`），打开 `file_menu::SHOW_FILE_OPERATIONS`；
 //! - 工单 22（传输）：`transfers.rs`（`TransferState`），打开 `file_menu::SHOW_TRANSFER`；
-//! - 工单 23（编辑器）、24（预览）：`file_open.rs`（`FileOpenState`），打开 `file_menu::SHOW_EDIT`、`SHOW_PREVIEW`。
+//! - 工单 23（编辑器）、24（预览）：`file_open.rs`（`FileOpenState`），打开 `file_menu::SHOW_EDIT`、`SHOW_PREVIEW`；
+//!   预览的框在 `preview`、`image_preview`。
 
 mod file_card;
 mod file_dialogs;
@@ -18,10 +19,12 @@ mod file_icons_table;
 mod file_listing;
 mod file_menu;
 mod file_open;
+mod image_preview;
 mod marquee;
 mod model;
 mod operations;
 mod path_bar;
+mod preview;
 mod properties_dialog;
 mod queue_card;
 mod selection;
@@ -36,6 +39,7 @@ pub use file_icons_table::FILE_ICON_ASSETS;
 pub use file_listing::FileListing;
 pub use model::*;
 pub use operations::FileOperation;
+pub use preview::{IMAGE_LIMIT, PreviewKind};
 pub use selection::{ClickMode, CursorMotion, Selection};
 pub use tab::{SftpTab, SftpTabEvent, SftpTabOptions};
 pub use transfer_queue::{

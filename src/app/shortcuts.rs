@@ -5,7 +5,8 @@
 //! - `TAB_KEYS`：标签（工单 04）；
 //! - `CARD_KEYS`：卡片（工单 05）；
 //! - `TERMINAL_KEYS`：终端（工单 03，键上下文是终端 crate 的 `Terminal` / `TerminalFind`）；
-//! - `LOCAL_FILE_KEYS`、`REMOTE_FILE_KEYS`：SFTP 标签的文件列表（工单 20，一次写全）。
+//! - `LOCAL_FILE_KEYS`、`REMOTE_FILE_KEYS`：SFTP 标签的文件列表（工单 20，一次写全）；
+//! - `PREVIEW_KEYS`：预览里的图片（工单 24）。
 //!
 //! 规则：Windows 和 Linux 用 Ctrl+Shift 系，macOS 用 ⌘；全局绑定里不能出现只按 Ctrl 加字母的组合
 //! （留给终端里的 shell）。绑定一律经 `KeyBinding::load` 加平台的 keyboard mapper 建，
@@ -449,6 +450,38 @@ pub const EDITOR_KEYS: &[Shortcut] = &[Shortcut {
     context: Some(EDITOR_CONTEXT),
 }];
 
+/// 预览里图片的键上下文。
+pub const IMAGE_PREVIEW_CONTEXT: &str = "ImagePreview";
+
+/// 预览里图片的按键（工单 24，照 shell-rs）：和终端字号一样的键，焦点在预览里时缩放图片；
+/// 0 是原图，9 是适合窗口（同 macOS 的「预览」）。
+pub const PREVIEW_KEYS: &[Shortcut] = &[
+    Shortcut {
+        keys: "ctrl-=",
+        mac: "cmd-=",
+        action: || Box::new(ZoomPreviewIn),
+        context: Some(IMAGE_PREVIEW_CONTEXT),
+    },
+    Shortcut {
+        keys: "ctrl--",
+        mac: "cmd--",
+        action: || Box::new(ZoomPreviewOut),
+        context: Some(IMAGE_PREVIEW_CONTEXT),
+    },
+    Shortcut {
+        keys: "ctrl-0",
+        mac: "cmd-0",
+        action: || Box::new(ActualSizePreview),
+        context: Some(IMAGE_PREVIEW_CONTEXT),
+    },
+    Shortcut {
+        keys: "ctrl-9",
+        mac: "cmd-9",
+        action: || Box::new(FitPreview),
+        context: Some(IMAGE_PREVIEW_CONTEXT),
+    },
+];
+
 /// 全部快捷键。全局的在前、带上下文的在后：同一个键在上下文里后写的胜出。
 pub fn all() -> impl Iterator<Item = &'static Shortcut> {
     let tables = [
@@ -459,6 +492,7 @@ pub fn all() -> impl Iterator<Item = &'static Shortcut> {
         LOCAL_FILE_KEYS,
         REMOTE_FILE_KEYS,
         EDITOR_KEYS,
+        PREVIEW_KEYS,
     ];
     let global = tables
         .into_iter()
