@@ -14,93 +14,93 @@ use crate::sftp_tab::{
     CardSide, CursorMotion, FileOperation, NewEntryKind, SftpTabId, TransferJob,
 };
 
-/// SFTP 标签的命令。`remote` 说是哪一侧的卡片。
+/// SFTP 标签的命令。`side` 说是哪一侧的卡片。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SftpTabCommand {
     /// 去 `path`（路径栏的某一级、双击目录）。
     Navigate {
-        remote: bool,
+        side: CardSide,
         path: String,
     },
     /// 路径栏变成输入框（点空白处、Ctrl+O）。
     EditPath {
-        remote: bool,
+        side: CardSide,
     },
     /// 路径栏输入框里按了回车：去输入的目录，去不了就描红、留在输入框。
     SubmitPath {
-        remote: bool,
+        side: CardSide,
         text: String,
     },
     /// 回上级目录（Backspace、`..`）。
     Up {
-        remote: bool,
+        side: CardSide,
     },
     /// 重读当前目录（Ctrl+R）。
     Refresh {
-        remote: bool,
+        side: CardSide,
     },
     /// 回车：进光标所在的目录，文件就编辑。
     Open {
-        remote: bool,
+        side: CardSide,
     },
     /// 用编辑器打开 `path`，没写就是光标所在的文件（F4，工单 23）。
     Edit {
-        remote: bool,
+        side: CardSide,
         path: Option<String>,
     },
     /// 预览 `path`，没写就是光标所在的文件（工单 24）。
     Preview {
-        remote: bool,
+        side: CardSide,
         path: Option<String>,
     },
     /// 复制当前目录的路径（空白处的右键菜单）。
     CopyPath {
-        remote: bool,
+        side: CardSide,
     },
     /// 复制选中项的路径，一行一个（行上的右键菜单）。
     CopySelectedPaths {
-        remote: bool,
+        side: CardSide,
     },
     /// 焦点给这一侧的文件列表（Tab）。
     FocusCard {
-        remote: bool,
+        side: CardSide,
     },
     MoveCursor {
-        remote: bool,
+        side: CardSide,
         motion: CursorMotion,
         extend: bool,
     },
     ToggleSelection {
-        remote: bool,
+        side: CardSide,
     },
     SelectAll {
-        remote: bool,
+        side: CardSide,
     },
     /// 删除这一侧选中的，先确认（Delete，工单 21）。
     Delete {
-        remote: bool,
+        side: CardSide,
     },
     /// 重命名（F2，工单 21）。
     Rename {
-        remote: bool,
+        side: CardSide,
     },
     /// 新建文件夹或文件（工单 21）。
     New {
-        remote: bool,
+        side: CardSide,
         kind: NewEntryKind,
     },
     /// 属性（F9，工单 21）。
     Properties {
-        remote: bool,
+        side: CardSide,
     },
     /// 做确认过的操作（工单 21）。
     Operate {
-        remote: bool,
+        side: CardSide,
         operation: FileOperation,
     },
     /// F5：上传本地选中的，或者下载远程选中的（工单 22）。
     Transfer {
-        remote: bool,
+        side: CardSide,
     },
     /// 用原生选择框挑要上传的（工单 22）。
     ChooseFiles,
@@ -139,7 +139,7 @@ pub enum SftpTabCommand {
     Reconnect,
     /// 双击光标所在的项目：和回车一样，只是图片预览（工单 24）。
     DoubleClick {
-        remote: bool,
+        side: CardSide,
     },
 }
 

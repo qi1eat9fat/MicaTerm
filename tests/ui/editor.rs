@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use qishell::app::{OpenHostSftp, Quit, SftpAction, SftpTabCommand};
 use qishell::editor::EditorTab;
-use qishell::sftp_tab::{SftpTab, TransferJob};
+use qishell::sftp_tab::{CardSide, SftpTab, TransferJob};
 
 use crate::support::*;
 
@@ -101,7 +101,7 @@ fn open_file(cx: &mut TestAppContext, fixture: &Fixture, remote: bool, path: &st
         cx,
         fixture,
         SftpTabCommand::Edit {
-            remote,
+            side: CardSide::from_remote(remote),
             path: Some(path.to_string()),
         },
     );
@@ -229,7 +229,7 @@ fn opening_a_remote_file_shows_it_and_opening_it_again_switches_to_it(cx: &mut T
         SftpAction::new(
             id,
             SftpTabCommand::Edit {
-                remote: true,
+                side: CardSide::Remote,
                 path: Some(REMOTE_FILE.to_string()),
             },
         ),
@@ -288,7 +288,7 @@ fn the_one_selected_file_opens_even_with_the_cursor_elsewhere(cx: &mut TestAppCo
         cx,
         &fixture,
         SftpTabCommand::MoveCursor {
-            remote: true,
+            side: CardSide::Remote,
             motion: qishell::sftp_tab::CursorMotion::Up,
             extend: true,
         },
@@ -296,14 +296,16 @@ fn the_one_selected_file_opens_even_with_the_cursor_elsewhere(cx: &mut TestAppCo
     sftp_command(
         cx,
         &fixture,
-        SftpTabCommand::ToggleSelection { remote: true },
+        SftpTabCommand::ToggleSelection {
+            side: CardSide::Remote,
+        },
     );
 
     dispatch(
         cx,
         fixture.handle,
         qishell::app::SftpShortcut(SftpTabCommand::Edit {
-            remote: true,
+            side: CardSide::Remote,
             path: None,
         }),
     );
@@ -322,7 +324,7 @@ fn a_new_file_opens_in_the_editor(cx: &mut TestAppContext) {
         cx,
         &fixture,
         SftpTabCommand::New {
-            remote: true,
+            side: CardSide::Remote,
             kind: qishell::sftp_tab::NewEntryKind::File,
         },
     );
@@ -715,7 +717,7 @@ fn a_binary_file_is_explained_not_opened_and_offers_the_download(cx: &mut TestAp
         cx,
         &fixture,
         SftpTabCommand::Edit {
-            remote: true,
+            side: CardSide::Remote,
             path: Some(REMOTE_FILE.to_string()),
         },
     );
@@ -738,7 +740,7 @@ fn a_file_over_the_limit_says_how_large_it_is(cx: &mut TestAppContext) {
         cx,
         &fixture,
         SftpTabCommand::Edit {
-            remote: true,
+            side: CardSide::Remote,
             path: Some(REMOTE_FILE.to_string()),
         },
     );
@@ -764,7 +766,7 @@ fn a_local_file_that_cannot_open_has_no_download(cx: &mut TestAppContext) {
         cx,
         &fixture,
         SftpTabCommand::Edit {
-            remote: false,
+            side: CardSide::Local,
             path: Some(LOCAL_FILE.to_string()),
         },
     );
@@ -859,7 +861,7 @@ fn saving_rereads_the_folder_the_remote_card_is_showing(cx: &mut TestAppContext)
 fn a_read_cut_off_by_a_lost_connection_can_be_tried_again(cx: &mut TestAppContext) {
     let fixture = open_server(cx, &[("/slow/a.txt", b"x\n")]);
     let edit = SftpTabCommand::Edit {
-        remote: true,
+        side: CardSide::Remote,
         path: Some("/slow/a.txt".to_string()),
     };
     sftp_command(cx, &fixture, edit.clone());

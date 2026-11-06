@@ -6,7 +6,7 @@
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 
-use super::{FileOperation, NewEntryKind, SftpTab};
+use super::{CardSide, FileOperation, NewEntryKind, SftpTab};
 use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
@@ -144,12 +144,12 @@ impl SftpTab {
     /// 问要不要删除这一侧选中的（Delete）。本地的进回收站，远程的就没了，框里写清楚。
     pub(super) fn confirm_delete(
         &mut self,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let names = self.card(remote).read(cx).selected_names(cx);
-        if names.is_empty() || !self.can_start_operation(remote, window, cx) {
+        let names = self.card(side).read(cx).selected_names(cx);
+        if names.is_empty() || !self.can_start_operation(side, window, cx) {
             return;
         }
         let question = if let [name] = names.as_slice() {
@@ -157,16 +157,16 @@ impl SftpTab {
         } else {
             t!("sftp_files.delete.question_many", count = names.len())
         };
-        let consequence = if remote {
+        let consequence = if side.is_remote() {
             t!("sftp_files.delete.remote")
         } else if cfg!(windows) {
             t!("sftp_files.delete.recycle_bin")
         } else {
             t!("sftp_files.delete.trash")
         };
-        let list = self.card(remote).read(cx).focus_handle(cx);
+        let list = self.card(side).read(cx).focus_handle(cx);
         let list_after_cancel = list.clone();
-        let send = self.operation_sender(remote);
+        let send = self.operation_sender(side);
         let layer = DialogLayer::new();
         open_confirm_dialog(
             Confirm {
@@ -192,38 +192,38 @@ impl SftpTab {
     /// 重命名（F2）：只选中一项时。
     pub(super) fn open_rename(
         &mut self,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let [name] = self.card(remote).read(cx).selected_names(cx).as_slice() {
+        if let [name] = self.card(side).read(cx).selected_names(cx).as_slice() {
             let intent = NameIntent::Rename(name.clone());
-            self.open_name_dialog(remote, intent, window, cx);
+            self.open_name_dialog(side, intent, window, cx);
         }
     }
 
     /// 新建文件夹或文件。
     pub(super) fn open_new(
         &mut self,
-        remote: bool,
+        side: CardSide,
         kind: NewEntryKind,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_name_dialog(remote, NameIntent::New(kind), window, cx);
+        self.open_name_dialog(side, NameIntent::New(kind), window, cx);
     }
 
     fn open_name_dialog(
         &mut self,
-        remote: bool,
+        side: CardSide,
         intent: NameIntent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.can_start_operation(remote, window, cx) {
+        if !self.can_start_operation(side, window, cx) {
             return;
         }
-        let card = self.card(remote).read(cx);
+        let card = self.card(side).read(cx);
         let existing: Vec<String> = card
             .listed_entries(cx)
             .iter()
@@ -258,7 +258,7 @@ impl SftpTab {
             NameForm {
                 intent,
                 existing,
-                windows_names: !remote && cfg!(windows),
+                windows_names: !side.is_remote() && cfg!(windows),
                 input: input.clone(),
                 label,
                 error: None,
@@ -266,7 +266,7 @@ impl SftpTab {
             }
         });
         let tokens = Tokens::current(cx);
-        let send = self.operation_sender(remote);
+        let send = self.operation_sender(side);
         let layer = DialogLayer::new();
         layer.open_dismissable(
             move |dialog, _, _| {

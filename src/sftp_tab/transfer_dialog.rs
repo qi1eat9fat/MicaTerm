@@ -12,7 +12,7 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{FileIcon, FileIconKind, QueueEntry, format_changed, format_size};
+use super::{CardSide, FileIcon, FileIconKind, QueueEntry, format_changed, format_size};
 use crate::backend::sftp::{
     FileFacts, TransferChoice, TransferDirection, TransferQuestion, TransferQuestionKind,
     describe_reason_link,
@@ -35,8 +35,8 @@ struct SourceItem {
 }
 
 impl SourceItem {
-    fn new(path: String, remote: bool, is_dir: bool) -> Self {
-        let (folder, name) = if remote {
+    fn new(path: String, side: CardSide, is_dir: bool) -> Self {
+        let (folder, name) = if side.is_remote() {
             match path.rsplit_once('/') {
                 Some(("", name)) => ("/".to_string(), name.to_string()),
                 Some((folder, name)) => (folder.to_string(), name.to_string()),
@@ -73,10 +73,10 @@ pub(super) struct TransferSources {
 
 impl TransferSources {
     /// 每项是 `(路径, 是不是远程路径, 是不是文件夹)`。
-    pub(super) fn new(items: Vec<(String, bool, bool)>) -> Self {
+    pub(super) fn new(items: Vec<(String, CardSide, bool)>) -> Self {
         let items: Vec<_> = items
             .into_iter()
-            .map(|(path, remote, is_dir)| SourceItem::new(path, remote, is_dir))
+            .map(|(path, side, is_dir)| SourceItem::new(path, side, is_dir))
             .collect();
         let folder = items
             .first()
@@ -541,14 +541,16 @@ pub(super) fn choice_of(button: Option<&str>) -> TransferChoice {
 
 #[cfg(test)]
 mod tests {
-    use super::{TransferSources, choice_of};
+    use super::{CardSide, TransferSources, choice_of};
     use crate::backend::sftp::TransferChoice;
 
     fn sources(items: &[(&str, bool, bool)]) -> TransferSources {
         TransferSources::new(
             items
                 .iter()
-                .map(|&(path, remote, is_dir)| (path.to_string(), remote, is_dir))
+                .map(|&(path, remote, is_dir)| {
+                    (path.to_string(), CardSide::from_remote(remote), is_dir)
+                })
                 .collect(),
         )
     }

@@ -358,37 +358,37 @@ pub const REMOTE_FILE_LIST_CONTEXT: &str = "RemoteFileList";
 /// 方向键和 Tab 绑在 `> DataTable` 这一层：DataTable 和 Root 自己也绑了它们。
 // 参考 since2006/shell-rs @ b2a307a: src/app/shortcuts.rs 的 `explorer_shortcuts`
 macro_rules! file_list_keys {
-    ($remote:literal, $side:expr, $list:literal, $table:literal) => {
+    ($side:expr, $list:literal, $table:literal) => {
         &[
-            file_list_key!("enter", "enter", $list, Open { remote: $remote }),
-            file_list_key!("f4", "f4", $list, Edit { remote: $remote, path: None }),
-            file_list_key!("f5", "f5", $list, Transfer { remote: $remote }),
-            file_list_key!("f2", "f2", $list, Rename { remote: $remote }),
-            file_list_key!("f7", "f7", $list, New { remote: $remote, kind: NewEntryKind::Folder }),
+            file_list_key!("enter", "enter", $list, Open { side: $side }),
+            file_list_key!("f4", "f4", $list, Edit { side: $side, path: None }),
+            file_list_key!("f5", "f5", $list, Transfer { side: $side }),
+            file_list_key!("f2", "f2", $list, Rename { side: $side }),
+            file_list_key!("f7", "f7", $list, New { side: $side, kind: NewEntryKind::Folder }),
             // 后写的优先：菜单上要写 Delete（原型），所以它排在 F8 后面。
-            file_list_key!("f8", "f8", $list, Delete { remote: $remote }),
-            file_list_key!("delete", "cmd-backspace", $list, Delete { remote: $remote }),
-            file_list_key!("f9", "cmd-i", $list, Properties { remote: $remote }),
-            file_list_key!("backspace", "backspace", $list, Up { remote: $remote }),
-            file_list_key!("ctrl-r", "cmd-r", $list, Refresh { remote: $remote }),
-            file_list_key!("ctrl-o", "cmd-o", $list, EditPath { remote: $remote }),
-            file_list_key!("ctrl-a", "cmd-a", $list, SelectAll { remote: $remote }),
-            file_list_key!("space", "space", $list, ToggleSelection { remote: $remote }),
-            file_list_key!("insert", "insert", $list, ToggleSelection { remote: $remote }),
-            file_list_key!("tab", "tab", $table, FocusCard { remote: !$remote }),
-            file_list_key!("shift-tab", "shift-tab", $table, FocusCard { remote: !$remote }),
-            file_list_key!("up", "up", $table, MoveCursor { remote: $remote, motion: CursorMotion::Up, extend: false }),
-            file_list_key!("down", "down", $table, MoveCursor { remote: $remote, motion: CursorMotion::Down, extend: false }),
-            file_list_key!("pageup", "pageup", $table, MoveCursor { remote: $remote, motion: CursorMotion::PageUp, extend: false }),
-            file_list_key!("pagedown", "pagedown", $table, MoveCursor { remote: $remote, motion: CursorMotion::PageDown, extend: false }),
-            file_list_key!("home", "home", $table, MoveCursor { remote: $remote, motion: CursorMotion::Home, extend: false }),
-            file_list_key!("end", "end", $table, MoveCursor { remote: $remote, motion: CursorMotion::End, extend: false }),
-            file_list_key!("shift-up", "shift-up", $table, MoveCursor { remote: $remote, motion: CursorMotion::Up, extend: true }),
-            file_list_key!("shift-down", "shift-down", $table, MoveCursor { remote: $remote, motion: CursorMotion::Down, extend: true }),
-            file_list_key!("shift-pageup", "shift-pageup", $table, MoveCursor { remote: $remote, motion: CursorMotion::PageUp, extend: true }),
-            file_list_key!("shift-pagedown", "shift-pagedown", $table, MoveCursor { remote: $remote, motion: CursorMotion::PageDown, extend: true }),
-            file_list_key!("shift-home", "shift-home", $table, MoveCursor { remote: $remote, motion: CursorMotion::Home, extend: true }),
-            file_list_key!("shift-end", "shift-end", $table, MoveCursor { remote: $remote, motion: CursorMotion::End, extend: true }),
+            file_list_key!("f8", "f8", $list, Delete { side: $side }),
+            file_list_key!("delete", "cmd-backspace", $list, Delete { side: $side }),
+            file_list_key!("f9", "cmd-i", $list, Properties { side: $side }),
+            file_list_key!("backspace", "backspace", $list, Up { side: $side }),
+            file_list_key!("ctrl-r", "cmd-r", $list, Refresh { side: $side }),
+            file_list_key!("ctrl-o", "cmd-o", $list, EditPath { side: $side }),
+            file_list_key!("ctrl-a", "cmd-a", $list, SelectAll { side: $side }),
+            file_list_key!("space", "space", $list, ToggleSelection { side: $side }),
+            file_list_key!("insert", "insert", $list, ToggleSelection { side: $side }),
+            file_list_key!("tab", "tab", $table, FocusCard { side: $side.other() }),
+            file_list_key!("shift-tab", "shift-tab", $table, FocusCard { side: $side.other() }),
+            file_list_key!("up", "up", $table, MoveCursor { side: $side, motion: CursorMotion::Up, extend: false }),
+            file_list_key!("down", "down", $table, MoveCursor { side: $side, motion: CursorMotion::Down, extend: false }),
+            file_list_key!("pageup", "pageup", $table, MoveCursor { side: $side, motion: CursorMotion::PageUp, extend: false }),
+            file_list_key!("pagedown", "pagedown", $table, MoveCursor { side: $side, motion: CursorMotion::PageDown, extend: false }),
+            file_list_key!("home", "home", $table, MoveCursor { side: $side, motion: CursorMotion::Home, extend: false }),
+            file_list_key!("end", "end", $table, MoveCursor { side: $side, motion: CursorMotion::End, extend: false }),
+            file_list_key!("shift-up", "shift-up", $table, MoveCursor { side: $side, motion: CursorMotion::Up, extend: true }),
+            file_list_key!("shift-down", "shift-down", $table, MoveCursor { side: $side, motion: CursorMotion::Down, extend: true }),
+            file_list_key!("shift-pageup", "shift-pageup", $table, MoveCursor { side: $side, motion: CursorMotion::PageUp, extend: true }),
+            file_list_key!("shift-pagedown", "shift-pagedown", $table, MoveCursor { side: $side, motion: CursorMotion::PageDown, extend: true }),
+            file_list_key!("shift-home", "shift-home", $table, MoveCursor { side: $side, motion: CursorMotion::Home, extend: true }),
+            file_list_key!("shift-end", "shift-end", $table, MoveCursor { side: $side, motion: CursorMotion::End, extend: true }),
             // 显示隐藏文件：WinSCP 的 Ctrl+Alt+H，访达的 ⌘⇧.（macOS 报成 ⌘>）。
             Shortcut {
                 keys: "ctrl-alt-h",
@@ -426,14 +426,12 @@ macro_rules! file_list_key {
 
 /// 本地文件列表的按键。
 pub const LOCAL_FILE_KEYS: &[Shortcut] = file_list_keys!(
-    false,
     CardSide::Local,
     "LocalFileList",
     "LocalFileList > DataTable"
 );
 /// 远程文件列表的按键。
 pub const REMOTE_FILE_KEYS: &[Shortcut] = file_list_keys!(
-    true,
     CardSide::Remote,
     "RemoteFileList",
     "RemoteFileList > DataTable"

@@ -11,7 +11,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::{FileCard, path_ancestors};
+use super::{CardSide, FileCard, path_ancestors};
 use crate::app::SftpTabCommand;
 use crate::i18n::t;
 use crate::theme::Tokens;
@@ -26,9 +26,9 @@ pub struct PathPart {
     pub path: String,
 }
 
-pub fn path_parts(path: &str, remote: bool) -> Vec<PathPart> {
-    let separator = separator(remote);
-    path_ancestors(path, remote)
+pub fn path_parts(path: &str, side: CardSide) -> Vec<PathPart> {
+    let separator = separator(side);
+    path_ancestors(path, side)
         .into_iter()
         .enumerate()
         .map(|(ix, (title, path))| PathPart {
@@ -43,8 +43,8 @@ pub fn path_parts(path: &str, remote: bool) -> Vec<PathPart> {
         .collect()
 }
 
-fn separator(remote: bool) -> char {
-    if remote {
+fn separator(side: CardSide) -> char {
+    if side.is_remote() {
         '/'
     } else {
         std::path::MAIN_SEPARATOR
@@ -124,8 +124,8 @@ impl FileCard {
             self.close_path_edit(window, cx);
             return;
         }
-        let remote = self.is_remote();
-        self.dispatch_command(SftpTabCommand::SubmitPath { remote, text }, window, cx);
+        let side = self.side;
+        self.dispatch_command(SftpTabCommand::SubmitPath { side, text }, window, cx);
     }
 
     /// 关掉输入框，焦点回到文件列表（Esc，或者已经切过去了）。
@@ -234,7 +234,7 @@ impl FileCard {
         tokens: &Tokens,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let remote = self.is_remote();
+        let side = self.side;
         let enabled = self.takes_commands();
         let parts = self.shown_parts(window);
         let hot = self
@@ -269,7 +269,7 @@ impl FileCard {
             // 点路径栏的空白处变成输入框（点某一级时那一级把冒泡拦下了）。
             .when(enabled, |this| {
                 this.on_click(cx.listener(move |this, _, window, cx| {
-                    this.dispatch_command(SftpTabCommand::EditPath { remote }, window, cx);
+                    this.dispatch_command(SftpTabCommand::EditPath { side }, window, cx);
                 }))
             })
             .children(parts.into_iter().enumerate().map(|(ix, part)| {
@@ -302,7 +302,7 @@ impl FileCard {
                                 cx.stop_propagation();
                                 this.dispatch_command(
                                     SftpTabCommand::Navigate {
-                                        remote,
+                                        side,
                                         path: target.clone(),
                                     },
                                     window,
@@ -331,8 +331,8 @@ impl FileCard {
 
     /// 要显示的段：上一帧放不下时中间折叠成 `…`。
     fn shown_parts(&self, window: &mut Window) -> Vec<PathPart> {
-        let remote = self.is_remote();
-        let parts = path_parts(&self.path, remote);
+        let side = self.side;
+        let parts = path_parts(&self.path, side);
         let Some(available) = self.label_width.get() else {
             return parts;
         };
@@ -357,7 +357,7 @@ impl FileCard {
             f32::from(line.width) + 4.
         };
         let widths: Vec<f32> = parts.iter().map(|part| measure(&part.label)).collect();
-        let ellipsis = format!("\u{2026}{}", separator(remote));
+        let ellipsis = format!("\u{2026}{}", separator(side));
         // 留一点余量，量的和排的舍入可能不一样；路径栏左右还有 12 的内边距。
         let folded = folded_parts(&widths, measure(&ellipsis), f32::from(available) - 13.);
         if folded.is_empty() {
@@ -376,11 +376,11 @@ impl FileCard {
 
 #[cfg(test)]
 mod tests {
-    use super::{PathPart, folded_parts, path_parts};
+    use super::{CardSide, PathPart, folded_parts, path_parts};
 
     #[test]
     fn parts_end_in_the_separator_and_open_their_directory() {
-        let parts = path_parts("/home/tester", true);
+        let parts = path_parts("/home/tester", CardSide::Remote);
         let labels: Vec<_> = parts.iter().map(|part| part.label.as_str()).collect();
         assert_eq!(labels, ["/", "home/", "tester/"]);
         assert_eq!(
@@ -390,8 +390,8 @@ mod tests {
                 path: "/home".into()
             }
         );
-        assert_eq!(path_parts("/", true).len(), 1);
-        assert!(path_parts("", true).is_empty());
+        assert_eq!(path_parts("/", CardSide::Remote).len(), 1);
+        assert!(path_parts("", CardSide::Remote).is_empty());
     }
 
     #[test]

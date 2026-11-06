@@ -55,6 +55,14 @@ impl CardSide {
         self == Self::Remote
     }
 
+    /// 另一侧。
+    pub fn other(self) -> Self {
+        match self {
+            Self::Local => Self::Remote,
+            Self::Remote => Self::Local,
+        }
+    }
+
     /// 卡片的元素 id。一次只画一个 SFTP 标签，不用带标签的 id。
     pub(super) fn card_id(self) -> &'static str {
         match self {
@@ -356,7 +364,7 @@ impl FileCard {
     }
 
     pub fn child_path_of(&self, name: &str) -> String {
-        child_path(&self.path, name, self.is_remote())
+        child_path(&self.path, name, self.side)
     }
 
     pub fn parent_path(&self) -> String {
@@ -373,7 +381,7 @@ impl FileCard {
     }
 
     pub fn expanded_path(&self, path: &str) -> String {
-        super::expand_path(path, &self.path, &self.home, self.is_remote())
+        super::expand_path(path, &self.path, &self.home, self.side)
     }
 
     /// 连上时知道了主目录。还没有目录时就停在那里。
@@ -744,7 +752,7 @@ impl FileCard {
         let targets = self.selected_names(cx);
         let entries = self.selected_entries(cx);
         CardMenuState {
-            remote: self.is_remote(),
+            side: self.side,
             edits_file: match entries.as_slice() {
                 [entry] if !entry.is_dir() && !entry.is_parent() => {
                     Some(self.child_path_of(&entry.name))

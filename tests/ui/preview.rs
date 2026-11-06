@@ -8,7 +8,7 @@ use gpui_kit::{
     TouchPhase, point,
 };
 use qishell::app::{OpenHostSftp, SftpAction, SftpTabCommand};
-use qishell::sftp_tab::{IMAGE_LIMIT, SftpTab};
+use qishell::sftp_tab::{CardSide, IMAGE_LIMIT, SftpTab};
 
 use crate::support::*;
 
@@ -77,7 +77,7 @@ fn open_pictures(cx: &mut TestAppContext, files: &[(&str, &[u8])]) -> Fixture {
         cx,
         &fixture,
         SftpTabCommand::Navigate {
-            remote: true,
+            side: CardSide::Remote,
             path: "/pictures".into(),
         },
     );
@@ -381,7 +381,7 @@ fn every_image_format_is_shown(cx: &mut TestAppContext) {
             cx,
             &fixture,
             SftpTabCommand::Preview {
-                remote: true,
+                side: CardSide::Remote,
                 path: Some(path.to_string()),
             },
         );
@@ -446,7 +446,7 @@ fn preview_of(cx: &mut TestAppContext, fixture: &Fixture, remote: bool, path: &s
         cx,
         fixture,
         SftpTabCommand::Preview {
-            remote,
+            side: CardSide::from_remote(remote),
             path: Some(path.to_string()),
         },
     );
@@ -506,7 +506,7 @@ fn preview_without_a_path_opens_the_selected_file(cx: &mut TestAppContext) {
         cx,
         fixture.handle,
         qishell::app::SftpShortcut(SftpTabCommand::Preview {
-            remote: true,
+            side: CardSide::Remote,
             path: None,
         }),
     );
@@ -705,7 +705,7 @@ fn a_confirmed_download_goes_into_the_queue_of_this_tab(cx: &mut TestAppContext)
         cx,
         &fixture,
         SftpTabCommand::Navigate {
-            remote: false,
+            side: CardSide::Local,
             path: local_folder().into(),
         },
     );

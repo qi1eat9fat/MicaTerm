@@ -14,7 +14,7 @@ use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::*;
 
 use super::preview::{IMAGE_LIMIT, Preview, PreviewContent, PreviewKind, open_preview_dialog};
-use super::{ConnectionState, SftpTab, SftpTabEvent, format_size};
+use super::{CardSide, ConnectionState, SftpTab, SftpTabEvent, format_size};
 use crate::app::{SftpAction, SftpDispatch as _, SftpTabCommand};
 use crate::backend::sftp::{
     EDIT_LIMIT, FileBytes, FileStamp, LocalDirectoryProvider, ReadFailure, RemotePath, SaveFailure,
@@ -53,20 +53,20 @@ impl SftpTab {
     /// 所以先问窗口壳：它再调 `read_for_editor`。
     pub(super) fn open_for_editing(
         &mut self,
-        remote: bool,
+        side: CardSide,
         path: Option<String>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(location) = self.edit_target(remote, path.as_deref(), cx) {
+        if let Some(location) = self.edit_target(side, path.as_deref(), cx) {
             cx.emit(SftpTabEvent::EditFile(location));
         }
     }
 
     /// `path` 说的文件；没写就是这一侧只选中的那一个（右键菜单对着的就是它），否则是光标所在的文件。
     /// 目录或者什么都没有是 `None`。
-    fn edit_target(&self, remote: bool, path: Option<&str>, cx: &App) -> Option<EditorLocation> {
-        let card = self.card(remote).read(cx);
+    fn edit_target(&self, side: CardSide, path: Option<&str>, cx: &App) -> Option<EditorLocation> {
+        let card = self.card(side).read(cx);
         let path = match path {
             Some(path) => path.to_string(),
             None => {
@@ -81,7 +81,7 @@ impl SftpTab {
                 card.child_path_of(&entry.name)
             }
         };
-        Some(if remote {
+        Some(if side.is_remote() {
             EditorLocation::Remote(RemotePath::new(path).ok()?)
         } else {
             EditorLocation::Local(path.into())
@@ -132,16 +132,16 @@ impl SftpTab {
         ) + 'static,
     ) {
         self.file_open.opening.insert(location.clone());
-        let remote = location.is_remote();
+        let side = CardSide::from_remote(location.is_remote());
         let name = location.name();
-        self.card(remote)
+        self.card(side)
             .clone()
             .update(cx, |card, cx| card.begin_opening(name, cx));
         cx.spawn_in(window, async move |this, cx| {
             let result = read.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.file_open.opening.remove(&location);
-                this.card(remote)
+                this.card(side)
                     .clone()
                     .update(cx, |card, cx| card.finish_opening(cx));
                 done(this, location, result, window, cx);
@@ -261,12 +261,12 @@ impl SftpTab {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let remote = location.is_remote();
-        if remote && self.state != ConnectionState::Connected {
+        let side = CardSide::from_remote(location.is_remote());
+        if side.is_remote() && self.state != ConnectionState::Connected {
             return;
         }
-        if self.card(remote).read(cx).path() == location.directory() {
-            self.reload(remote, window, cx);
+        if self.card(side).read(cx).path() == location.directory() {
+            self.reload(side, window, cx);
         }
     }
 
@@ -286,11 +286,11 @@ impl SftpTab {
     /// 双击：图片预览，别的和回车一样（目录进去，文件编辑）。
     pub(super) fn open_double_clicked(
         &mut self,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let card = self.card(remote).read(cx);
+        let card = self.card(side).read(cx);
         let picture = card
             .cursor_entry(cx)
             .filter(|entry| {
@@ -300,8 +300,8 @@ impl SftpTab {
             })
             .map(|entry| card.child_path_of(&entry.name));
         match picture {
-            Some(path) => self.open_for_preview(remote, Some(path), window, cx),
-            None => self.open_cursor_entry(remote, window, cx),
+            Some(path) => self.open_for_preview(side, Some(path), window, cx),
+            None => self.open_cursor_entry(side, window, cx),
         }
     }
 
@@ -309,12 +309,12 @@ impl SftpTab {
     /// 编辑器里没保存的修改不出现。预览不了的文件什么都不做（菜单上本来就没有这一项）。
     pub(super) fn open_for_preview(
         &mut self,
-        remote: bool,
+        side: CardSide,
         path: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(location) = self.edit_target(remote, path.as_deref(), cx) else {
+        let Some(location) = self.edit_target(side, path.as_deref(), cx) else {
             return;
         };
         let Some(kind) = PreviewKind::of(&location.name()) else {
@@ -399,7 +399,7 @@ impl SftpTab {
             SftpAction::new(
                 tab,
                 SftpTabCommand::Edit {
-                    remote,
+                    side: CardSide::from_remote(remote),
                     path: Some(location.path()),
                 },
             )

@@ -84,7 +84,7 @@ fn wait_for_path(cx: &mut TestAppContext, fixture: &Fixture, remote: bool, path:
     let done = wait_until(cx, fixture.handle, |cx| {
         let tab = tab(cx, fixture);
         cx.update(|cx| {
-            let card = tab.read(cx).card(remote).read(cx);
+            let card = tab.read(cx).card(CardSide::from_remote(remote)).read(cx);
             card.path() == path && !card.is_loading()
         })
     });
@@ -96,7 +96,7 @@ fn names(cx: &mut TestAppContext, fixture: &Fixture, remote: bool) -> Vec<String
     let tab = tab(cx, fixture);
     cx.update(|cx| {
         tab.read(cx)
-            .card(remote)
+            .card(CardSide::from_remote(remote))
             .read(cx)
             .entries(cx)
             .iter()
@@ -107,7 +107,12 @@ fn names(cx: &mut TestAppContext, fixture: &Fixture, remote: bool) -> Vec<String
 
 fn selected(cx: &mut TestAppContext, fixture: &Fixture, remote: bool) -> Vec<String> {
     let tab = tab(cx, fixture);
-    cx.update(|cx| tab.read(cx).card(remote).read(cx).selected_names(cx))
+    cx.update(|cx| {
+        tab.read(cx)
+            .card(CardSide::from_remote(remote))
+            .read(cx)
+            .selected_names(cx)
+    })
 }
 
 fn card_id(remote: bool) -> &'static str {
@@ -116,7 +121,13 @@ fn card_id(remote: bool) -> &'static str {
 
 /// 焦点放进这一侧的列表，只选中 `name`。
 fn select(cx: &mut TestAppContext, fixture: &Fixture, remote: bool, name: &str) {
-    command(cx, fixture, SftpTabCommand::FocusCard { remote });
+    command(
+        cx,
+        fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::from_remote(remote),
+        },
+    );
     let cell = format!("name-cell:{name}");
     in_frame(cx, fixture.handle, move |window, cx| {
         window.within(card_id(remote)).click(cell, cx)
@@ -179,7 +190,7 @@ fn wait_not_busy(cx: &mut TestAppContext, fixture: &Fixture, remote: bool) {
     let tab = tab(cx, fixture);
     let done = wait_until(cx, fixture.handle, |cx| {
         cx.update(|cx| {
-            let card = tab.read(cx).card(remote).read(cx);
+            let card = tab.read(cx).card(CardSide::from_remote(remote)).read(cx);
             !card.is_busy() && !card.is_loading()
         })
     });
@@ -211,7 +222,7 @@ fn a_new_folder_asks_for_a_name_and_is_created_in_this_directory(cx: &mut TestAp
         cx,
         &fixture,
         SftpTabCommand::New {
-            remote: true,
+            side: CardSide::Remote,
             kind: NewEntryKind::Folder,
         },
     );
@@ -241,7 +252,13 @@ fn a_new_folder_asks_for_a_name_and_is_created_in_this_directory(cx: &mut TestAp
 #[gpui_kit::test]
 fn f7_also_opens_it_and_the_local_side_creates_on_its_own_disk(cx: &mut TestAppContext) {
     let fixture = open(cx);
-    command(cx, &fixture, SftpTabCommand::FocusCard { remote: false });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::Local,
+        },
+    );
 
     press(cx, &fixture, "f7");
     type_text(cx, &fixture, "本地目录");
@@ -260,7 +277,7 @@ fn a_new_file_is_selected_once_it_shows_and_enter_commits(cx: &mut TestAppContex
         cx,
         &fixture,
         SftpTabCommand::Navigate {
-            remote: true,
+            side: CardSide::Remote,
             path: "/pictures".into(),
         },
     );
@@ -270,7 +287,7 @@ fn a_new_file_is_selected_once_it_shows_and_enter_commits(cx: &mut TestAppContex
         cx,
         &fixture,
         SftpTabCommand::New {
-            remote: true,
+            side: CardSide::Remote,
             kind: NewEntryKind::File,
         },
     );
@@ -300,7 +317,7 @@ fn a_bad_name_is_said_under_the_field_and_the_dialog_stays(cx: &mut TestAppConte
         cx,
         &fixture,
         SftpTabCommand::New {
-            remote: true,
+            side: CardSide::Remote,
             kind: NewEntryKind::Folder,
         },
     );
@@ -358,8 +375,20 @@ fn f2_renames_the_selected_file_and_the_list_keeps_the_keyboard(cx: &mut TestApp
 #[gpui_kit::test]
 fn f2_with_several_selected_does_nothing_and_the_same_name_is_refused(cx: &mut TestAppContext) {
     let fixture = open(cx);
-    command(cx, &fixture, SftpTabCommand::SelectAll { remote: true });
-    command(cx, &fixture, SftpTabCommand::Rename { remote: true });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::SelectAll {
+            side: CardSide::Remote,
+        },
+    );
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::Rename {
+            side: CardSide::Remote,
+        },
+    );
     assert!(!visible(cx, &fixture, "entry-name"));
 
     select(cx, &fixture, true, "文件 甲.txt");
@@ -422,7 +451,13 @@ fn delete_asks_first_and_cancel_keeps_the_file(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn delete_takes_every_selected_item_but_never_the_parent_row(cx: &mut TestAppContext) {
     let fixture = open(cx);
-    command(cx, &fixture, SftpTabCommand::FocusCard { remote: true });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::Remote,
+        },
+    );
     // 只点了 `..`：没有选中项，不问。
     in_frame(cx, fixture.handle, |window, cx| {
         window.within("remote-card").click("name-cell:..", cx)
@@ -473,7 +508,13 @@ fn ctrl_r_reads_the_directory_of_this_side_again(cx: &mut TestAppContext) {
         fixture.local.listed.lock().unwrap().len(),
     );
 
-    command(cx, &fixture, SftpTabCommand::FocusCard { remote: true });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::Remote,
+        },
+    );
     press(cx, &fixture, "ctrl-r");
     let reread = wait_until(cx, fixture.handle, |_| {
         fixture.sftp.listed.lock().unwrap().len() == remote_before + 1
@@ -481,7 +522,13 @@ fn ctrl_r_reads_the_directory_of_this_side_again(cx: &mut TestAppContext) {
     assert!(reread);
     assert_eq!(fixture.local.listed.lock().unwrap().len(), local_before);
 
-    command(cx, &fixture, SftpTabCommand::FocusCard { remote: false });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::Local,
+        },
+    );
     press(cx, &fixture, "ctrl-r");
     let reread = wait_until(cx, fixture.handle, |_| {
         fixture.local.listed.lock().unwrap().len() == local_before + 1
@@ -540,7 +587,13 @@ fn while_an_operation_runs_the_side_takes_no_other_and_a_lost_connection_ends_th
     assert!(free, "断开以后还在等");
 
     // 断开时要连接的命令先问要不要重新连接，本地一侧不受影响。
-    command(cx, &fixture, SftpTabCommand::Delete { remote: true });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::Delete {
+            side: CardSide::Remote,
+        },
+    );
     assert!(visible(cx, &fixture, "sftp-reconnect"));
     click(cx, &fixture, "sftp-reconnect-cancel");
     select(cx, &fixture, false, "文件 甲.txt");
@@ -692,7 +745,13 @@ fn x_for_folders_can_be_turned_off(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn with_several_items_differing_bits_stay_and_links_take_no_part(cx: &mut TestAppContext) {
     let fixture = open(cx);
-    command(cx, &fixture, SftpTabCommand::FocusCard { remote: true });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::Remote,
+        },
+    );
     press(cx, &fixture, "ctrl-a");
     press(cx, &fixture, "f9");
 
@@ -769,7 +828,7 @@ fn hidden_files_have_a_switch_for_each_side(cx: &mut TestAppContext) {
             cx,
             &fixture,
             SftpTabCommand::Navigate {
-                remote,
+                side: CardSide::from_remote(remote),
                 path: "/dotfiles".into(),
             },
         );
@@ -784,7 +843,13 @@ fn hidden_files_have_a_switch_for_each_side(cx: &mut TestAppContext) {
     );
 
     // 本地的开关（Ctrl+Alt+H）只管本地，写进设置。
-    command(cx, &fixture, SftpTabCommand::FocusCard { remote: false });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::Local,
+        },
+    );
     press(cx, &fixture, "ctrl-alt-h");
     assert!(is_listed(cx, &fixture, false, ".bashrc"));
     assert!(!is_listed(cx, &fixture, true, ".bashrc"));
@@ -830,7 +895,7 @@ fn open_sized_files(cx: &mut TestAppContext) -> Fixture {
         cx,
         &fixture,
         SftpTabCommand::Navigate {
-            remote: true,
+            side: CardSide::Remote,
             path: "/pictures".into(),
         },
     );
@@ -879,7 +944,13 @@ fn sorting_by_time_survives_a_refresh(cx: &mut TestAppContext) {
     assert_eq!(names(cx, &fixture, true), ["..", "c.png", "b.png", "a.png"]);
 
     let before = fixture.sftp.listed.lock().unwrap().len();
-    command(cx, &fixture, SftpTabCommand::Refresh { remote: true });
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::Refresh {
+            side: CardSide::Remote,
+        },
+    );
     let reread = wait_until(cx, fixture.handle, |_| {
         fixture.sftp.listed.lock().unwrap().len() > before
     });
@@ -912,11 +983,36 @@ fn the_menu_commands_show_the_keys_of_the_prototype(cx: &mut TestAppContext) {
     let list = cx.update(|cx| tab.read(cx).remote().read(cx).focus_handle(cx));
     let remote = true;
     let cases = [
-        (SftpTabCommand::Delete { remote }, "delete"),
-        (SftpTabCommand::Rename { remote }, "f2"),
-        (SftpTabCommand::Properties { remote }, "f9"),
-        (SftpTabCommand::Refresh { remote }, "r"),
-        (SftpTabCommand::Up { remote }, "backspace"),
+        (
+            SftpTabCommand::Delete {
+                side: CardSide::from_remote(remote),
+            },
+            "delete",
+        ),
+        (
+            SftpTabCommand::Rename {
+                side: CardSide::from_remote(remote),
+            },
+            "f2",
+        ),
+        (
+            SftpTabCommand::Properties {
+                side: CardSide::from_remote(remote),
+            },
+            "f9",
+        ),
+        (
+            SftpTabCommand::Refresh {
+                side: CardSide::from_remote(remote),
+            },
+            "r",
+        ),
+        (
+            SftpTabCommand::Up {
+                side: CardSide::from_remote(remote),
+            },
+            "backspace",
+        ),
     ];
     in_frame(cx, fixture.handle, move |window, _| {
         for (command, key) in cases {

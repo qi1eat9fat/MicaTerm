@@ -13,7 +13,7 @@ use crate::i18n::t;
 /// 菜单要知道的卡片的事，开菜单时读。
 #[derive(Clone, Debug)]
 pub(super) struct CardMenuState {
-    pub remote: bool,
+    pub side: CardSide,
     /// 选中的项目（文件命令的对象）。
     pub targets: Vec<String>,
     /// 只选中一个文件时它的完整路径：编辑器可以试着打开它。
@@ -56,11 +56,11 @@ impl CardMenuState {
 
 /// 行上的右键：编辑 / 预览 / 下载… / 复制路径 / 删除 / 重命名… / 属性…。
 pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
-    let remote = state.remote;
+    let side = state.side;
     let none = state.targets.is_empty() || !state.can_modify;
     let edit = state.shows_edit();
     let preview = state.previewed_file();
-    let transfer = if remote {
+    let transfer = if side.is_remote() {
         t!("sftp_tab.menu.download")
     } else {
         t!("sftp_tab.menu.upload")
@@ -69,14 +69,14 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
     menu.when(edit, |menu| {
         menu.menu(
             t!("sftp_tab.menu.edit"),
-            state.action(SftpTabCommand::Edit { remote, path: None }),
+            state.action(SftpTabCommand::Edit { side, path: None }),
         )
     })
     .when_some(preview, |menu, path| {
         menu.menu(
             t!("sftp_tab.menu.preview"),
             state.action(SftpTabCommand::Preview {
-                remote,
+                side,
                 path: Some(path),
             }),
         )
@@ -84,29 +84,29 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
     .when(state.edits_file.is_some(), |menu| menu.separator())
     .menu_with_disabled(
         transfer,
-        state.action(SftpTabCommand::Transfer { remote }),
+        state.action(SftpTabCommand::Transfer { side }),
         state.targets.is_empty() || !state.can_transfer,
     )
     .menu_with_disabled(
         t!("sftp_tab.menu.copy_path"),
-        state.action(SftpTabCommand::CopySelectedPaths { remote }),
+        state.action(SftpTabCommand::CopySelectedPaths { side }),
         state.targets.is_empty(),
     )
     .separator()
     .menu_with_disabled(
         t!("sftp_tab.menu.delete"),
-        state.action(SftpTabCommand::Delete { remote }),
+        state.action(SftpTabCommand::Delete { side }),
         none,
     )
     .menu_with_disabled(
         t!("sftp_tab.menu.rename"),
-        state.action(SftpTabCommand::Rename { remote }),
+        state.action(SftpTabCommand::Rename { side }),
         none || state.targets.len() != 1,
     )
     .when(state.has_properties, |menu| {
         menu.menu_with_disabled(
             t!("sftp_tab.menu.properties"),
-            state.action(SftpTabCommand::Properties { remote }),
+            state.action(SftpTabCommand::Properties { side }),
             none,
         )
     })
@@ -114,20 +114,20 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
 
 /// 空白处的右键：新建文件夹… / 新建文件… / 上传… / 刷新 / 上级目录 / 复制路径 / 显示隐藏文件。
 pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
-    let remote = state.remote;
+    let side = state.side;
     // 远程一侧的「上传…」用原生选择框挑；本地一侧传的是选中的，没选中不能点。
-    let (upload, upload_disabled) = if remote {
+    let (upload, upload_disabled) = if side.is_remote() {
         (SftpTabCommand::ChooseFiles, !state.can_transfer)
     } else {
         (
-            SftpTabCommand::Transfer { remote },
+            SftpTabCommand::Transfer { side },
             state.targets.is_empty() || !state.can_transfer,
         )
     };
     menu.menu_with_disabled(
         t!("sftp_tab.menu.new_folder"),
         state.action(SftpTabCommand::New {
-            remote,
+            side,
             kind: NewEntryKind::Folder,
         }),
         !state.can_modify,
@@ -135,7 +135,7 @@ pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMen
     .menu_with_disabled(
         t!("sftp_tab.menu.new_file"),
         state.action(SftpTabCommand::New {
-            remote,
+            side,
             kind: NewEntryKind::File,
         }),
         !state.can_modify,
@@ -149,32 +149,32 @@ pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMen
     .separator()
     .menu(
         t!("sftp_tab.menu.refresh"),
-        state.action(SftpTabCommand::Refresh { remote }),
+        state.action(SftpTabCommand::Refresh { side }),
     )
     .menu_with_disabled(
         t!("sftp_tab.menu.up"),
-        state.action(SftpTabCommand::Up { remote }),
+        state.action(SftpTabCommand::Up { side }),
         !state.can_go_up,
     )
     .menu(
         t!("sftp_tab.menu.copy_path"),
-        state.action(SftpTabCommand::CopyPath { remote }),
+        state.action(SftpTabCommand::CopyPath { side }),
     )
     .separator()
     .menu_with_check(
         t!("sftp_tab.menu.show_hidden"),
         state.show_hidden,
-        Box::new(ToggleHiddenFiles(CardSide::from_remote(remote))),
+        Box::new(ToggleHiddenFiles(side)),
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::CardMenuState;
+    use super::{CardMenuState, CardSide};
 
     fn state_on(file: Option<&str>) -> CardMenuState {
         CardMenuState {
-            remote: true,
+            side: CardSide::Remote,
             targets: file.iter().map(|file| file.to_string()).collect(),
             edits_file: file.map(str::to_string),
             can_go_up: true,

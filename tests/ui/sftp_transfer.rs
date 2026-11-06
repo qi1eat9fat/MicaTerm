@@ -11,7 +11,7 @@ use qishell::backend::sftp::{
     ConflictFacts, FileFacts, SftpEvent, TransferChoice, TransferDetail, TransferPhase,
     TransferProgress, TransferQuestion, TransferQuestionKind,
 };
-use qishell::sftp_tab::SftpTab;
+use qishell::sftp_tab::{CardSide, SftpTab};
 
 use crate::support::*;
 
@@ -114,7 +114,13 @@ fn command(cx: &mut TestAppContext, fixture: &Fixture, command: SftpTabCommand) 
 
 /// 这一侧选中一个文件，焦点在这一侧的列表。
 fn select(cx: &mut TestAppContext, fixture: &Fixture, remote: bool, name: &'static str) {
-    command(cx, fixture, SftpTabCommand::FocusCard { remote });
+    command(
+        cx,
+        fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::from_remote(remote),
+        },
+    );
     let side = if remote { "remote-card" } else { "local-card" };
     in_frame(cx, fixture.handle, move |window, cx| {
         window
@@ -930,7 +936,7 @@ fn a_file_the_editor_refuses_can_be_downloaded(cx: &mut TestAppContext) {
         cx,
         &fixture,
         SftpTabCommand::Edit {
-            remote: true,
+            side: CardSide::Remote,
             path: Some("/home/tester/blob.bin".into()),
         },
     );
