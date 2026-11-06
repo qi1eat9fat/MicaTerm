@@ -1,39 +1,38 @@
-//! SFTP 标签（工单 20 起）。这一步只是占位，后面的提交接上内容。
+//! SFTP 标签（工单 20）：一台主机的 WinSCP 式双栏文件标签，有自己的一条连接，不能分屏。
+//!
+//! - `tab`：`SftpTab`，持有两张文件卡片、连接的命令通道；`execute` 是全部命令的入口；
+//! - `file_card`：一侧的状态和界面；`path_bar`：路径栏；`file_listing`：表格的行和列，渲染回调只用快照；
+//! - `model`、`selection`、`transfer_queue`：纯逻辑，没有 gpui 实体；`marquee`：框选；`file_icons`：文件图标；
+//! - `file_menu`：右键菜单，还没实现的项用开关藏着。
+//!
+//! 后面的工单只填自己的文件，不用改 `tab.rs` 的大 match：
+//! - 工单 21（文件操作）：`operations.rs`（`OperationState`），打开 `file_menu::SHOW_FILE_OPERATIONS`；
+//! - 工单 22（传输）：`transfers.rs`（`TransferState`），打开 `file_menu::SHOW_TRANSFER`；
+//! - 工单 23（编辑器）、24（预览）：`file_open.rs`（`FileOpenState`），打开 `file_menu::SHOW_EDIT`、`SHOW_PREVIEW`。
 
-use gpui_kit::*;
+mod file_card;
+mod file_icons;
+mod file_icons_table;
+mod file_listing;
+mod file_menu;
+mod file_open;
+mod marquee;
+mod model;
+mod operations;
+mod path_bar;
+mod selection;
+mod tab;
+mod transfer_queue;
+mod transfers;
 
-use crate::card::StatusDot;
-use crate::programs::Program;
-
-/// SFTP 标签。
-pub struct SftpTab {
-    focus_handle: FocusHandle,
-}
-
-impl SftpTab {
-    pub(crate) fn rail_name(&self) -> SharedString {
-        SharedString::default()
-    }
-
-    pub(crate) fn rail_directory(&self, _: &App) -> SharedString {
-        SharedString::default()
-    }
-
-    pub(crate) fn rail_tile(&self) -> Program {
-        crate::programs::sftp_program()
-    }
-
-    pub(crate) fn rail_dot(&self) -> StatusDot {
-        StatusDot::None
-    }
-
-    pub(crate) fn focus_target(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl Render for SftpTab {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().track_focus(&self.focus_handle)
-    }
-}
+pub use file_card::{CardSide, ConnectionState, FileCard, LoadIntent};
+pub use file_icons::{FileIcon, FileIconKind, FileIconStyle};
+pub use file_icons_table::FILE_ICON_ASSETS;
+pub use file_listing::FileListing;
+pub use model::*;
+pub use operations::FileOperation;
+pub use selection::{ClickMode, CursorMotion, Selection};
+pub use tab::{SftpTab, SftpTabEvent, SftpTabOptions};
+pub use transfer_queue::{
+    QueueEntry, QueueId, QueueState, Removal, TransferJob, TransferQueue, percent,
+};

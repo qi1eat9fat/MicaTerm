@@ -40,6 +40,8 @@ type Entry = (&'static str, &'static str, &'static str, u32, u32, bool);
 pub const TERMINAL_GLYPH: &str = "icons/terminal.svg";
 /// 文件夹图标（Lucide `folder`）：SFTP 标签的图块。
 pub const FOLDER_GLYPH: &str = "icons/folder.svg";
+/// 显示器图标（Lucide `monitor`）：SFTP 标签里「本机」那张卡片。
+pub const MONITOR_GLYPH: &str = "icons/monitor.svg";
 
 /// shell 图块的颜色：取全部界面原型的 `PROG.pwsh`。
 const SHELL_BG: u32 = 0x334155;
@@ -443,6 +445,20 @@ fn hash_color(name: &str) -> u32 {
     PALETTE[hash as usize % PALETTE.len()]
 }
 
+/// SFTP 标签里「本机」那张卡片的图块（原型 `fcard` 的蓝底显示器）。
+pub fn local_files_program() -> Program {
+    Program {
+        name: "Local".to_string(),
+        glyph: MONITOR_GLYPH,
+        tile_bg: 0x3b82f6,
+        tile_fg: 0xffffff,
+        border: false,
+        shell: false,
+        letter: None,
+        off: false,
+    }
+}
+
 /// SFTP 标签的图块：固定颜色的文件夹（原型 `PROG.sftp`）。
 pub fn sftp_program() -> Program {
     Program {
@@ -473,7 +489,7 @@ pub fn editor_program(name: &str) -> Program {
 
 /// 全部图标的资源路径：资源来源要能把它们都加载出来（`app::assets` 的测试核对）。
 pub fn glyphs() -> impl Iterator<Item = &'static str> {
-    [TERMINAL_GLYPH, FOLDER_GLYPH]
+    [TERMINAL_GLYPH, FOLDER_GLYPH, MONITOR_GLYPH]
         .into_iter()
         .chain(PROGRAMS.iter().map(|entry| entry.2))
 }

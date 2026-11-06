@@ -86,10 +86,8 @@ impl Workspace {
 
     /// `card` 在哪个标签里。
     fn tab_of(&self, card: CardId, cx: &App) -> Option<TabId> {
-        self.tabs.find(|tab| {
-            tab.as_terminal()
-                .is_some_and(|tab| tab.contains(card, cx))
-        })
+        self.tabs
+            .find(|tab| tab.as_terminal().is_some_and(|tab| tab.contains(card, cx)))
     }
 
     /// `id` 这个标签，是终端标签时。
@@ -125,7 +123,7 @@ impl Workspace {
             }
             Some(_) => {
                 if let Some(id) = self.tabs.active() {
-                    self.close_tab(id, window, cx);
+                    self.request_close_tabs(vec![id], None, window, cx);
                 }
             }
             None => {}

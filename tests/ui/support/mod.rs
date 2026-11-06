@@ -24,6 +24,7 @@
 mod credentials;
 mod hosts;
 mod remote;
+mod sftp;
 mod terminal;
 mod vault;
 
@@ -47,6 +48,7 @@ pub use qishell::workspace::{Workspace, WorkspaceServices};
 pub use qishell_terminal::{FixedLocalTerminalTransportProvider, LocalShell, LocalShellInfo};
 pub use qishell_terminal::{RightClick, TerminalColors, TerminalFont, TerminalInteraction};
 pub use remote::*;
+pub use sftp::*;
 pub use terminal::*;
 pub use vault::*;
 // 卡片分屏（工单 05）。
@@ -85,6 +87,9 @@ pub fn fake_services() -> WorkspaceServices {
         // 没有保险库：秘密只在上面的内存存储里，不弹保险库的框（工单 13 的夹具见 `vault.rs`）。
         vault: None,
         vault_problem: None,
+        // SFTP 不连网络，本地目录不碰真实磁盘（工单 20）。
+        sftp: Arc::new(FakeSftpProvider::default()),
+        local_files: Arc::new(FakeLocalDirectory::default()),
     }
 }
 

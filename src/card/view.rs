@@ -22,7 +22,7 @@ use super::header::{HeaderState, render_header};
 use super::remote::{RemoteCard, RemoteLaunch, RemoteState, RemoteUpdate};
 use super::status_bar::{StatusBar, StatusTone, render_status_bar};
 use super::status_dot::{ACTIVE_FOR, StatusDot};
-use crate::app::{CloseCard, CopyCardAddress, DisconnectCard, ReconnectCard};
+use crate::app::{CloseCard, CopyCardAddress, DisconnectCard, OpenCardSftp, ReconnectCard};
 use crate::backend::{ConnectionId, RemoteTarget};
 use crate::i18n::t;
 use crate::programs::{Program, program_of, shell_program};
@@ -669,7 +669,7 @@ impl TerminalCard {
 }
 
 /// 远程终端右键菜单里卡片加的项：「复制」下面的复制 IP（域名时叫复制主机名），最后的重新连接、
-/// 断开连接（已经断开时不能点）。「打开 SFTP」留给 SFTP 工单。
+/// 断开连接（已经断开时不能点），和它们前面的打开 SFTP（工单 20）。
 fn remote_menu_items(id: CardId, host: &Host) -> TerminalMenuItems {
     let copy_label = if host.address_is_ip() {
         t!("card.menu.copy_ip")
@@ -679,7 +679,8 @@ fn remote_menu_items(id: CardId, host: &Host) -> TerminalMenuItems {
     TerminalMenuItems {
         copy: Rc::new(move |menu, _| menu.menu(copy_label.clone(), Box::new(CopyCardAddress(id)))),
         commands: Rc::new(move |menu, lifecycle| {
-            menu.menu(t!("card.menu.reconnect"), Box::new(ReconnectCard(id)))
+            menu.menu(t!("card.menu.open_sftp"), Box::new(OpenCardSftp(id)))
+                .menu(t!("card.menu.reconnect"), Box::new(ReconnectCard(id)))
                 .menu_with_disabled(
                     t!("card.menu.disconnect"),
                     Box::new(DisconnectCard(id)),

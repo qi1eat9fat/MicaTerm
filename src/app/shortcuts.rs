@@ -4,7 +4,8 @@
 //! - `WINDOW_KEYS`：窗口壳（主机栏、右侧栏、新建主机、快速连接、设置、退出）；
 //! - `TAB_KEYS`：标签（工单 04）；
 //! - `CARD_KEYS`：卡片（工单 05）；
-//! - `TERMINAL_KEYS`：终端（工单 03，键上下文是终端 crate 的 `Terminal` / `TerminalFind`）。
+//! - `TERMINAL_KEYS`：终端（工单 03，键上下文是终端 crate 的 `Terminal` / `TerminalFind`）；
+//! - `LOCAL_FILE_KEYS`、`REMOTE_FILE_KEYS`：SFTP 标签的文件列表（工单 20，一次写全）。
 //!
 //! 规则：Windows 和 Linux 用 Ctrl+Shift 系，macOS 用 ⌘；全局绑定里不能出现只按 Ctrl 加字母的组合
 //! （留给终端里的 shell）。绑定一律经 `KeyBinding::load` 加平台的 keyboard mapper 建，
@@ -17,6 +18,7 @@ use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate, NoAction};
 use qishell_terminal::actions::*;
 
 use super::actions::*;
+use crate::sftp_tab::{CardSide, CursorMotion, NewEntryKind};
 use crate::split::Direction;
 
 /// 快捷键表里的一项。
@@ -346,9 +348,105 @@ pub const TERMINAL_KEYS: &[Shortcut] = &[
     },
 ];
 
+/// 本地文件列表的键上下文（文件卡片的列表外面那一层）。
+pub const LOCAL_FILE_LIST_CONTEXT: &str = "LocalFileList";
+/// 远程文件列表的键上下文。
+pub const REMOTE_FILE_LIST_CONTEXT: &str = "RemoteFileList";
+
+/// 一侧文件列表的按键（spec 第 8 节，照 shell-rs，去掉 Ctrl+H、Ctrl+F、Ctrl+D、Alt+方向键、Ctrl+\）。
+/// 方向键和 Tab 绑在 `> DataTable` 这一层：DataTable 和 Root 自己也绑了它们。
+// 参考 since2006/shell-rs @ b2a307a: src/app/shortcuts.rs 的 `explorer_shortcuts`
+macro_rules! file_list_keys {
+    ($remote:literal, $side:expr, $list:literal, $table:literal) => {
+        &[
+            file_list_key!("enter", "enter", $list, Open { remote: $remote }),
+            file_list_key!("f4", "f4", $list, Edit { remote: $remote, path: None }),
+            file_list_key!("f5", "f5", $list, Transfer { remote: $remote }),
+            file_list_key!("f2", "f2", $list, Rename { remote: $remote }),
+            file_list_key!("f7", "f7", $list, New { remote: $remote, kind: NewEntryKind::Folder }),
+            file_list_key!("delete", "cmd-backspace", $list, Delete { remote: $remote }),
+            file_list_key!("f8", "f8", $list, Delete { remote: $remote }),
+            file_list_key!("f9", "cmd-i", $list, Properties { remote: $remote }),
+            file_list_key!("backspace", "backspace", $list, Up { remote: $remote }),
+            file_list_key!("ctrl-r", "cmd-r", $list, Refresh { remote: $remote }),
+            file_list_key!("ctrl-o", "cmd-o", $list, EditPath { remote: $remote }),
+            file_list_key!("ctrl-a", "cmd-a", $list, SelectAll { remote: $remote }),
+            file_list_key!("space", "space", $list, ToggleSelection { remote: $remote }),
+            file_list_key!("insert", "insert", $list, ToggleSelection { remote: $remote }),
+            file_list_key!("tab", "tab", $table, FocusCard { remote: !$remote }),
+            file_list_key!("shift-tab", "shift-tab", $table, FocusCard { remote: !$remote }),
+            file_list_key!("up", "up", $table, MoveCursor { remote: $remote, motion: CursorMotion::Up, extend: false }),
+            file_list_key!("down", "down", $table, MoveCursor { remote: $remote, motion: CursorMotion::Down, extend: false }),
+            file_list_key!("pageup", "pageup", $table, MoveCursor { remote: $remote, motion: CursorMotion::PageUp, extend: false }),
+            file_list_key!("pagedown", "pagedown", $table, MoveCursor { remote: $remote, motion: CursorMotion::PageDown, extend: false }),
+            file_list_key!("home", "home", $table, MoveCursor { remote: $remote, motion: CursorMotion::Home, extend: false }),
+            file_list_key!("end", "end", $table, MoveCursor { remote: $remote, motion: CursorMotion::End, extend: false }),
+            file_list_key!("shift-up", "shift-up", $table, MoveCursor { remote: $remote, motion: CursorMotion::Up, extend: true }),
+            file_list_key!("shift-down", "shift-down", $table, MoveCursor { remote: $remote, motion: CursorMotion::Down, extend: true }),
+            file_list_key!("shift-pageup", "shift-pageup", $table, MoveCursor { remote: $remote, motion: CursorMotion::PageUp, extend: true }),
+            file_list_key!("shift-pagedown", "shift-pagedown", $table, MoveCursor { remote: $remote, motion: CursorMotion::PageDown, extend: true }),
+            file_list_key!("shift-home", "shift-home", $table, MoveCursor { remote: $remote, motion: CursorMotion::Home, extend: true }),
+            file_list_key!("shift-end", "shift-end", $table, MoveCursor { remote: $remote, motion: CursorMotion::End, extend: true }),
+            // 显示隐藏文件：WinSCP 的 Ctrl+Alt+H，访达的 ⌘⇧.（macOS 报成 ⌘>）。
+            Shortcut {
+                keys: "ctrl-alt-h",
+                mac: "cmd->",
+                action: || Box::new(ToggleHiddenFiles($side)),
+                context: Some($list),
+            },
+            // 左右键不让表格拿去换列。
+            Shortcut {
+                keys: "left",
+                mac: "left",
+                action: || Box::new(NoAction {}),
+                context: Some($table),
+            },
+            Shortcut {
+                keys: "right",
+                mac: "right",
+                action: || Box::new(NoAction {}),
+                context: Some($table),
+            },
+        ]
+    };
+}
+
+macro_rules! file_list_key {
+    ($keys:literal, $mac:literal, $context:literal, $($command:tt)*) => {
+        Shortcut {
+            keys: $keys,
+            mac: $mac,
+            action: || Box::new(SftpShortcut(SftpTabCommand::$($command)*)),
+            context: Some($context),
+        }
+    };
+}
+
+/// 本地文件列表的按键。
+pub const LOCAL_FILE_KEYS: &[Shortcut] = file_list_keys!(
+    false,
+    CardSide::Local,
+    "LocalFileList",
+    "LocalFileList > DataTable"
+);
+/// 远程文件列表的按键。
+pub const REMOTE_FILE_KEYS: &[Shortcut] = file_list_keys!(
+    true,
+    CardSide::Remote,
+    "RemoteFileList",
+    "RemoteFileList > DataTable"
+);
+
 /// 全部快捷键。全局的在前、带上下文的在后：同一个键在上下文里后写的胜出。
 pub fn all() -> impl Iterator<Item = &'static Shortcut> {
-    let tables = [WINDOW_KEYS, TAB_KEYS, CARD_KEYS, TERMINAL_KEYS];
+    let tables = [
+        WINDOW_KEYS,
+        TAB_KEYS,
+        CARD_KEYS,
+        TERMINAL_KEYS,
+        LOCAL_FILE_KEYS,
+        REMOTE_FILE_KEYS,
+    ];
     let global = tables
         .into_iter()
         .flatten()

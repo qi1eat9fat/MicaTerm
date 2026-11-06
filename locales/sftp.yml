@@ -1,0 +1,184 @@
+_version: 2
+
+# SFTP 引擎的错误和本机文件操作的错误（来自 shell-rs 的 locales/sftp.yml，只留用到的、只留简体中文）。
+
+sftp.worker.disconnected:
+  zh-CN: SFTP 已断开
+sftp.worker.dropped:
+  zh-CN: SFTP 连接中断，请重新连接
+sftp.worker.dropped_kept:
+  zh-CN: 连接中断，传输进度已保留
+sftp.edit.not_file:
+  zh-CN: 不是普通文件
+sftp.edit.too_large:
+  zh-CN: 文件太大（%{count} 字节）
+sftp.edit.not_text:
+  zh-CN: 不是 UTF-8 文本文件
+sftp.edit.changed:
+  zh-CN: 文件在打开后已被修改
+sftp.transfer.cancelled:
+  zh-CN: 传输已停止，进度已保留
+sftp.client.start_timeout:
+  zh-CN: 启动 SFTP 超时
+sftp.client.no_v3:
+  zh-CN: 服务器未提供 SFTP v3
+sftp.client.no_path:
+  zh-CN: 服务器未返回目录路径
+sftp.client.no_link_target:
+  zh-CN: 无法读取链接目标
+sftp.client.ambiguous_name:
+  zh-CN: 远端名称包含无法可靠表示的字符，已停止操作
+sftp.error.remote_path_invalid:
+  zh-CN: 远程路径不能为空或包含空字符
+sftp.error.file_name_invalid:
+  zh-CN: 无效的文件名：%{name}
+sftp.error.nothing_to_upload:
+  zh-CN: 请选择要上传的文件或目录
+sftp.error.nothing_to_download:
+  zh-CN: 请选择要下载的文件或目录
+sftp.error.download_target_relative:
+  zh-CN: 下载目标必须是绝对路径
+sftp.error.file_name_not_utf8:
+  zh-CN: 目录包含无法用 UTF-8 表示的文件名
+sftp.error.exists:
+  zh-CN: 已有名为「%{name}」的项目
+sftp.transfer.host_key_changed:
+  zh-CN: 服务器主机指纹已改变，已停止续传
+sftp.worker.not_connected:
+  zh-CN: SFTP 未连接，请重新连接
+sftp.worker.not_connected_short:
+  zh-CN: SFTP 未连接
+sftp.worker.list_failed:
+  zh-CN: 无法读取目录：%{error}
+sftp.sync.delete_failed:
+  zh-CN: 无法删除：%{error}
+sftp.worker.busy:
+  zh-CN: 已有传输批次正在处理
+sftp.worker.local_folder_missing:
+  zh-CN: 本地目录 %{path} 不存在
+sftp.worker.remote_folder_missing:
+  zh-CN: 远程目录 %{path} 不存在
+sftp.worker.reconnect_in:
+  zh-CN: 将在 %{count} 秒后重连（%{attempt}/3）
+sftp.upload.source_name_not_utf8:
+  zh-CN: 来源文件名不是有效的 UTF-8
+sftp.upload.target_busy:
+  zh-CN: 另一个传输正在上传同一目标，请稍后继续上传
+sftp.upload.parent_missing:
+  zh-CN: 父目录未创建，无法上传
+sftp.upload.failed:
+  zh-CN: 无法上传：%{error}
+sftp.upload.folder_in_the_way:
+  zh-CN: 目录与文件类型冲突，不会删除远程目录
+sftp.upload.exists:
+  zh-CN: 远程项目已存在（%{count} 字节，修改时间 %{modified}）。覆盖会替换这个文件或链接。
+sftp.upload.exists_changed:
+  zh-CN: 目标在上传期间发生变化。远程项目已存在（%{count} 字节，修改时间 %{modified}）。覆盖会替换这个文件或链接。
+sftp.upload.target_gone:
+  zh-CN: 原目标在上传期间已被删除或移走。是否继续发布此文件？
+sftp.upload.source_now_folder:
+  zh-CN: 来源已变为目录，请丢弃旧文件进度后重新上传，或跳过。
+sftp.upload.target_not_folder:
+  zh-CN: 目标已存在且不是目录，不会跟随或替换链接
+sftp.upload.special_file:
+  zh-CN: 不支持上传设备、套接字或其他特殊文件
+sftp.upload.resume_found:
+  zh-CN: 发现未完成的 .filepart 文件。续传会按它的现有大小跳过本地文件前缀，请确认本地文件仍是同一版本。
+sftp.upload.link_target_not_utf8:
+  zh-CN: 链接目标不是有效的 UTF-8
+sftp.upload.record_without_link:
+  zh-CN: 续传记录中缺少链接目标
+sftp.upload.temporary_link_changed:
+  zh-CN: 临时链接已变化，无法继续上传
+sftp.upload.record_without_source:
+  zh-CN: 续传记录中缺少来源文件信息
+sftp.upload.temporary_kind_changed:
+  zh-CN: 远端临时文件类型已变化
+sftp.upload.partial_too_large:
+  zh-CN: 远端续传偏移大于本地文件
+sftp.upload.pipeline_ended:
+  zh-CN: 上传写入流水线意外结束
+sftp.upload.publish_unconfirmed:
+  zh-CN: 无法确认文件发布结果，已保留恢复文件；请检查远端目录
+sftp.upload.temporary_changed:
+  zh-CN: 临时文件大小或类型已变化，未替换目标
+sftp.upload.target_created:
+  zh-CN: 替换期间目标被其他操作创建，已保留目标、备份和临时文件
+sftp.upload.backup_changed:
+  zh-CN: 恢复备份已变化，停止替换
+sftp.upload.backup_changed_after_publish:
+  zh-CN: 备份已变化，未清理；上传的目标文件已发布
+sftp.upload.backup_and_target:
+  zh-CN: 存在恢复备份和目标文件，请先检查远端目录；未删除任何文件
+sftp.download.name_invalid:
+  zh-CN: 名称「%{name}」在本机无效
+sftp.download.source_missing:
+  zh-CN: 远程项目不存在
+sftp.download.target_busy:
+  zh-CN: 另一个传输正在下载到同一位置，请稍后继续下载
+sftp.download.parent_missing:
+  zh-CN: 父目录未创建，无法下载
+sftp.download.failed:
+  zh-CN: 无法下载：%{error}
+sftp.download.target_invalid:
+  zh-CN: 无效的下载目标
+sftp.download.folder_in_the_way:
+  zh-CN: 本地已有同名目录，不会删除它
+sftp.download.exists:
+  zh-CN: 本地已有同名项目（%{count} 字节，修改时间 %{modified}）。覆盖会替换它。
+sftp.download.exists_changed:
+  zh-CN: 目标在下载期间发生变化。本地已有同名项目（%{count} 字节，修改时间 %{modified}）。覆盖会替换它。
+sftp.download.file_in_the_way:
+  zh-CN: 本地已有同名文件，不会替换为目录
+sftp.download.special_file:
+  zh-CN: 不支持下载设备、套接字或其他特殊文件
+sftp.download.partial_not_file:
+  zh-CN: 临时文件 %{path} 不是普通文件
+sftp.download.partial_too_large:
+  zh-CN: 本地 .filepart 文件比远程文件大，无法续传。
+sftp.download.source_changed:
+  zh-CN: 远程文件在上次下载后已变化，无法续传。
+sftp.download.resume_found:
+  zh-CN: 发现未完成的 .filepart 文件。续传会按它的现有大小跳过远程文件前缀，请确认远程文件仍是同一版本。
+sftp.download.pipeline_ended:
+  zh-CN: 下载读取流水线意外结束
+sftp.download.source_shrank:
+  zh-CN: 远程文件在下载期间变短，已停止
+sftp.download.links_unsupported:
+  zh-CN: 此系统不支持创建符号链接
+sftp.journal.source_not_file:
+  zh-CN: 本地来源已不再是普通文件
+sftp.journal.mismatch:
+  zh-CN: 续传记录与当前来源或服务器不匹配
+sftp.journal.temporary_invalid:
+  zh-CN: 无效的续传临时路径
+sftp.journal.replaces_folder:
+  zh-CN: 续传记录不能替换目录
+sftp.journal.upload_damaged:
+  zh-CN: 续传记录损坏，原文件和临时文件均已保留
+sftp.journal.download_damaged:
+  zh-CN: 续传记录损坏，临时文件已保留
+sftp.journal.unreadable:
+  zh-CN: 无法读取续传记录
+sftp.journal.unsaved:
+  zh-CN: 无法保存续传进度
+sftp.edit.missing:
+  zh-CN: 文件不存在
+sftp.edit.shrank:
+  zh-CN: 文件在读取时变短了，请重新打开
+sftp.edit.gone_after_save:
+  zh-CN: 保存后找不到文件
+sftp.error.path_not_utf8:
+  zh-CN: 路径不是有效的 UTF-8
+sftp.error.recycle_bin_failed:
+  zh-CN: 无法移到废纸篓：%{error}
+sftp.error.trash_failed:
+  zh-CN: 无法移到废纸篓：%{error}
+sftp.error.permissions_unsupported:
+  zh-CN: 此系统不支持修改权限
+sftp.error.permission_denied:
+  zh-CN: 没有权限操作「%{name}」
+sftp.error.not_found:
+  zh-CN: 「%{name}」不存在
+sftp.error.item:
+  zh-CN: 「%{name}」：%{error}

@@ -59,7 +59,7 @@ pub struct ConnectHostRight(pub HostId);
 #[action(namespace = qishell, no_json)]
 pub struct ConnectHostDown(pub HostId);
 
-/// 打开这台主机的 SFTP 标签，已经有就切过去（右键菜单）。处理器在 M3 接上。
+/// 打开这台主机的 SFTP 标签，已经有就切过去（右键菜单）。处理器在工单 20 接上。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
 #[action(namespace = qishell, no_json)]
 pub struct OpenHostSftp(pub HostId);

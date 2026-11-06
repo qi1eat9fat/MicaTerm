@@ -76,6 +76,16 @@ pub fn component_theme(mode: ThemeMode, cx: &App) -> Rc<ThemeConfig> {
     colors.overlay = hex(tokens.scrim);
     colors.danger = hex(tokens.bad);
     colors.group_box = hex(tokens.group);
+    // 文件列表（原型 `.ftab`）：表格本身透明，透出卡片的底；悬停和选中只画在名称格上。
+    let clear = Some(SharedString::new_static("#00000000"));
+    colors.table = clear.clone();
+    colors.table_head = clear.clone();
+    colors.table_even = clear.clone();
+    colors.table_hover = clear.clone();
+    colors.table_row_border = clear;
+    colors.table_active = hex(tokens.selection_solid);
+    colors.table_active_border = hex(tokens.accent);
+    colors.table_head_foreground = hex(tokens.faint);
     Rc::new(config)
 }
 

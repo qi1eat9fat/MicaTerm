@@ -13,13 +13,53 @@ use qishell_terminal::TerminalIcons;
 icon_assets!(
     ExtraIcons,
     [
-        Terminal, CodeXml, KeyRound, Columns2, Rows2, Maximize2, Minimize2,
+        Terminal,
+        CodeXml,
+        KeyRound,
+        Columns2,
+        Rows2,
+        Maximize2,
+        Minimize2,
         // 程序图块（工单 06，`crate::programs`）。
-        Activity, Globe, Cpu, FileCode, Diff, GitBranch,
+        Activity,
+        Globe,
+        Cpu,
+        FileCode,
+        Diff,
+        GitBranch,
         // 命令片段面板：悬停时的 ⚡（点击就执行，工单 19）。
         Zap,
         // 保险库（工单 13）：解锁小卡片和主机栏底部的锁、设置主密码框和设置 › 安全。
-        Lock, LockOpen, Shield
+        Lock,
+        LockOpen,
+        Shield,
+        // SFTP 标签、编辑器标签、预览（M3，工单 20 一次加全）。
+        ArrowUpRight,
+        CircleMinus,
+        Download,
+        Eraser,
+        Eye,
+        EyeOff,
+        FilePenLine,
+        FilePlus,
+        FileSymlink,
+        FileText,
+        FolderPlus,
+        FolderSymlink,
+        FolderUp,
+        Laptop,
+        Monitor,
+        Pencil,
+        Play,
+        RefreshCw,
+        Save,
+        Server,
+        Square,
+        SquarePen,
+        Trash,
+        Upload,
+        ZoomIn,
+        ZoomOut
     ]
 );
 
@@ -116,6 +156,15 @@ fn os_icon(path: &str) -> Option<Cow<'static, [u8]>> {
         .map(|(_, bytes)| Cow::Borrowed(*bytes))
 }
 
+/// 文件列表的彩色图标（工单 20，`crate::sftp_tab`）：Material Icon Theme，MIT，许可见
+/// `assets/icons/files/LICENSE`。
+fn file_icon(path: &str) -> Option<Cow<'static, [u8]>> {
+    crate::sftp_tab::FILE_ICON_ASSETS
+        .iter()
+        .find(|(name, _)| *name == path)
+        .map(|(_, bytes)| Cow::Borrowed(*bytes))
+}
+
 /// 图标名，凡是建 `Icon` 的地方都能用（`ExtraIcons` 和默认图标包里的都在里面）。
 pub use gpui_kit::assets::IconName as CatalogIcon;
 
@@ -136,6 +185,9 @@ impl AssetSource for AppAssets {
         if let Some(bytes) = os_icon(path) {
             return Ok(Some(bytes));
         }
+        if let Some(bytes) = file_icon(path) {
+            return Ok(Some(bytes));
+        }
         gpui_kit::assets::Assets.load(path)
     }
 
@@ -152,6 +204,13 @@ impl AssetSource for AppAssets {
         );
         paths.extend(
             OS_ICONS
+                .iter()
+                .map(|(name, _)| *name)
+                .filter(|name| name.starts_with(path))
+                .map(SharedString::from),
+        );
+        paths.extend(
+            crate::sftp_tab::FILE_ICON_ASSETS
                 .iter()
                 .map(|(name, _)| *name)
                 .filter(|name| name.starts_with(path))
@@ -177,6 +236,18 @@ mod tests {
             assert!(
                 bytes.is_some_and(|bytes| bytes.starts_with(b"<svg")),
                 "{os:?}"
+            );
+        }
+    }
+
+    /// 文件列表的每个彩色图标都加载得出来（工单 20）。
+    #[test]
+    fn every_file_icon_loads() {
+        for (path, _) in crate::sftp_tab::FILE_ICON_ASSETS {
+            let bytes = AppAssets.load(path).unwrap();
+            assert!(
+                bytes.is_some_and(|bytes| bytes.starts_with(b"<svg")),
+                "{path}"
             );
         }
     }

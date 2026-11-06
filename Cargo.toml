@@ -51,6 +51,9 @@ async-channel = "2"
 futures = "0.3"
 # 开始卡片最近连接的「10 分钟前」「今天 09:12」：按本地时区算（gpui 本来就带着它）。
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# SFTP 标签本地一侧：「下载」文件夹在哪（工单 20）；本地删除进回收站（工单 21）。
+dirs = "6"
+trash = "5"
 
 # Windows 可执行文件里的图标与版本信息（build.rs）。
 [target.'cfg(windows)'.build-dependencies]

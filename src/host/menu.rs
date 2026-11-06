@@ -23,8 +23,8 @@ use crate::i18n::t;
 pub const SHOW_CONNECT: bool = true;
 /// 「在右侧 / 下方分屏打开」：工单 16 接上了 `ConnectHostRight`、`ConnectHostDown` 的处理器。
 pub const SHOW_SPLIT_OPEN: bool = true;
-/// 「打开 SFTP」：M3 接上处理器后改成 `true`。
-pub const SHOW_OPEN_SFTP: bool = false;
+/// 「打开 SFTP」：工单 20 接上了 `OpenHostSftp` 的处理器。
+pub const SHOW_OPEN_SFTP: bool = true;
 
 /// 一台主机的右键菜单，按打开时的主机建。
 pub fn build_host_menu(

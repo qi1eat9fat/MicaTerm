@@ -41,6 +41,8 @@ card.menu.copy_ip:
   zh-CN: 复制 IP
 card.menu.copy_host_name:
   zh-CN: 复制主机名
+card.menu.open_sftp:
+  zh-CN: 打开 SFTP
 card.menu.reconnect:
   zh-CN: 重新连接
 card.menu.disconnect:

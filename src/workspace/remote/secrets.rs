@@ -14,6 +14,7 @@ use crate::vault::{asks_before_using, before_using_secrets, login_secrets};
 use crate::workspace::Workspace;
 
 impl Workspace {
+    /// 给卡片连接用：复用已有的连接时不登录、用不到秘密，直接放行。
     pub(in crate::workspace) fn with_login_secrets(
         &mut self,
         target: &RemoteTarget,
@@ -21,11 +22,25 @@ impl Workspace {
         cx: &mut Context<Self>,
         then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) {
+        if self.services.remote_terminals.reuses_connection(target) {
+            then(self, window, cx);
+            return;
+        }
+        self.with_new_login_secrets(target, window, cx, then);
+    }
+
+    /// 给一定会新登录一次的连接用（SFTP 标签有自己的连接，工单 20）：不看连接表里有没有能复用的，
+    /// 用不到的秘密不问，用得到又锁着就先弹解锁框。
+    pub(in crate::workspace) fn with_new_login_secrets(
+        &mut self,
+        target: &RemoteTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
         let secrets = login_secrets(&target.login);
-        // 复用已有的连接不登录、用不到秘密；不用弹框就直接连：同步回调会重入正在更新的窗口壳。
-        if self.services.remote_terminals.reuses_connection(target)
-            || !asks_before_using(&secrets, cx)
-        {
+        // 不用弹框就直接连：同步回调会重入正在更新的窗口壳。
+        if !asks_before_using(&secrets, cx) {
             then(self, window, cx);
             return;
         }

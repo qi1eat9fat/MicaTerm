@@ -24,5 +24,5 @@ mod title_bar;
 mod view;
 mod window_buttons;
 
-pub use right_sidebar::RightPanel;
+pub use right_sidebar::{FilesButton, RightPanel};
 pub use view::{Workspace, WorkspaceServices, window_options};

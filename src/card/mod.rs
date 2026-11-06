@@ -22,7 +22,7 @@ mod view;
 
 pub use directory::{display_directory, home_dir, reported_path};
 pub use program_tile::{MAX_STACKED_TILES, render_program_tile, render_tile_stack};
-pub use remote::{RemoteActivity, RemoteLaunch, RemoteState, RemoteUpdate};
+pub use remote::{RemoteActivity, RemoteLaunch, RemoteState, RemoteUpdate, host_badge};
 pub use status_dot::{ACTIVE_FOR, StatusDot, render_status_dot};
 pub use view::{CardEvent, TerminalCard};
 

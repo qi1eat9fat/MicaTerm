@@ -15,6 +15,32 @@ pub struct IconButton {
     radius: Pixels,
     /// 显示成按下的样子（右侧栏里展开着面板的图标，原型 `.rail .ib.on`）。
     pressed: bool,
+    /// 显示成当前所在：图标是强调色（在 SFTP 标签里的「文件」，原型 `.rail .ib.cur`）。
+    current: bool,
+    /// 变灰（原型 `.ib.dis`）：现在做不了，悬停说为什么。
+    dimmed: bool,
+    /// 悬停时的提示。
+    tooltip: Option<SharedString>,
+}
+
+/// 悬停时的提示（原型 `.tip`）。
+struct IconButtonTooltip(SharedString);
+
+impl Render for IconButtonTooltip {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let tokens = Tokens::current(cx);
+        div()
+            .id("icon-button-tooltip")
+            .test_support()
+            .aria_label(self.0.clone())
+            .px(px(9.))
+            .py(px(5.))
+            .rounded(px(7.))
+            .bg(tokens.tooltip)
+            .text_color(tokens.tooltip_text)
+            .text_size(px(11.5))
+            .child(self.0.clone())
+    }
 }
 
 impl IconButton {
@@ -26,6 +52,9 @@ impl IconButton {
             size: ICON_BUTTON,
             radius: ICON_BUTTON_RADIUS,
             pressed: false,
+            current: false,
+            dimmed: false,
+            tooltip: None,
         }
     }
 
@@ -42,6 +71,24 @@ impl IconButton {
         self
     }
 
+    /// 显示成当前所在：图标是强调色，没有按下的底色。
+    pub fn current(mut self, current: bool) -> Self {
+        self.current = current;
+        self
+    }
+
+    /// 变灰：现在做不了。
+    pub fn dimmed(mut self, dimmed: bool) -> Self {
+        self.dimmed = dimmed;
+        self
+    }
+
+    /// 悬停时的提示。
+    pub fn tooltip(mut self, tooltip: SharedString) -> Self {
+        self.tooltip = Some(tooltip);
+        self
+    }
+
     /// 点了经 `target`（窗口壳的焦点）派发 `action`：焦点为空时也能送到窗口壳。
     pub fn dispatch(
         self,
@@ -52,6 +99,7 @@ impl IconButton {
         let target = target.clone();
         let hover = tokens.hover;
         let text = tokens.text;
+        let dimmed = self.dimmed;
         div()
             .id(self.id)
             .test_support()
@@ -75,8 +123,16 @@ impl IconButton {
                         inset: false,
                     }])
             })
-            .cursor_pointer()
-            .hover(move |style| style.bg(hover).text_color(text))
+            .when(self.current, |button| button.text_color(tokens.accent))
+            .when(dimmed, |button| button.opacity(0.35))
+            .when(!dimmed, |button| {
+                button
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(hover).text_color(text))
+            })
+            .when_some(self.tooltip, |button, tooltip| {
+                button.tooltip(move |_, cx| cx.new(|_| IconButtonTooltip(tooltip.clone())).into())
+            })
             .on_click(move |_, window, cx| target.dispatch_action(action.as_ref(), window, cx))
             .child(self.icon.size(self.size * 0.6))
     }

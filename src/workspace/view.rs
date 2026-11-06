@@ -20,6 +20,10 @@ use super::remote::PromptQueue;
 use super::right_sidebar::{RightPanel, render_right_sidebar};
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
+use crate::backend::sftp::{
+    SharedLocalDirectoryProvider, SharedSftpTransportProvider, SshSftpTransportProvider,
+    SystemLocalDirectoryProvider,
+};
 use crate::backend::{
     SharedConnectionTester, SharedRemoteTerminals, SshConnectionTester, SshRemoteTerminals,
 };
@@ -62,6 +66,10 @@ pub struct WorkspaceServices {
     pub vault: Option<std::sync::Arc<Vault>>,
     /// 保险库打不开时给用户看的原因（这次运行的秘密只在内存里）。窗口壳打开后弹出错误通知。
     pub vault_problem: Option<SharedString>,
+    /// SFTP 标签的连接（工单 20）：生产真的登录，测试注入假的。
+    pub sftp: SharedSftpTransportProvider,
+    /// SFTP 标签本地一侧的文件（工单 20）：生产是这台电脑，测试注入假的，不碰真实磁盘。
+    pub local_files: SharedLocalDirectoryProvider,
 }
 
 impl WorkspaceServices {
@@ -81,6 +89,14 @@ impl WorkspaceServices {
         let known_hosts = crate::app::known_hosts_path()
             .unwrap_or_else(|_| std::path::PathBuf::from(crate::app::KNOWN_HOSTS_FILE));
         let source = qishell_hosts::secrets::StoreSource::shared(secrets.clone());
+        let resume = |dir: std::io::Result<std::path::PathBuf>, name: &str| {
+            dir.unwrap_or_else(|_| std::path::PathBuf::from(name))
+        };
+        let sftp = std::sync::Arc::new(SshSftpTransportProvider::new(
+            qishell_ssh::SshConnector::new(known_hosts.clone(), source.clone()),
+            resume(crate::app::upload_resume_dir(), "upload-resume"),
+            resume(crate::app::download_resume_dir(), "download-resume"),
+        ));
         Self {
             local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
             hosts,
@@ -93,6 +109,8 @@ impl WorkspaceServices {
             secrets,
             vault,
             vault_problem,
+            sftp,
+            local_files: std::sync::Arc::new(SystemLocalDirectoryProvider),
         }
     }
 }
@@ -126,6 +144,10 @@ pub struct Workspace {
     pub(super) tabs: TabList<Tab>,
     /// 下一张卡片的 id：从 1 起，不复用。
     pub(super) next_card_id: u64,
+    /// 下一个 SFTP 标签的 id：从 1 起，不复用。
+    pub(super) next_sftp_id: u64,
+    /// 关闭标签前问的那个框（`request_close_tabs`），开着时不再叠一个。
+    pub(super) close_dialog: Option<crate::ui::DialogLayer>,
     /// 每张卡片每类通知上一次发出的时间，用来限频（`notices`）。
     pub(super) notice_times: NoticeTimes,
     /// 标签轨道的滚动位置。
@@ -241,6 +263,8 @@ impl Workspace {
             host_sidebar_open: true,
             tabs: TabList::default(),
             next_card_id: 1,
+            next_sftp_id: 1,
+            close_dialog: None,
             notice_times: NoticeTimes::default(),
             tab_rail: TabRail::default(),
             window_active: window.is_window_active(),
@@ -520,7 +544,12 @@ impl Render for Workspace {
                         RightPanel::Snippets => self.render_snippet_panel(&tokens, cx),
                         RightPanel::Credentials => self.credential_panel.clone().into_any_element(),
                     }))
-                    .child(render_right_sidebar(self.right_panel, &target, &tokens)),
+                    .child(render_right_sidebar(
+                        self.right_panel,
+                        self.files_button(cx),
+                        &target,
+                        &tokens,
+                    )),
             );
         div()
             .id("workspace")
@@ -537,6 +566,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_quick_connect_actions(root, cx))
             .map(|root| handlers::bind_vault_actions(root, cx))
             .map(|root| handlers::bind_credentials_actions(root, cx))
+            .map(|root| handlers::bind_sftp_actions(root, cx))
             .relative()
             .flex()
             .size_full()
