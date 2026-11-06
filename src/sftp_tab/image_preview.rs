@@ -91,6 +91,8 @@ pub(super) fn percent(scale: f32) -> String {
 pub(super) struct ImageView {
     /// 解码的结果：解码时是 `None`。
     pub(super) decoded: Option<Result<Arc<RenderImage>, String>>,
+    /// 解码结果的几个像素算图片自己的一个点。GPUI 把 SVG 按两倍光栅化，别的格式是 1。
+    density: f32,
     zoom: Zoom,
     scroll: ScrollHandle,
     /// 上次排版时画框的大小：放进画框、居中和滚动范围都按它算。
@@ -98,9 +100,14 @@ pub(super) struct ImageView {
 }
 
 impl ImageView {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(format: ImageFormat) -> Self {
         Self {
             decoded: None,
+            density: if format == ImageFormat::Svg {
+                SMOOTH_SVG_SCALE_FACTOR
+            } else {
+                1.
+            },
             zoom: Zoom::Fit,
             scroll: ScrollHandle::new(),
             frame: Rc::new(Cell::new(None)),
@@ -114,8 +121,8 @@ impl ImageView {
         };
         let pixels = decoded.size(0);
         Some(size(
-            px(u32::from(pixels.width) as f32),
-            px(u32::from(pixels.height) as f32),
+            px(u32::from(pixels.width) as f32 / self.density),
+            px(u32::from(pixels.height) as f32 / self.density),
         ))
     }
 

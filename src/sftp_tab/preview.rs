@@ -115,7 +115,8 @@ impl PreviewDialog {
         } = preview;
         let (body, decode) = match content {
             PreviewContent::Image(image) => {
-                (PreviewBody::Image(ImageView::new()), Some(decode(image, cx)))
+                let view = ImageView::new(image.format());
+                (PreviewBody::Image(view), Some(decode(image, cx)))
             }
             PreviewContent::Markdown(text) => (PreviewBody::Markdown(text), None),
         };
@@ -144,7 +145,11 @@ impl PreviewDialog {
     }
 
     /// 对图片的状态做点什么，画面跟着变。Markdown 什么都不做。
-    pub(super) fn with_image(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut ImageView)) {
+    pub(super) fn with_image(
+        &mut self,
+        cx: &mut Context<Self>,
+        change: impl FnOnce(&mut ImageView),
+    ) {
         if let PreviewBody::Image(image) = &mut self.body {
             change(image);
             cx.notify();
@@ -196,7 +201,11 @@ impl PreviewDialog {
         let this = cx.entity().downgrade();
         let choose_mode = std::rc::Rc::new(move |mode: usize, _: &mut Window, cx: &mut App| {
             let _ = this.update(cx, |this, cx| {
-                let zoom = if mode == 0 { Zoom::Fit } else { Zoom::Scale(1.0) };
+                let zoom = if mode == 0 {
+                    Zoom::Fit
+                } else {
+                    Zoom::Scale(1.0)
+                };
                 this.with_image(cx, |image| image.set_zoom(zoom));
             });
         });
@@ -316,9 +325,7 @@ impl Render for PreviewDialog {
         let header = self.header(&tokens, cx);
         let is_image = matches!(self.body, PreviewBody::Image(_));
         let body = match &self.body {
-            PreviewBody::Image(image) => image
-                .render_frame(&tokens, window, cx)
-                .into_any_element(),
+            PreviewBody::Image(image) => image.render_frame(&tokens, window, cx).into_any_element(),
             PreviewBody::Markdown(text) => render_markdown(&self.name, text).into_any_element(),
         };
         div()
@@ -327,9 +334,11 @@ impl Render for PreviewDialog {
             .aria_label(self.name.clone())
             .when(is_image, |root| root.key_context(IMAGE_PREVIEW_CONTEXT))
             .track_focus(&self.focus_handle)
-            .on_action(cx.listener(|this, _: &ZoomPreviewIn, _, cx| {
-                this.with_image(cx, ImageView::step_in)
-            }))
+            .on_action(
+                cx.listener(|this, _: &ZoomPreviewIn, _, cx| {
+                    this.with_image(cx, ImageView::step_in)
+                }),
+            )
             .on_action(cx.listener(|this, _: &ZoomPreviewOut, _, cx| {
                 this.with_image(cx, ImageView::step_out)
             }))

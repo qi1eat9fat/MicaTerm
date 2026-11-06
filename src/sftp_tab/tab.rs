@@ -602,7 +602,12 @@ impl SftpTab {
     }
 
     /// 回车：进光标所在的目录；文件交给编辑器。
-    pub(super) fn open_cursor_entry(&mut self, remote: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_cursor_entry(
+        &mut self,
+        remote: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let card = self.card(remote).clone();
         let Some(entry) = card.read(cx).cursor_entry(cx) else {
             return;

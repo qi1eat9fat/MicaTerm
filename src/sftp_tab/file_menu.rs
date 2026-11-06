@@ -47,20 +47,31 @@ impl CardMenuState {
     fn action(&self, command: SftpTabCommand) -> Box<dyn Action> {
         Box::new(SftpShortcut(command))
     }
+
+    /// 有「编辑」吗：只选中一个文件时有，图片除外（当文本打开只会被拒绝）。
+    fn shows_edit(&self) -> bool {
+        let picture = self
+            .edits_file
+            .as_deref()
+            .and_then(PreviewKind::of)
+            .is_some_and(PreviewKind::preview_only);
+        SHOW_EDIT && self.edits_file.is_some() && !picture
+    }
+
+    /// 「预览」对着的文件：只选中一个能预览的文件时有。Markdown 和 SVG 两项都有。
+    fn previewed_file(&self) -> Option<String> {
+        self.edits_file
+            .clone()
+            .filter(|path| SHOW_PREVIEW && PreviewKind::of(path).is_some())
+    }
 }
 
 /// 行上的右键：编辑 / 预览 / 下载… / 复制路径 / 删除 / 重命名… / 属性…。
 pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
     let remote = state.remote;
     let none = state.targets.is_empty() || !state.can_modify;
-    let kind = state.edits_file.as_deref().and_then(PreviewKind::of);
-    // 图片只有「预览」：当文本打开只会被拒绝。Markdown 和 SVG 两项都有。
-    let edit =
-        state.edits_file.is_some() && SHOW_EDIT && !kind.is_some_and(PreviewKind::preview_only);
-    let preview = state
-        .edits_file
-        .clone()
-        .filter(|_| SHOW_PREVIEW && kind.is_some());
+    let edit = state.shows_edit();
+    let preview = state.previewed_file();
     let transfer = if remote {
         t!("sftp_tab.menu.download")
     } else {
@@ -178,4 +189,50 @@ pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMen
         state.show_hidden,
         Box::new(ToggleHiddenFiles(CardSide::from_remote(remote))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CardMenuState;
+
+    fn state_on(file: Option<&str>) -> CardMenuState {
+        CardMenuState {
+            remote: true,
+            targets: file.iter().map(|file| file.to_string()).collect(),
+            edits_file: file.map(str::to_string),
+            can_go_up: true,
+            can_modify: true,
+            can_transfer: true,
+            show_hidden: false,
+            has_properties: true,
+        }
+    }
+
+    #[test]
+    fn a_picture_is_only_previewed() {
+        for picture in ["/p/a.png", "/p/a.JPG", "/p/a.gif", "/p/a.tiff"] {
+            let state = state_on(Some(picture));
+            assert!(!state.shows_edit(), "{picture}");
+            assert_eq!(state.previewed_file().as_deref(), Some(picture));
+        }
+    }
+
+    #[test]
+    fn markdown_and_svg_are_edited_and_previewed() {
+        for file in ["/p/README.md", "/p/logo.svg"] {
+            let state = state_on(Some(file));
+            assert!(state.shows_edit(), "{file}");
+            assert_eq!(state.previewed_file().as_deref(), Some(file));
+        }
+    }
+
+    #[test]
+    fn other_files_are_only_edited_and_no_file_has_neither() {
+        let text = state_on(Some("/p/notes.txt"));
+        assert!(text.shows_edit());
+        assert_eq!(text.previewed_file(), None);
+        let none = state_on(None);
+        assert!(!none.shows_edit());
+        assert_eq!(none.previewed_file(), None);
+    }
 }
