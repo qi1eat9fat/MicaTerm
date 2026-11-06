@@ -1,8 +1,9 @@
 //! 设置对话框（spec 第 9 节）：一个大对话框，左边分类导航，右边是选中那一类的设置，正文可以滚动。
 //! 改动立即写进设置存储（`SettingsStore`），窗口壳观察它、马上应用。
 //!
-//! 分类是一张表（`CATEGORIES`）：以后加「SFTP」「安全」「应用」，只要往表里加一项、
-//! 在 `pages/` 下加一个页面函数。
+//! 分类是一张表（`CATEGORIES`）：以后加「应用」，只要往表里加一项、加一个页面函数。
+
+use std::path::PathBuf;
 
 use gpui_kit::component::{Icon, IconName, input::InputState, scroll::ScrollableElement as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -13,6 +14,7 @@ use qishell_terminal::monospace_font_families;
 use super::SettingsStore;
 use super::local_shell_editor::LocalShellEditor;
 use super::pages;
+use super::sftp::LocalDirectoryEditor;
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
@@ -34,7 +36,7 @@ struct Category {
 type Page =
     fn(&SettingsDialog, &Tokens, &mut Window, &mut Context<SettingsDialog>) -> Vec<AnyElement>;
 
-/// 左栏的分类，按显示的顺序。之后的工单按 spec 依次加「SFTP」「安全」「应用」。
+/// 左栏的分类，按显示的顺序（原型 `SETNAV`）。之后的工单按 spec 加「应用」。
 const CATEGORIES: &[Category] = &[
     Category {
         title: "settings.category.appearance",
@@ -45,6 +47,11 @@ const CATEGORIES: &[Category] = &[
         title: "settings.category.terminal",
         icon: CatalogIcon::Terminal,
         page: pages::terminal,
+    },
+    Category {
+        title: "settings.category.sftp",
+        icon: CatalogIcon::Folder,
+        page: super::sftp::sftp,
     },
     Category {
         title: "settings.category.security",
@@ -64,6 +71,7 @@ pub struct SettingsDialog {
     pub(super) terminal_font_size: Entity<InputState>,
     pub(super) terminal_line_height: Entity<InputState>,
     pub(super) local_shell: Entity<LocalShellEditor>,
+    pub(super) local_directory: Entity<LocalDirectoryEditor>,
     /// 对话框是哪一层：关闭按钮只关自己。
     layer: DialogLayer,
     focus_handle: FocusHandle,
@@ -72,8 +80,16 @@ pub struct SettingsDialog {
 }
 
 impl SettingsDialog {
-    pub fn new(store: Entity<SettingsStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// `downloads` 是「下载」文件夹：本地默认打开目录留空时用它，这里只用来显示。
+    pub fn new(
+        store: Entity<SettingsStore>,
+        downloads: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let local_shell = cx.new(|cx| LocalShellEditor::new(store.clone(), window, cx));
+        let local_directory =
+            cx.new(|cx| LocalDirectoryEditor::new(store.clone(), downloads, window, cx));
         let mut subscriptions = vec![cx.observe(&store, |_, _, cx| cx.notify())];
         // 设置 › 安全跟着保险库的状态变（工单 13）。
         if let Some(vault) = crate::vault::VaultStore::global(cx) {
@@ -104,6 +120,7 @@ impl SettingsDialog {
             terminal_font_size,
             terminal_line_height,
             local_shell,
+            local_directory,
             layer: DialogLayer::new(),
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
@@ -277,8 +294,13 @@ fn navigation(
 }
 
 /// 打开设置对话框。对话框不点遮罩关闭，用右上角的按钮或 Esc 关。
-pub fn open_settings_dialog(store: Entity<SettingsStore>, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| SettingsDialog::new(store, window, cx));
+pub fn open_settings_dialog(
+    store: Entity<SettingsStore>,
+    downloads: PathBuf,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let view = cx.new(|cx| SettingsDialog::new(store, downloads, window, cx));
     let layer = view.read(cx).layer.clone();
     layer.open(
         move |dialog, window, _| {
