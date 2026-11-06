@@ -13,8 +13,8 @@ use super::{CardSide, NewEntryKind, SftpTabId};
 use crate::app::{SftpAction, SftpTabCommand, ToggleHiddenFiles};
 use crate::i18n::t;
 
-/// 「编辑」：工单 23 接上 `SftpTabCommand::Edit` 后改成 `true`。
-pub const SHOW_EDIT: bool = false;
+/// 「编辑」：工单 23 接上了 `SftpTabCommand::Edit`。
+pub const SHOW_EDIT: bool = true;
 /// 「预览」：工单 24 接上 `SftpTabCommand::Preview` 后改成 `true`。
 pub const SHOW_PREVIEW: bool = false;
 /// 「上传…」「下载…」：工单 22 接上 `SftpTabCommand::Transfer`、`ChooseFiles` 后改成 `true`。

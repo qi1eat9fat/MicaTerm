@@ -85,7 +85,11 @@ impl WindowButton {
                         match self {
                             Self::Minimize => window.minimize_window(),
                             Self::Maximize { .. } => window.zoom_window(),
-                            Self::Close => window.remove_window(),
+                            Self::Close => {
+                                if !crate::app::quit_held_back(window, cx) {
+                                    window.remove_window();
+                                }
+                            }
                         }
                     })
             })

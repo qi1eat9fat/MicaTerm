@@ -191,6 +191,10 @@ impl Workspace {
                 let id = tab.read(cx).id();
                 self.ask_for_sftp_tab(id, *generation, prompt.clone(), window, cx);
             }
+            SftpTabEvent::EditFile(location) => self.on_edit_file(tab, location, window, cx),
+            SftpTabEvent::FileRead { location, file } => {
+                self.on_file_read(tab, location, file, window, cx)
+            }
         }
     }
 
@@ -261,13 +265,14 @@ impl Workspace {
         });
     }
 
-    /// 开一个编辑器标签（工单 23 从 `sftp_tab::file_open` 接过来）。
+    /// 开一个编辑器标签（`sftp_tab::file_open` 读好文件后经 `on_file_read` 到这里）。
     pub fn open_editor_tab(
         &mut self,
         editor: Entity<crate::editor::EditorTab>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TabId {
+        self.watch_editor(&editor, window, cx);
         self.open_tab(Tab::Editor(editor), window, cx)
     }
 }

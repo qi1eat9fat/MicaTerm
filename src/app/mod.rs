@@ -4,6 +4,7 @@ mod actions;
 mod assets;
 mod fonts;
 mod paths;
+mod quit;
 pub mod shortcuts;
 
 pub use actions::*;
@@ -13,6 +14,8 @@ pub use paths::{DATABASE_FILE, database_path};
 pub use paths::{KNOWN_HOSTS_FILE, known_hosts_path};
 pub use paths::{VAULT_FILE, vault_path};
 pub use paths::{download_resume_dir, upload_resume_dir};
+pub use quit::{quit_held_back, set_quit_guard};
+pub use shortcuts::EDITOR_CONTEXT;
 pub use shortcuts::{LOCAL_FILE_LIST_CONTEXT, REMOTE_FILE_LIST_CONTEXT};
 
 use gpui_kit::App;
@@ -30,5 +33,5 @@ pub fn init(cx: &mut App) {
     fonts::register(cx);
     // 在 gpui-kit 自己的绑定之后：同一个键后绑的胜出。
     shortcuts::bind(cx);
-    cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
+    cx.on_action(|_: &Quit, cx: &mut App| quit::quit(cx));
 }

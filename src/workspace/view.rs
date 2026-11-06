@@ -148,6 +148,8 @@ pub struct Workspace {
     pub(super) next_sftp_id: u64,
     /// 关闭标签前问的那个框（`request_close_tabs`），开着时不再叠一个。
     pub(super) close_dialog: Option<crate::ui::DialogLayer>,
+    /// 开着的退出询问框，不再叠一个。
+    pub(super) quit_dialog: Option<crate::ui::DialogLayer>,
     /// 每张卡片每类通知上一次发出的时间，用来限频（`notices`）。
     pub(super) notice_times: NoticeTimes,
     /// 标签轨道的滚动位置。
@@ -197,6 +199,17 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
+        // 关窗口、退出都先问：有未保存的修改、未完成的传输时（工单 23）。
+        let this = cx.weak_entity();
+        crate::app::set_quit_guard(
+            window.window_handle(),
+            move |window, cx| {
+                this.update(cx, |this, cx| this.ask_before_quit(window, cx))
+                    .unwrap_or(false)
+            },
+            cx,
+        );
+        window.on_window_should_close(cx, |window, cx| !crate::app::quit_held_back(window, cx));
         let (hosts, host_list, host_subscriptions) =
             Self::open_hosts(&mut services, &focus_handle, window, cx);
         let snippet_panel = SnippetPanel::new(window, cx);
@@ -265,6 +278,7 @@ impl Workspace {
             next_card_id: 1,
             next_sftp_id: 1,
             close_dialog: None,
+            quit_dialog: None,
             notice_times: NoticeTimes::default(),
             tab_rail: TabRail::default(),
             window_active: window.is_window_active(),
@@ -567,6 +581,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_vault_actions(root, cx))
             .map(|root| handlers::bind_credentials_actions(root, cx))
             .map(|root| handlers::bind_sftp_actions(root, cx))
+            .map(|root| handlers::bind_editor_actions(root, cx))
             .relative()
             .flex()
             .size_full()

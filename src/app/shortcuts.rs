@@ -437,6 +437,17 @@ pub const REMOTE_FILE_KEYS: &[Shortcut] = file_list_keys!(
     "RemoteFileList > DataTable"
 );
 
+/// 编辑器标签的键上下文。
+pub const EDITOR_CONTEXT: &str = "EditorTab";
+
+/// 编辑器标签的按键（工单 23）。Ctrl+F、Ctrl+H 是编辑器自带的查找替换。
+pub const EDITOR_KEYS: &[Shortcut] = &[Shortcut {
+    keys: "ctrl-s",
+    mac: "cmd-s",
+    action: || Box::new(SaveEditor),
+    context: Some(EDITOR_CONTEXT),
+}];
+
 /// 全部快捷键。全局的在前、带上下文的在后：同一个键在上下文里后写的胜出。
 pub fn all() -> impl Iterator<Item = &'static Shortcut> {
     let tables = [
@@ -446,6 +457,7 @@ pub fn all() -> impl Iterator<Item = &'static Shortcut> {
         TERMINAL_KEYS,
         LOCAL_FILE_KEYS,
         REMOTE_FILE_KEYS,
+        EDITOR_KEYS,
     ];
     let global = tables
         .into_iter()

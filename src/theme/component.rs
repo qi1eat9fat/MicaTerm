@@ -34,6 +34,9 @@ pub fn component_theme(mode: ThemeMode, cx: &App) -> Rc<ThemeConfig> {
     config.is_default = false;
     // 界面字号由设置定（`settings::apply`），主题不带字号，免得换主题时把它改回去。
     config.font_size = None;
+    // 代码（编辑器）的字体：随包的 JetBrains Mono，12.5（原型 `.ed.mono`）。
+    config.mono_font_family = Some(SharedString::new_static("JetBrains Mono"));
+    config.mono_font_size = Some(12.5);
     let hex = |color: Hsla| Some(hex(color));
     let colors = &mut config.colors;
     // 对话框、浮层：`--panel`、`--panel-b`。

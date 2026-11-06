@@ -68,6 +68,13 @@ pub enum SftpTabEvent {
         generation: u64,
         prompt: ConnectionPrompt,
     },
+    /// 用户要编辑这个文件：窗口壳看它开着没有，没开就调 `read_for_editor`（工单 23）。
+    EditFile(crate::editor::EditorLocation),
+    /// `read_for_editor` 读好了（工单 23）。
+    FileRead {
+        location: crate::editor::EditorLocation,
+        file: Rc<crate::backend::sftp::TextFile>,
+    },
 }
 
 /// SFTP 标签。
@@ -393,6 +400,7 @@ impl SftpTab {
                 self.state = ConnectionState::Disconnected;
                 self.latency = None;
                 self.abandon_remote_operations(cx);
+                self.abandon_file_requests();
                 self.remote
                     .update(cx, |card, cx| card.disconnected(message, cx));
             }
@@ -627,6 +635,7 @@ impl SftpTab {
         if self.state == ConnectionState::Connected {
             self.send(SftpCommand::Disconnect);
             self.state = ConnectionState::Disconnected;
+            self.abandon_file_requests();
             let message = t!("sftp_tab.connection.lost").to_string();
             self.remote
                 .update(cx, |card, cx| card.disconnected(message, cx));
@@ -637,7 +646,7 @@ impl SftpTab {
 
     /// 告诉用户远程断开了和原因，「重新连接」就在那里。队列自己管重连时（停着的批次等「继续」，
     /// 或者传输正在自己重连）就这么说。这是没有工具栏以后唯一的重连入口。
-    fn offer_reconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn offer_reconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self
             .reconnect_dialog
             .as_ref()
