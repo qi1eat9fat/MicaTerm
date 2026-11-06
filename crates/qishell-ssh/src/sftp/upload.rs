@@ -2,9 +2,9 @@
 // 裁剪：去掉外部 CLI 的 `sync`（跳过没变的文件、`add_pruned`）。
 
 use super::{
-    ConflictFacts, EntryKind, FileFacts, FileMetadata, RESUME_THRESHOLD, Reason, RemotePath, SftpError, TransferAnswer,
-    TransferChoice, TransferDetail, TransferDirection, TransferPhase, TransferQuestionKind,
-    UploadError, UploadRequest,
+    ConflictFacts, EntryKind, FileFacts, FileMetadata, RESUME_THRESHOLD, Reason, RemotePath,
+    SftpError, TransferAnswer, TransferChoice, TransferDetail, TransferDirection, TransferPhase,
+    TransferQuestionKind, UploadError, UploadRequest,
     client::{RemoteFs, is_network_error},
     control::{Cancelled, TargetGuard, TransferControl},
     file_size,

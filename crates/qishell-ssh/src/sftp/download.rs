@@ -8,9 +8,9 @@
 //! flushed to the disk on its own.
 
 use super::{
-    ConflictFacts, DownloadError, DownloadRequest, EntryKind, FileMetadata, RESUME_THRESHOLD, Reason, RemotePath,
-    SftpError, TransferAnswer, TransferChoice, TransferDetail, TransferDirection, TransferPhase,
-    TransferQuestionKind,
+    ConflictFacts, DownloadError, DownloadRequest, EntryKind, FileMetadata, RESUME_THRESHOLD,
+    Reason, RemotePath, SftpError, TransferAnswer, TransferChoice, TransferDetail,
+    TransferDirection, TransferPhase, TransferQuestionKind,
     client::{RemoteFs, is_network_error},
     control::{Cancelled, TargetGuard, TransferControl},
     file_size,

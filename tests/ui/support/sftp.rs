@@ -11,7 +11,8 @@ use qishell::backend::sftp::{
     DirectoryEntry, DirectoryListing, DownloadRequest, EDIT_LIMIT, EntryKind, FileBytes,
     FileMetadata, FileStamp, LocalDirectoryProvider, PermissionEdit, ReadFailure, RemoteOperation,
     RemotePath, SaveFailure, SftpCommand, SftpEvent, SftpTransport, SftpTransportProvider,
-    TextFile, TransferChoice, TransferDirection, TransferPhase, TransferProgress, UploadRequest,
+    TextFile, TransferAnswer, TransferChoice, TransferDirection, TransferPhase, TransferProgress,
+    UploadRequest,
 };
 
 /// 假服务器上给编辑器用的文件：内容和修改时间。
@@ -43,6 +44,8 @@ pub struct FakeSftpProvider {
     /// 编辑器的读取，按路径。
     pub reads: Arc<Mutex<Vec<String>>>,
     pub writes: FakeWrites,
+    /// 传输问题的回答：请求号和回答。
+    pub answers: Arc<Mutex<Vec<(u64, TransferAnswer)>>>,
 }
 
 // 工单 21–24 会用到其余的方法。
@@ -109,6 +112,7 @@ impl SftpTransportProvider for FakeSftpProvider {
             files: self.files.clone(),
             reads: self.reads.clone(),
             writes: self.writes.clone(),
+            answers: self.answers.clone(),
             home: if self.slow_home {
                 "/slow"
             } else {
@@ -130,6 +134,7 @@ pub struct FakeSftpTransport {
     pub files: FakeFiles,
     pub reads: Arc<Mutex<Vec<String>>>,
     pub writes: FakeWrites,
+    pub answers: Arc<Mutex<Vec<(u64, TransferAnswer)>>>,
     pub home: &'static str,
 }
 
@@ -285,7 +290,12 @@ impl SftpTransport for FakeSftpTransport {
                     connect("/home/tester")?;
                     events.send_blocking(SftpEvent::Idle)?;
                 }
-                SftpCommand::Answer { answer, .. } => {
+                SftpCommand::Forget => {
+                    stopped = false;
+                    events.send_blocking(SftpEvent::Idle)?;
+                }
+                SftpCommand::Answer { request_id, answer } => {
+                    self.answers.lock().unwrap().push((request_id, answer));
                     stopped = answer.choice() == TransferChoice::Cancel;
                     events.send_blocking(SftpEvent::Progress(TransferProgress::new(
                         if answer.choice() == TransferChoice::Cancel {

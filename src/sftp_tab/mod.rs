@@ -20,8 +20,10 @@ mod marquee;
 mod model;
 mod operations;
 mod path_bar;
+mod queue_card;
 mod selection;
 mod tab;
+mod transfer_dialog;
 mod transfer_queue;
 mod transfers;
 

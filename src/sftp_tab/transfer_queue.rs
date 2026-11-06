@@ -73,6 +73,14 @@ impl TransferJob {
         }
     }
 
+    /// 这一批列了几项（文件夹算一项）。
+    pub fn count(&self) -> usize {
+        match self {
+            TransferJob::Upload { paths, .. } => paths.len(),
+            TransferJob::Download { paths, .. } => paths.len(),
+        }
+    }
+
     /// The 目标 column.
     pub fn target(&self) -> &str {
         match self {
@@ -159,9 +167,17 @@ impl QueueEntry {
                 Some(_) => percent(progress.map_or(0.0, TransferProgress::fraction)),
             },
             QueueState::Stopped => t!("sftp_transfer.queue.status.stopped").into(),
-            QueueState::Done => match progress.map_or(0, TransferProgress::failed) {
-                0 => t!("sftp_transfer.queue.status.done").into(),
-                failed => t!("sftp_transfer.queue.status.partly_failed", count = failed).into(),
+            QueueState::Done => match (
+                progress.map_or(0, TransferProgress::failed),
+                progress.map_or(0, TransferProgress::skipped),
+            ) {
+                (0, 0) => t!("sftp_transfer.queue.status.done").into(),
+                (0, skipped) => {
+                    t!("sftp_transfer.queue.status.done_skipped", count = skipped).into()
+                }
+                (failed, _) => {
+                    t!("sftp_transfer.queue.status.partly_failed", count = failed).into()
+                }
             },
             QueueState::Removed => match &self.removed {
                 Some(Removal::Discarded) => t!("sftp_transfer.queue.status.discarded").into(),

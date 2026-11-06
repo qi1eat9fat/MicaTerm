@@ -334,6 +334,7 @@ impl SftpTab {
         if let Some(layer) = self.reconnect_dialog.take() {
             layer.close(window, cx);
         }
+        self.close_transfer_dialogs(window, cx);
         self.send(SftpCommand::Disconnect);
         self.send(SftpCommand::Shutdown);
     }
@@ -581,13 +582,7 @@ impl SftpTab {
             C::ToggleQueueEntry { id } => {
                 self.transfers.queue.toggle_expanded(super::QueueId(*id));
             }
-            C::RemoveQueueEntry => {
-                if let Some(id) = self.transfers.queue.removable()
-                    && self.transfers.queue.remove(id)
-                {
-                    self.start_next_if_idle(window, cx);
-                }
-            }
+            C::RemoveQueueEntry => self.remove_queue_entry(window, cx),
             C::ClearFinishedTransfers => self.transfers.queue.clear_finished(),
             C::Reconnect => self.reconnect(cx),
         }
@@ -705,7 +700,7 @@ impl SftpTab {
         let half = GAP / 2.;
         h_resizable(("sftp-cards", self.id.0 as usize))
             .with_state(&self.cards_split)
-            .with_handle_appearance(invisible_handle())
+            .with_handle_appearance(invisible_handle("sftp-cards-gap"))
             .child(
                 resizable_panel()
                     .size(px(0.))
@@ -746,6 +741,7 @@ impl Drop for SftpTab {
 impl Render for SftpTab {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_queue = !self.transfers.queue.is_empty();
+        let half = GAP / 2.;
         div()
             .id("sftp-tab")
             .test_support()
@@ -761,12 +757,29 @@ impl Render for SftpTab {
                 tab.child(
                     v_resizable(("sftp-queue", self.id.0 as usize))
                         .with_state(&self.queue_split)
-                        .child(resizable_panel().child(self.render_cards()))
+                        .with_handle_appearance(invisible_handle("sftp-queue-gap"))
+                        .child(
+                            resizable_panel().child(
+                                div()
+                                    .flex()
+                                    .size_full()
+                                    .min_h_0()
+                                    .pb(half)
+                                    .child(self.render_cards()),
+                            ),
+                        )
                         .child(
                             resizable_panel()
                                 .size(px(180.))
                                 .size_range(px(96.)..px(480.))
-                                .child(self.render_queue(cx)),
+                                .child(
+                                    div()
+                                        .flex()
+                                        .size_full()
+                                        .min_h_0()
+                                        .pt(half)
+                                        .child(self.render_queue(cx)),
+                                ),
                         ),
                 )
             })
@@ -774,11 +787,11 @@ impl Render for SftpTab {
 }
 
 /// 间隙就是拖动柄（同卡片分屏）：柄里什么都不画，命中区和光标还是库的。
-fn invisible_handle() -> ResizeHandleRenderer {
-    Rc::new(|_: &ResizeHandleContext, _, _| {
+fn invisible_handle(id: &'static str) -> ResizeHandleRenderer {
+    Rc::new(move |_: &ResizeHandleContext, _, _| {
         Some(
             div()
-                .id("sftp-cards-gap")
+                .id(id)
                 .test_support()
                 .absolute()
                 .inset_0()
