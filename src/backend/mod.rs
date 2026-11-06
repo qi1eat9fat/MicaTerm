@@ -22,6 +22,8 @@ mod route_tests;
 mod runtime;
 pub mod sftp;
 #[cfg(test)]
+mod sftp_protocol_tests;
+#[cfg(test)]
 mod sftp_tests;
 mod tester;
 #[cfg(test)]
