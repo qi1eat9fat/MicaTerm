@@ -242,7 +242,7 @@ impl SftpTransport for FakeSftpTransport {
                     let mut files = self.files.lock().unwrap();
                     let now = files.get(path.as_str()).map(|(b, m)| fake_stamp(b, *m));
                     let result = if expected.is_some() && expected != now {
-                        Err(SaveFailure::Changed)
+                        Err(SaveFailure::Changed { now })
                     } else {
                         // 每次保存晚一秒。
                         let modified = files.get(path.as_str()).map_or(100, |(_, m)| m + 1);
@@ -404,7 +404,7 @@ impl LocalDirectoryProvider for FakeLocalDirectory {
             .get(path)
             .map(|bytes| FileStamp::new(bytes.len() as u64, None));
         if expected.is_some() && expected != now {
-            return Err(SaveFailure::Changed.into());
+            return Err(SaveFailure::Changed { now }.into());
         }
         files.insert(path.into(), bytes.to_vec());
         drop(files);

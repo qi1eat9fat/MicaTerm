@@ -117,7 +117,7 @@ impl Tab {
         match self {
             Self::Terminal(tab) => tab.focused_card().read(cx).focus_handle(),
             Self::Sftp(tab) => tab.read(cx).focus_target(cx),
-            Self::Editor(tab) => tab.read(cx).focus_target(),
+            Self::Editor(tab) => tab.read(cx).focus_target(cx),
         }
     }
 }

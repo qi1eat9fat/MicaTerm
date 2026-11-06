@@ -1,0 +1,104 @@
+_version: 2
+
+# 编辑器标签（工单 23）：卡片头部、状态栏、冲突框、关闭确认、打不开的文件，和退出时的询问。
+
+editor.command.reload:
+  zh-CN: 重新加载
+editor.command.save:
+  zh-CN: 保存
+editor.text_label:
+  zh-CN: 编辑「%{name}」
+editor.status.local:
+  zh-CN: 本机文件
+editor.status.remote:
+  zh-CN: 经 %{host} 的 SFTP 连接 · %{endpoint}
+editor.status.cursor:
+  zh-CN: 第 %{line} 行，第 %{column} 列
+editor.status.plain_text:
+  zh-CN: 纯文本
+editor.status.saving:
+  zh-CN: 正在保存…
+editor.status.reloading:
+  zh-CN: 正在重新加载…
+editor.changed.title_remote:
+  zh-CN: 文件在服务器上被改过
+editor.changed.title_local:
+  zh-CN: 文件在磁盘上被改过
+editor.changed.lead_remote:
+  zh-CN: 打开之后，服务器上的这个文件被改过：
+editor.changed.lead_local:
+  zh-CN: 打开之后，磁盘上的这个文件被改过：
+editor.changed.opened:
+  zh-CN: 打开时
+editor.changed.now:
+  zh-CN: 现在
+editor.changed.gone:
+  zh-CN: 文件已不存在
+editor.changed.warning:
+  zh-CN: 覆盖会丢掉别人的修改。
+editor.changed.warning_gone:
+  zh-CN: 覆盖会重新创建这个文件。
+editor.changed.reload:
+  zh-CN: 重新加载
+editor.changed.cancel:
+  zh-CN: 取消
+editor.changed.overwrite:
+  zh-CN: 覆盖
+editor.close.title:
+  zh-CN: 保存修改吗
+editor.close.description:
+  zh-CN: 这个文件有未保存的修改，不保存就会丢掉。
+editor.close.discard:
+  zh-CN: 不保存
+editor.close.cancel:
+  zh-CN: 取消
+editor.close.save:
+  zh-CN: 保存
+editor.reload.title:
+  zh-CN: 重新加载「%{name}」
+editor.reload.description:
+  zh-CN: 未保存的修改会丢掉。
+editor.reload.cancel:
+  zh-CN: 取消
+editor.reload.confirm:
+  zh-CN: 重新加载
+editor.reload.failed:
+  zh-CN: 重新加载「%{name}」失败
+editor.save.failed:
+  zh-CN: 保存「%{name}」失败
+editor.save.interrupted_title:
+  zh-CN: 「%{name}」没有写完
+editor.save.interrupted:
+  zh-CN: 服务器上的文件现在不完整，请再保存一次。%{message}
+editor.file.connecting:
+  zh-CN: 正在连接 SFTP，连上以后再试
+editor.file.connection_lost:
+  zh-CN: 连接断开了
+editor.file.open_failed:
+  zh-CN: 打不开「%{name}」
+editor.refused.title:
+  zh-CN: 无法用编辑器打开
+editor.refused.too_large:
+  zh-CN: 「%{name}」有 %{size}，编辑器只打开 %{limit} 以内的 UTF-8 文本文件。
+editor.refused.not_text:
+  zh-CN: 「%{name}」不是 UTF-8 文本文件，编辑器只打开 %{limit} 以内的 UTF-8 文本文件。
+editor.refused.not_file:
+  zh-CN: 「%{name}」不是普通文件，编辑器打不开。
+editor.refused.download_hint:
+  zh-CN: 可以先下载到本机，再用别的程序打开。
+editor.refused.close:
+  zh-CN: 关闭
+editor.refused.download:
+  zh-CN: 下载…
+quit.title:
+  zh-CN: 退出 QiShell
+quit.transfers:
+  zh-CN: "%{name} 还有 %{count} 批传输没完成。"
+quit.transfers_note:
+  zh-CN: 退出后队列清空；续传记录保留，下次传同一个文件会问是否续传。
+quit.unsaved:
+  zh-CN: 「%{name}」有未保存的修改，退出就会丢掉。
+quit.cancel:
+  zh-CN: 取消
+quit.confirm:
+  zh-CN: 仍要退出

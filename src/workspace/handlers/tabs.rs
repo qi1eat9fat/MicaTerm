@@ -263,6 +263,14 @@ impl Workspace {
             self.close_tabs_now(ids, activate, window, cx);
             return;
         }
+        // 只关一个有修改的编辑器：问「保存 / 不保存 / 取消」，它到前面来，看得见在问谁。
+        if let [id] = ids[..]
+            && let Some(editor) = self.tabs.get(id).and_then(Tab::as_editor).cloned()
+        {
+            self.activate_tab(id, window, cx);
+            editor.update(cx, |editor, cx| editor.confirm_close(window, cx));
+            return;
+        }
         // 已经在问了：不再叠一个。
         if self
             .close_dialog
@@ -301,6 +309,59 @@ impl Workspace {
             window,
             cx,
         );
+    }
+
+    /// 关窗口、退出之前（工单 23）：有未完成的传输、未保存的文件就问一次（合成一个框），返回 true 表示拦下了，
+    /// 用户同意时由框自己退出。
+    pub fn ask_before_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let ids = self.tabs.ids();
+        let transfers = self.unfinished_transfers(&ids, cx);
+        let unsaved = self.unsaved_editors(&ids, cx);
+        if transfers.is_empty() && unsaved.is_empty() {
+            return false;
+        }
+        // 已经在问了：还是拦着，不再叠一个。
+        if self
+            .quit_dialog
+            .as_ref()
+            .is_some_and(|layer| layer.is_open(window, cx))
+        {
+            return true;
+        }
+        let mut lines: Vec<_> = transfers
+            .iter()
+            .map(|(name, count)| {
+                ConfirmLine::Text(t!("quit.transfers", name = name, count = count))
+            })
+            .collect();
+        if !transfers.is_empty() {
+            lines.push(ConfirmLine::Text(t!("quit.transfers_note")));
+        }
+        lines.extend(
+            unsaved
+                .iter()
+                .map(|name| ConfirmLine::Text(t!("quit.unsaved", name = name))),
+        );
+        let layer = DialogLayer::new();
+        self.quit_dialog = Some(layer.clone());
+        open_confirm_dialog(
+            Confirm {
+                id: "quit-confirm",
+                title: t!("quit.title"),
+                lines,
+                cancel: t!("quit.cancel"),
+                confirm: t!("quit.confirm"),
+            },
+            layer,
+            Box::new(|_, _, cx| {
+                cx.quit();
+                None
+            }),
+            Box::new(|_, _| {}),
+            window,
+            cx,
+        );
+        true
     }
 
     fn close_tabs_now(

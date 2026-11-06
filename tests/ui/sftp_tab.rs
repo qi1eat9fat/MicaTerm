@@ -8,12 +8,12 @@ use qishell::app::{
     CloseFocusedCard, CloseOtherTabs, ConnectHost, NextTab, OpenCardSftp, OpenHostSftp, OpenSftp,
     SftpAction, SftpTabCommand, ShowCredentials, ShowSnippets, ToggleHiddenFiles,
 };
-use qishell::backend::sftp::SftpEvent;
+use qishell::backend::sftp::{FileStamp, RemotePath, SftpEvent, TextFile};
 use qishell::backend::{
     AuthenticationRequest, ConnectionPrompt, ConnectionPromptKind, ProbedHost, RemoteEvent,
     RemoteTerminalId,
 };
-use qishell::editor::EditorTab;
+use qishell::editor::{EditorLocation, EditorOptions, EditorTab};
 use qishell::sftp_tab::{CardSide, SftpTab, TransferJob};
 use qishell::workspace::{FilesButton, RightPanel};
 use qishell_hosts::SecretRef;
@@ -152,28 +152,29 @@ fn sftp_action(cx: &mut TestAppContext, fixture: &Fixture, command: SftpTabComma
     dispatch(cx, fixture.handle, SftpAction::new(id, command));
 }
 
-/// 本地编辑器标签：工单 23 接上之前，测试直接建。
-fn open_local_editor(cx: &mut TestAppContext, fixture: &Fixture) {
-    let workspace = fixture.workspace.clone();
+/// 直接开一个编辑器标签：这里测的是「文件」按钮和关闭，不是读文件（读文件见 `editor.rs`）。
+fn open_editor(
+    cx: &mut TestAppContext,
+    fixture: &Fixture,
+    location: EditorLocation,
+    sftp: Option<gpui_kit::WeakEntity<SftpTab>>,
+) {
+    let (workspace, local_files) = (fixture.workspace.clone(), fixture.local.clone());
     in_frame(cx, fixture.handle, move |window, cx| {
-        let editor = cx
-            .new(|cx| EditorTab::local("notes.txt".into(), "notes.txt".into(), "本机".into(), cx));
-        workspace.update(cx, |workspace, cx| {
-            workspace.open_editor_tab(editor, window, cx);
-        });
-    });
-}
-
-/// `sftp` 打开的远程编辑器标签。
-fn open_remote_editor(cx: &mut TestAppContext, fixture: &Fixture, sftp: &Entity<SftpTab>) {
-    let (workspace, sftp) = (fixture.workspace.clone(), sftp.downgrade());
-    in_frame(cx, fixture.handle, move |window, cx| {
+        let dispatch = cx.focus_handle();
+        let file = TextFile::decode::<String>(Vec::new(), FileStamp::new(0, None)).unwrap();
         let editor = cx.new(|cx| {
-            EditorTab::remote(
-                "/etc/hosts".into(),
-                "hosts".into(),
-                "web-01".into(),
-                sftp,
+            EditorTab::new(
+                EditorOptions {
+                    location,
+                    place: "web-01".into(),
+                    link: "link".into(),
+                    sftp,
+                    local_files: Arc::new(local_files),
+                    file,
+                    dispatch,
+                },
+                window,
                 cx,
             )
         });
@@ -181,6 +182,18 @@ fn open_remote_editor(cx: &mut TestAppContext, fixture: &Fixture, sftp: &Entity<
             workspace.open_editor_tab(editor, window, cx);
         });
     });
+}
+
+/// 本地编辑器标签。
+fn open_local_editor(cx: &mut TestAppContext, fixture: &Fixture) {
+    let location = EditorLocation::Local("notes.txt".into());
+    open_editor(cx, fixture, location, None);
+}
+
+/// `sftp` 打开的远程编辑器标签。
+fn open_remote_editor(cx: &mut TestAppContext, fixture: &Fixture, sftp: &Entity<SftpTab>) {
+    let location = EditorLocation::Remote(RemotePath::new("/etc/hosts").unwrap());
+    open_editor(cx, fixture, location, Some(sftp.downgrade()));
 }
 
 // ---------- 三个入口 ----------

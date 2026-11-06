@@ -473,16 +473,53 @@ pub fn sftp_program() -> Program {
     }
 }
 
-/// 编辑器标签的图块：写文件名的首字，底色按名字取。工单 23 按文件类型换成原型的颜色。
+/// 编辑器标签的图块：按文件类型取色，写一两个字（原型 `PROG.yaml`、`md`、`sh`、`conf`）。
+/// 没有类型的文件写文件名的首字，底色按名字取。
 pub fn editor_program(name: &str) -> Program {
+    let lower = name.to_ascii_lowercase();
+    let extension = lower
+        .rsplit_once('.')
+        .map_or("", |(_, extension)| extension);
+    let tile = match crate::editor::language_for(name) {
+        "bash" => Some(("$", 0x4EAA25, 0xffffff)),
+        "yaml" => Some(("Y", 0xCB171E, 0xffffff)),
+        "toml" => Some(("T", 0x9C4221, 0xffffff)),
+        "json" => Some(("{}", 0xCBCB41, 0x1a1a1a)),
+        "python" => Some(("py", 0x3776AB, 0xffd43b)),
+        "javascript" => Some(("js", 0xF7DF1E, 0x1a1a1a)),
+        "html" => Some(("<>", 0xE34F26, 0xffffff)),
+        "css" => Some(("#", 0x1572B6, 0xffffff)),
+        "markdown" => Some(("M", 0x4B5563, 0xffffff)),
+        "sql" => Some(("S", 0x336791, 0xffffff)),
+        "php" => Some(("P", 0x777BB4, 0xffffff)),
+        "go" => Some(("Go", 0x00ADD8, 0xffffff)),
+        "lua" => Some(("L", 0x2C2D72, 0xffffff)),
+        "make" => Some(("M", 0x6B7280, 0xffffff)),
+        "diff" => Some(("\u{b1}", 0x3F8F4F, 0xffffff)),
+        _ => match extension {
+            "conf" | "cfg" | "cnf" | "ini" | "service" => Some(("\u{2699}", 0x6D8086, 0xffffff)),
+            "txt" | "log" => Some(("T", 0x9E9E9E, 0xffffff)),
+            _ => None,
+        },
+    };
+    let (letter, tile_bg, tile_fg) = match tile {
+        Some((letter, background, foreground)) => {
+            (Some(letter.to_string()), background, foreground)
+        }
+        None => (
+            name.chars().next().map(|first| first.to_string()),
+            hash_color(name),
+            0xffffff,
+        ),
+    };
     Program {
         name: name.to_string(),
         glyph: TERMINAL_GLYPH,
-        tile_bg: hash_color(name),
-        tile_fg: 0xffffff,
+        tile_bg,
+        tile_fg,
         border: false,
         shell: false,
-        letter: name.chars().next().map(|first| first.to_string()),
+        letter,
         off: false,
     }
 }
@@ -496,7 +533,24 @@ pub fn glyphs() -> impl Iterator<Item = &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::program_of;
+    use super::{editor_program, program_of};
+
+    /// 颜色和字取自原型的 `PROG`。
+    #[test]
+    fn an_editor_tab_gets_the_tile_of_its_file_type() {
+        let tile = |name: &str| {
+            let program = editor_program(name);
+            (program.letter.unwrap(), program.tile_bg)
+        };
+        assert_eq!(tile("docker-compose.yml"), ("Y".to_string(), 0xCB171E));
+        assert_eq!(tile("README.md"), ("M".to_string(), 0x4B5563));
+        assert_eq!(tile("deploy.sh"), ("$".to_string(), 0x4EAA25));
+        assert_eq!(tile("nginx.conf"), ("\u{2699}".to_string(), 0x6D8086));
+        // 同一种类型的文件同色；没有类型的写首字。
+        assert_eq!(tile("a.yaml").1, tile("b.yml").1);
+        assert_eq!(tile("hosts").0, "h");
+        assert_eq!(editor_program("hosts").name, "hosts");
+    }
 
     #[test]
     fn a_known_command_shows_its_own_tile() {
