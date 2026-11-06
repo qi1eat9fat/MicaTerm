@@ -182,3 +182,5 @@ sftp.error.not_found:
   zh-CN: 「%{name}」不存在
 sftp.error.item:
   zh-CN: 「%{name}」：%{error}
+sftp.worker.discard_offline:
+  zh-CN: 连不上主机，远程的半截文件和续传记录还留着，下次传同一个文件会问是否续传
