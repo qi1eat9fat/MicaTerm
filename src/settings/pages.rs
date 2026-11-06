@@ -24,7 +24,11 @@ use crate::i18n::t;
 use crate::theme::Tokens;
 
 /// 改一项设置，写进存储（存储再写文件、通知窗口壳去应用）。
-fn write(store: &Entity<SettingsStore>, cx: &mut App, change: impl FnOnce(&mut AppSettings)) {
+pub(super) fn write(
+    store: &Entity<SettingsStore>,
+    cx: &mut App,
+    change: impl FnOnce(&mut AppSettings),
+) {
     store.update(cx, |store, cx| store.update(change, cx));
 }
 

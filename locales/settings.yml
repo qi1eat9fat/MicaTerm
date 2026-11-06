@@ -79,3 +79,35 @@ settings.local_terminal.automatic_unknown:
   zh-CN: 自动检测
 settings.local_terminal.installed:
   zh-CN: 常用 shell
+settings.category.sftp:
+  zh-CN: SFTP
+settings.sftp.transfers:
+  zh-CN: 传输
+settings.sftp.parallel:
+  zh-CN: 最大同时传输数量
+settings.sftp.parallel_description:
+  zh-CN: "%{min}–%{max}；每个 SFTP 标签各自按这个数传"
+settings.sftp.file_list:
+  zh-CN: 文件列表
+settings.sftp.local_directory:
+  zh-CN: 本地默认打开目录
+settings.sftp.local_directory_description:
+  zh-CN: 新开 SFTP 标签时本地一侧停在这里；留空是「下载」文件夹
+settings.sftp.local_directory_label:
+  zh-CN: 本地默认打开目录，默认 %{path}
+settings.sftp.choose:
+  zh-CN: 选择…
+settings.sftp.choose_prompt:
+  zh-CN: 选择本地默认打开目录
+settings.sftp.icon_style:
+  zh-CN: 图标风格
+settings.sftp.icon_color:
+  zh-CN: 彩色
+settings.sftp.icon_monochrome:
+  zh-CN: 单色
+settings.sftp.show_hidden_local:
+  zh-CN: 显示隐藏文件 · 本地
+settings.sftp.show_hidden_description:
+  zh-CN: 名称以 . 开头的文件和目录
+settings.sftp.show_hidden_remote:
+  zh-CN: 显示隐藏文件 · 远程

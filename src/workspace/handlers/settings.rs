@@ -20,6 +20,7 @@ impl Workspace {
         if window.has_active_dialog(cx) {
             return;
         }
-        open_settings_dialog(self.settings.clone(), window, cx);
+        let downloads = self.services.local_files.downloads();
+        open_settings_dialog(self.settings.clone(), downloads, window, cx);
     }
 }

@@ -66,6 +66,24 @@ pub fn row(
     control: impl IntoElement,
     tokens: &Tokens,
 ) -> AnyElement {
+    let note = description.map(|description| {
+        div()
+            .mt(px(2.))
+            .text_size(px(11.5))
+            .line_height(relative(1.45))
+            .text_color(tokens.faint)
+            .child(description)
+            .into_any_element()
+    });
+    row_with_note(label, note, control)
+}
+
+/// 一行设置，名称下面放任意内容（比如图标风格的示例图标），不只是一句说明。
+pub fn row_with_note(
+    label: SharedString,
+    note: Option<AnyElement>,
+    control: impl IntoElement,
+) -> AnyElement {
     div()
         .flex()
         .items_center()
@@ -80,16 +98,7 @@ pub fn row(
                 .flex_1()
                 .min_w_0()
                 .child(div().text_size(px(13.)).child(label))
-                .when_some(description, |text, description| {
-                    text.child(
-                        div()
-                            .mt(px(2.))
-                            .text_size(px(11.5))
-                            .line_height(relative(1.45))
-                            .text_color(tokens.faint)
-                            .child(description),
-                    )
-                }),
+                .children(note),
         )
         .child(div().flex_none().child(control))
         .into_any_element()

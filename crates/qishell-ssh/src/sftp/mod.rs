@@ -28,7 +28,10 @@ pub use edit::{EDIT_LIMIT, FileBytes, FileStamp, ReadFailure, SaveFailure, TextF
 pub use engine::{Disconnect, EngineEvent, EventSink, EventsClosed, RemoteOperation, SftpCommand};
 pub use error::*;
 pub use model::*;
-pub use parallel::{DEFAULT_PARALLEL_TRANSFERS, PARALLEL_TRANSFERS_RANGE, set_parallel_transfers};
+pub use parallel::{
+    DEFAULT_PARALLEL_TRANSFERS, PARALLEL_TRANSFERS_RANGE, parallel_transfers,
+    set_parallel_transfers,
+};
 pub use worker::SftpWorker;
 
 #[cfg(test)]
