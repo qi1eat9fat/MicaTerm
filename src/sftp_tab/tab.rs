@@ -6,10 +6,14 @@
 //! 每个标签一条工作线程（`SftpTransport`），事件经通道过来，这里每 16ms 取一次：
 //! 工作线程不直接唤醒只在前台跑的 GPUI 任务。
 
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use gpui_kit::base::{ResizableState, h_resizable, resizable_panel, v_resizable};
+use gpui_kit::base::{
+    ResizableState, ResizeHandleContext, ResizeHandleRenderer, h_resizable, resizable_panel,
+    v_resizable,
+};
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -701,6 +705,7 @@ impl SftpTab {
         let half = GAP / 2.;
         h_resizable(("sftp-cards", self.id.0 as usize))
             .with_state(&self.cards_split)
+            .with_handle_appearance(invisible_handle())
             .child(
                 resizable_panel()
                     .size(px(0.))
@@ -766,6 +771,20 @@ impl Render for SftpTab {
                 )
             })
     }
+}
+
+/// 间隙就是拖动柄（同卡片分屏）：柄里什么都不画，命中区和光标还是库的。
+fn invisible_handle() -> ResizeHandleRenderer {
+    Rc::new(|_: &ResizeHandleContext, _, _| {
+        Some(
+            div()
+                .id("sftp-cards-gap")
+                .test_support()
+                .absolute()
+                .inset_0()
+                .into_any_element(),
+        )
+    })
 }
 
 /// 状态栏上的 `user@地址:端口`。

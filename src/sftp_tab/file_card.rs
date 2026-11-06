@@ -164,6 +164,8 @@ pub struct FileCard {
     pub(super) hovered_part: Option<String>,
     /// 路径栏上一帧的宽度，决定折叠哪几级。
     pub(super) label_width: Rc<Cell<Option<Pixels>>>,
+    /// 列表上一帧的宽度：列按它的百分比摆。
+    list_width: Rc<Cell<Option<Pixels>>>,
     /// 用过的最后一侧：标签再到前面来时焦点回到这里，边框也亮着。
     pub(super) current: bool,
     selection: Selection,
@@ -237,6 +239,7 @@ impl FileCard {
             table,
             hovered_part: None,
             label_width: Rc::default(),
+            list_width: Rc::default(),
             current: side == CardSide::Remote,
             selection: Selection::default(),
             menu_hit: Rc::default(),
@@ -436,6 +439,15 @@ impl FileCard {
     /// 下一次列目录后选中这一行。
     pub fn select_after_load(&mut self, name: String) {
         self.select_after_load = Some(name);
+    }
+
+    /// 列表宽度变了：没拖过的列按原型的百分比重新摆，放得下就不用横着滚。
+    fn fit_columns(&mut self, width: Pixels, cx: &mut Context<Self>) {
+        self.table.update(cx, |table, cx| {
+            if table.delegate_mut().fit_columns(width) {
+                table.refresh(cx);
+            }
+        });
     }
 
     fn sync_listing(&mut self, cx: &mut Context<Self>) {
@@ -756,15 +768,11 @@ impl FileCard {
             )
         };
         let hidden = (hidden > 0).then(|| t!("sftp_tab.status.hidden", count = hidden));
-        let counts: SharedString = if selected > 0 {
-            t!(
-                "sftp_tab.status.items_selected",
-                count = items,
-                selected = selected
-            )
-        } else {
-            t!("sftp_tab.status.items", count = items)
-        };
+        let counts = t!(
+            "sftp_tab.status.items_selected",
+            count = items,
+            selected = selected
+        );
         let note = if let Some(name) = &self.opening {
             Some(t!("sftp_tab.status.opening", name = name))
         } else if self.slow_load {
@@ -805,7 +813,11 @@ impl FileCard {
                 details: Vec::new(),
                 problem,
                 note: None,
-                right: self.listed.then_some(counts).into_iter().collect(),
+                right: self
+                    .listed
+                    .then(|| t!("sftp_tab.status.items", count = items))
+                    .into_iter()
+                    .collect(),
             },
         }
     }
@@ -1097,6 +1109,26 @@ impl Render for FileCard {
                         .bordered(false)
                         .with_size(Size::Size(ROW_HEIGHT)),
                 )
+                .child({
+                    // 上一帧有多宽决定列宽；变了下一帧生效。
+                    let (last, card) = (self.list_width.clone(), cx.entity().downgrade());
+                    canvas(
+                        move |bounds, window, _| {
+                            let width = bounds.size.width;
+                            if last.get() != Some(width) {
+                                last.set(Some(width));
+                                window.on_next_frame(move |_, cx| {
+                                    let _ = card.update(cx, |card, cx| card.fit_columns(width, cx));
+                                });
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                })
                 .child(self.marquee.canvas())
                 .children(self.marquee.rectangle(cx)),
             )

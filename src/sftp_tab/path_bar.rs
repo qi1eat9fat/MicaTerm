@@ -191,7 +191,7 @@ impl FileCard {
             .mb(px(6.))
             .mx(px(10.))
             .h(px(26.))
-            .pl(px(10.))
+            .pl(px(2.))
             .pr(px(6.))
             .rounded(px(8.))
             .bg(tokens.field_focused)

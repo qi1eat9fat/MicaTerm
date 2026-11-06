@@ -84,16 +84,29 @@ pub struct FileListing {
     show_hidden: bool,
     sort: Option<(usize, ColumnSort)>,
     side: CardSide,
+    /// 用户拖过列宽：之后不再按百分比摆。
+    dragged: bool,
     context: ListingContext,
 }
 
-/// 两侧的列（原型）。
+/// 列表放不下时的最窄的列。
+const MIN_COLUMN_WIDTH: Pixels = px(48.);
+/// 列表右边留给竖滚动条的地方。
+const SCROLLBAR_ROOM: Pixels = px(10.);
+
+/// 两侧每列占列表宽度的百分比（原型 `fcard` 的 `colgroup`）。
+fn column_shares(side: CardSide) -> &'static [f32] {
+    match side {
+        CardSide::Local => &[44., 13., 19., 24.],
+        CardSide::Remote => &[34., 13., 22., 16., 15.],
+    }
+}
+
+/// 两侧的列（原型）。量到列表的宽度之前先用这些宽度。箭头是 `render_th` 自己画的：
+/// 原型只在排序的那一列上有箭头，不用表格那种每列都有的。
 fn columns(side: CardSide) -> Vec<Column> {
-    let column = |key: &'static str, width: f32| {
-        Column::new(key, column_title(key))
-            .width(px(width))
-            .sortable()
-    };
+    let column =
+        |key: &'static str, width: f32| Column::new(key, column_title(key)).width(px(width));
     match side {
         CardSide::Local => vec![
             name_column(px(240.)),
@@ -133,6 +146,7 @@ impl FileListing {
             show_hidden: false,
             sort: None,
             side,
+            dragged: false,
             context: ListingContext::default(),
         }
     }
@@ -144,8 +158,28 @@ impl FileListing {
     /// 记住拖到的列宽：每次 `refresh`（每次列目录都有）表格都重新取一遍列。
     pub(super) fn set_widths(&mut self, widths: &[Pixels]) {
         for (column, width) in self.columns.iter_mut().zip(widths) {
-            column.width = *width;
+            if column.width != *width {
+                self.dragged = true;
+                column.width = *width;
+            }
         }
+    }
+
+    /// 按原型的百分比摆列，列表宽 `width`。用户拖过就不动了。返回变了没有。
+    pub(super) fn fit_columns(&mut self, width: Pixels) -> bool {
+        if self.dragged {
+            return false;
+        }
+        let room = f32::from((width - SCROLLBAR_ROOM).max(px(0.)));
+        let mut changed = false;
+        for (column, share) in self.columns.iter_mut().zip(column_shares(self.side)) {
+            let fitted = px((room * share / 100.).floor()).max(MIN_COLUMN_WIDTH);
+            if column.width != fitted {
+                column.width = fitted;
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// 点列标题排序，和点箭头一样：降序、升序、回到按名称。
@@ -158,21 +192,23 @@ impl FileListing {
         self.set_sort(col_ix, sort);
     }
 
-    /// 按某一列排序，列上也记一下：表格每次 `refresh` 都重新取列，
-    /// 不记的话下一次列目录箭头就回到没排序，行却还排着。
+    /// 按某一列排序。
     fn set_sort(&mut self, col_ix: usize, sort: ColumnSort) {
         self.sort = match sort {
             ColumnSort::Default => None,
             sort => Some((col_ix, sort)),
         };
-        for (ix, column) in self.columns.iter_mut().enumerate() {
-            column.sort = Some(if ix == col_ix {
-                sort
-            } else {
-                ColumnSort::Default
-            });
-        }
         self.apply_sort();
+    }
+
+    /// 这一列标题后面的箭头：排序的那一列才有，没选时是按名称升序（原型 `th.srt`）。
+    fn sort_arrow(&self, col_ix: usize) -> Option<&'static str> {
+        match self.sort {
+            Some((ix, ColumnSort::Descending)) if ix == col_ix => Some("\u{2193}"),
+            Some((ix, _)) if ix == col_ix => Some("\u{2191}"),
+            None if self.columns[col_ix].key.as_ref() == "name" => Some("\u{2191}"),
+            _ => None,
+        }
     }
 
     /// 显示的行，按显示的顺序。
@@ -376,6 +412,8 @@ impl TableDelegate for FileListing {
     ) -> impl IntoElement {
         let column = &self.columns[col_ix];
         let key = column.key.clone();
+        let arrow = self.sort_arrow(col_ix);
+        let accent = Tokens::current(cx).accent;
         let menu_hit = self.context.menu_hit.clone();
         let geometry = self.context.geometry.clone();
         h_flex()
@@ -397,7 +435,9 @@ impl TableDelegate for FileListing {
                 table.refresh(cx);
                 cx.notify();
             }))
+            .gap(px(3.))
             .child(column.name.clone())
+            .children(arrow.map(|arrow| div().text_color(accent).child(arrow)))
     }
 
     fn render_td(
@@ -581,7 +621,6 @@ fn name_column(width: Pixels) -> Column {
     Column::new("name", column_title("name"))
         .width(width)
         .paddings(Edges::all(px(0.)))
-        .sortable()
 }
 
 /// 往另一侧拖的行，路径是它自己那一侧的。
@@ -723,5 +762,68 @@ impl Render for FileDragPreview {
             .test_support()
             .aria_label(text)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{Pixels, px};
+
+    use super::{CardSide, FileListing};
+    use crate::sftp_tab::FileEntry;
+
+    fn widths(listing: &FileListing) -> Vec<Pixels> {
+        listing.columns.iter().map(|column| column.width).collect()
+    }
+
+    #[test]
+    fn the_columns_share_the_list_as_the_prototype_does() {
+        let mut local = FileListing::new(CardSide::Local);
+        assert!(local.fit_columns(px(1010.)));
+        assert_eq!(widths(&local), [px(440.), px(130.), px(190.), px(240.)]);
+        // 同样的宽度：什么都没变，不用刷新表格。
+        assert!(!local.fit_columns(px(1010.)));
+
+        let mut remote = FileListing::new(CardSide::Remote);
+        remote.fit_columns(px(1010.));
+        assert_eq!(
+            widths(&remote),
+            [px(340.), px(130.), px(220.), px(160.), px(150.)]
+        );
+    }
+
+    #[test]
+    fn a_narrow_list_keeps_a_minimum_and_dragged_columns_stay() {
+        let mut listing = FileListing::new(CardSide::Remote);
+        listing.fit_columns(px(100.));
+        assert!(widths(&listing).iter().all(|width| *width == px(48.)));
+
+        let dragged = [px(300.), px(60.), px(60.), px(60.), px(60.)];
+        listing.set_widths(&dragged);
+        assert!(!listing.fit_columns(px(1010.)));
+        assert_eq!(widths(&listing), dragged);
+    }
+
+    #[test]
+    fn folders_stay_first_and_the_parent_on_top_whatever_the_sort() {
+        let mut listing = FileListing::new(CardSide::Local);
+        listing.set_rows(vec![
+            FileEntry::parent(),
+            FileEntry::file("b.txt", 1),
+            FileEntry::file("a.txt", 9),
+            FileEntry::dir("目录"),
+        ]);
+        assert_eq!(listing.order(), ["..", "目录", "a.txt", "b.txt"]);
+        // 第 1 列是大小：第一次点降序，按字节数。
+        listing.cycle_sort(1);
+        assert_eq!(listing.order(), ["..", "目录", "a.txt", "b.txt"]);
+        assert_eq!(listing.sort_arrow(1), Some("\u{2193}"));
+        assert_eq!(listing.sort_arrow(0), None);
+        listing.cycle_sort(1);
+        assert_eq!(listing.order(), ["..", "目录", "b.txt", "a.txt"]);
+        // 第三次回到按名称。
+        listing.cycle_sort(1);
+        assert_eq!(listing.order(), ["..", "目录", "a.txt", "b.txt"]);
+        assert_eq!(listing.sort_arrow(0), Some("\u{2191}"));
     }
 }

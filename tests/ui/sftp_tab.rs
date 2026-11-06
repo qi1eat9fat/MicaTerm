@@ -697,7 +697,7 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
     open_tab(cx, &fixture);
     assert_eq!(
         label(cx, fixture.handle, "local-status").as_deref(),
-        Some("4 项")
+        Some("4 项 · 已选 0 项")
     );
     let endpoint = cx.update(|cx| {
         let tab = fixture.workspace.read(cx).active_sftp_tab().unwrap();
@@ -707,7 +707,7 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
     });
     assert_eq!(
         label(cx, fixture.handle, "remote-status"),
-        Some(format!("已连接 · {endpoint} · 4 项"))
+        Some(format!("已连接 · {endpoint} · 4 项 · 已选 0 项"))
     );
 
     fixture
@@ -717,7 +717,7 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
         )));
     let measured = wait_until(cx, fixture.handle, |cx| {
         label(cx, fixture.handle, "remote-status").as_deref()
-            == Some(format!("已连接 · {endpoint} · 38 ms · 4 项").as_str())
+            == Some(format!("已连接 · {endpoint} · 38 ms · 4 项 · 已选 0 项").as_str())
     });
     assert!(measured, "{:?}", label(cx, fixture.handle, "remote-status"));
 
@@ -754,7 +754,7 @@ fn the_local_status_bar_counts_hidden_files(cx: &mut TestAppContext) {
     );
     let hidden = wait_until(cx, fixture.handle, |cx| {
         label(cx, fixture.handle, "remote-status")
-            .is_some_and(|status| status.ends_with("1 项 · 隐藏 2 项"))
+            .is_some_and(|status| status.ends_with("1 项 · 已选 0 项 · 隐藏 2 项"))
     });
     assert!(hidden, "{:?}", label(cx, fixture.handle, "remote-status"));
 
@@ -763,7 +763,8 @@ fn the_local_status_bar_counts_hidden_files(cx: &mut TestAppContext) {
     let settings = cx.update(|cx| fixture.workspace.read(cx).settings().clone());
     assert!(cx.update(|cx| settings.read(cx).settings().sftp.show_hidden.remote));
     let shown = wait_until(cx, fixture.handle, |cx| {
-        label(cx, fixture.handle, "remote-status").is_some_and(|status| status.ends_with("3 项"))
+        label(cx, fixture.handle, "remote-status")
+            .is_some_and(|status| status.ends_with("3 项 · 已选 0 项"))
     });
     assert!(shown, "{:?}", label(cx, fixture.handle, "remote-status"));
 }
