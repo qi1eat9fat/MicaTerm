@@ -11,7 +11,7 @@ use crate::app::{
 };
 use crate::card::{CardEvent, CardId, TerminalCard};
 use crate::split::{Axis, Closed};
-use crate::tabs::TabId;
+use crate::tabs::{Tab, TabId, TerminalTab};
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) fn bind_cards_actions(
@@ -78,7 +78,7 @@ impl Workspace {
         let Some(tab) = self.tab_of(card, cx) else {
             return;
         };
-        if let Some(tab) = self.tabs.get_mut(tab) {
+        if let Some(tab) = self.terminal_tab_mut(tab) {
             tab.focus_card(card, cx);
         }
         cx.notify();
@@ -86,12 +86,18 @@ impl Workspace {
 
     /// `card` 在哪个标签里。
     fn tab_of(&self, card: CardId, cx: &App) -> Option<TabId> {
-        self.tabs.find(|tab| tab.contains(card, cx))
+        self.tabs
+            .find(|tab| tab.as_terminal().is_some_and(|tab| tab.contains(card, cx)))
+    }
+
+    /// `id` 这个标签，是终端标签时。
+    pub(in crate::workspace) fn terminal_tab_mut(&mut self, id: TabId) -> Option<&mut TerminalTab> {
+        self.tabs.get_mut(id).and_then(Tab::as_terminal_mut)
     }
 
     /// 把焦点交给在前那个标签的焦点卡片。
     fn focus_active_card(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(tab) = self.tabs.active_content() {
+        if let Some(tab) = self.active_terminal_tab() {
             let focus = tab.focused_card().read(cx).focus_handle();
             window.focus(&focus, cx);
         }
@@ -109,9 +115,18 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(tab) = self.tabs.active_content() {
-            let card = tab.focused_card().read(cx).id();
-            self.close_card(card, window, cx);
+        // SFTP 标签和编辑器标签没有卡片：关的是整个标签（spec 第 8 节）。
+        match self.tabs.active_content() {
+            Some(Tab::Terminal(tab)) => {
+                let card = tab.focused_card().read(cx).id();
+                self.close_card(card, window, cx);
+            }
+            Some(_) => {
+                if let Some(id) = self.tabs.active() {
+                    self.request_close_tabs(vec![id], None, window, cx);
+                }
+            }
+            None => {}
         }
     }
 
@@ -119,7 +134,7 @@ impl Workspace {
         let Some(id) = self.tab_of(card, cx) else {
             return;
         };
-        let Some(tab) = self.tabs.get_mut(id) else {
+        let Some(tab) = self.terminal_tab_mut(id) else {
             return;
         };
         match tab.close_card(card, cx) {
@@ -167,8 +182,7 @@ impl Workspace {
         let Some(id) = self.tabs.active() else {
             return false;
         };
-        self.tabs
-            .get_mut(id)
+        self.terminal_tab_mut(id)
             .is_some_and(|tab| tab.focus_card(card, cx))
     }
 
@@ -178,7 +192,7 @@ impl Workspace {
         let Some(id) = self.tabs.active() else {
             return;
         };
-        let Some(tab) = self.tabs.get(id) else {
+        let Some(tab) = self.tabs.get(id).and_then(Tab::as_terminal) else {
             return;
         };
         let source = tab.focused_card().clone();
@@ -216,13 +230,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.tabs.get(tab).is_none() {
+        if self.tabs.get(tab).and_then(Tab::as_terminal).is_none() {
             self.retire_card(&card, cx);
             return;
         }
         let subscriptions = self.card_subscriptions(&card, window, cx);
         let focus = card.read(cx).focus_handle();
-        if let Some(tab) = self.tabs.get_mut(tab) {
+        if let Some(tab) = self.terminal_tab_mut(tab) {
             tab.split(axis, card, subscriptions, cx);
         }
         window.focus(&focus, cx);
@@ -236,7 +250,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if let Some(id) = self.tabs.active()
-            && let Some(tab) = self.tabs.get_mut(id)
+            && let Some(tab) = self.terminal_tab_mut(id)
             && tab.toggle_zoom(cx)
         {
             self.focus_active_card(window, cx);
@@ -257,7 +271,7 @@ impl Workspace {
         let Some(id) = self.tabs.active() else {
             return;
         };
-        let Some(tab) = self.tabs.get_mut(id) else {
+        let Some(tab) = self.terminal_tab_mut(id) else {
             return;
         };
         if let Some(card) = tab.move_focus(direction, cx) {
@@ -275,7 +289,7 @@ impl Workspace {
     ) {
         let MoveDivider(direction) = *action;
         if let Some(id) = self.tabs.active()
-            && let Some(tab) = self.tabs.get_mut(id)
+            && let Some(tab) = self.terminal_tab_mut(id)
         {
             tab.move_divider(direction, window, cx);
             cx.notify();
@@ -290,7 +304,7 @@ impl Workspace {
     ) {
         let ResetDivider(node) = *action;
         if let Some(id) = self.tabs.active()
-            && let Some(tab) = self.tabs.get_mut(id)
+            && let Some(tab) = self.terminal_tab_mut(id)
         {
             tab.reset_divider(node, window, cx);
             cx.notify();
@@ -305,7 +319,7 @@ impl Workspace {
     ) {
         let ResizeDivider { node, ratio } = *action;
         if let Some(id) = self.tabs.active()
-            && let Some(tab) = self.tabs.get_mut(id)
+            && let Some(tab) = self.terminal_tab_mut(id)
         {
             tab.resize_divider(node, ratio, window, cx);
             cx.notify();

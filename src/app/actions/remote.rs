@@ -1,6 +1,6 @@
 //! 远程卡片的 action（工单 12）：远程终端右键菜单里的重新连接、断开连接、复制 IP，
 //! 以及断开后在卡片里按 Enter 原地重连（按 Space 关闭用的是 `CloseCard`）。
-//! 「打开 SFTP」留给 SFTP 工单（M3）。
+//! 「打开 SFTP」按焦点卡片的规则打开这张卡片所在主机的 SFTP 标签（工单 20）。
 
 use gpui_kit::Action;
 
@@ -17,6 +17,11 @@ pub struct ReconnectCard(pub CardId);
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
 #[action(namespace = qishell, no_json)]
 pub struct DisconnectCard(pub CardId);
+
+/// 打开这张远程卡片所在主机的 SFTP 标签，已经有就切过去（终端右键菜单「打开 SFTP」）。
+#[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
+#[action(namespace = qishell, no_json)]
+pub struct OpenCardSftp(pub CardId);
 
 /// 把远程卡片主机的地址放进剪贴板（右键菜单「复制 IP」，地址是域名时叫「复制主机名」）。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]

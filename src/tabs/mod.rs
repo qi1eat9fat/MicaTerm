@@ -4,9 +4,11 @@
 //! 工单 04 补全了标签的切换、关闭（`model`）和标签轨道（`TabRail`）。
 
 mod model;
+mod tab;
 mod tab_rail;
 
 pub use model::{TabId, TabList};
+pub use tab::Tab;
 pub use tab_rail::{TabRail, TabSnapshot, build_tab_menu};
 
 use std::collections::HashMap;

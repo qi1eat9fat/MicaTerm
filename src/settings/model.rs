@@ -9,13 +9,17 @@
 // 「终端交互」直接用终端 crate 的 `TerminalInteraction`，终端字体的默认值和范围也取自终端 crate）
 
 use std::ops::RangeInclusive;
+use std::path::PathBuf;
 
 use gpui_kit::WindowAppearance;
 use gpui_kit::component::ThemeMode;
 use serde::{Deserialize, Serialize};
 
+use qishell_ssh::sftp::{DEFAULT_PARALLEL_TRANSFERS, PARALLEL_TRANSFERS_RANGE};
 use qishell_terminal::TerminalTheme;
 pub use qishell_terminal::{RightClick, TerminalCursorStyle, TerminalInteraction};
+
+use crate::sftp_tab::{FileIconStyle, ShowHiddenFiles};
 
 /// 全部设置。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -33,6 +37,8 @@ pub struct AppSettings {
     pub terminal_interaction: TerminalInteraction,
     /// 终端 → 本地终端的 shell。
     pub local_terminal: LocalTerminalSettings,
+    /// SFTP（工单 20 定好模型，25 只加页面）。
+    pub sftp: SftpSettings,
 }
 
 impl AppSettings {
@@ -46,6 +52,46 @@ impl AppSettings {
             .shell
             .map(|shell| shell.trim().to_string())
             .filter(|shell| !shell.is_empty());
+        self.sftp = self.sftp.normalized();
+        self
+    }
+}
+
+/// SFTP：同时传输数量、本地默认打开目录、文件图标风格、显示隐藏文件。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SftpSettings {
+    /// 每个 SFTP 标签同时传几个文件（1–10，默认 3）。
+    pub parallel: usize,
+    /// 本地一侧从哪里开始；`None` 是「下载」文件夹，不把本机的路径写进文件（数据目录能拷到别的电脑）。
+    pub local_directory: Option<PathBuf>,
+    /// 文件列表的图标：彩色或单色。
+    pub file_icon_style: FileIconStyle,
+    /// 显示隐藏文件，本地和远程各一个开关。
+    pub show_hidden: ShowHiddenFiles,
+}
+
+impl Default for SftpSettings {
+    fn default() -> Self {
+        Self {
+            parallel: DEFAULT_PARALLEL_TRANSFERS,
+            local_directory: None,
+            file_icon_style: FileIconStyle::default(),
+            show_hidden: ShowHiddenFiles::default(),
+        }
+    }
+}
+
+impl SftpSettings {
+    /// 数量收进范围；空的目录等于没设。
+    fn normalized(mut self) -> Self {
+        self.parallel = self.parallel.clamp(
+            *PARALLEL_TRANSFERS_RANGE.start(),
+            *PARALLEL_TRANSFERS_RANGE.end(),
+        );
+        self.local_directory = self
+            .local_directory
+            .filter(|directory| !directory.as_os_str().is_empty());
         self
     }
 }
@@ -252,6 +298,32 @@ mod tests {
         assert!(!settings.terminal_interaction.copy_on_select);
         assert!(settings.terminal_interaction.cursor_blinking);
         assert_eq!(settings.local_terminal.shell, None);
+        assert_eq!(settings.sftp.parallel, 3);
+        assert_eq!(settings.sftp.local_directory, None);
+        assert!(!settings.sftp.show_hidden.local && !settings.sftp.show_hidden.remote);
+    }
+
+    #[test]
+    fn the_sftp_settings_keep_their_keys_and_range() {
+        let json = r#"{ "sftp": {
+            "parallel": 99,
+            "local_directory": "D:/Work",
+            "file_icon_style": "monochrome",
+            "show_hidden": { "local": true }
+        } }"#;
+        let settings = serde_json::from_str::<AppSettings>(json)
+            .unwrap()
+            .normalized();
+        assert_eq!(settings.sftp.parallel, 10);
+        assert_eq!(
+            settings.sftp.local_directory.as_deref(),
+            Some(std::path::Path::new("D:/Work"))
+        );
+        assert_eq!(
+            settings.sftp.file_icon_style,
+            crate::sftp_tab::FileIconStyle::Monochrome
+        );
+        assert!(settings.sftp.show_hidden.local && !settings.sftp.show_hidden.remote);
     }
 
     #[test]

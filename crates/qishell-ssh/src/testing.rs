@@ -5,13 +5,13 @@
 //! A real SSH server in the test's own process, for this crate's tests and
 //! those of what is built on it: a password login, a login with the keys it
 //! is told to accept, a shell that echoes what is typed, commands, and SFTP through this machine's OpenSSH
-//! `sftp-server` (none on Windows). Only in tests or with the `testing`
-//! feature.
+//! `sftp-server` (on Windows, the one Git for Windows carries). Only in tests
+//! or with the `testing` feature.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use russh::keys::{Algorithm, PrivateKey, PublicKey};
@@ -392,15 +392,41 @@ pub fn has_sftp_server() -> bool {
     sftp_server().is_some()
 }
 
-/// This machine's OpenSSH `sftp-server`, if it has one.
-fn sftp_server() -> Option<&'static str> {
-    [
-        "/usr/libexec/sftp-server",
-        "/usr/lib/openssh/sftp-server",
-        "/usr/lib/ssh/sftp-server",
-    ]
-    .into_iter()
-    .find(|path| std::path::Path::new(path).exists())
+/// This machine's OpenSSH `sftp-server`, if it has one. On Windows, the one
+/// Git for Windows carries, wherever Git is: its paths come out in MSYS form
+/// (`/e/...`), so treat them as opaque.
+fn sftp_server() -> Option<&'static std::path::Path> {
+    static SERVER: OnceLock<Option<PathBuf>> = OnceLock::new();
+    SERVER
+        .get_or_init(|| {
+            [
+                "/usr/libexec/sftp-server",
+                "/usr/libexec/openssh/sftp-server",
+                "/usr/lib/openssh/sftp-server",
+                "/usr/lib/ssh/sftp-server",
+            ]
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|path| path.exists())
+            .or_else(git_sftp_server)
+        })
+        .as_deref()
+}
+
+/// `<git>\usr\lib\ssh\sftp-server.exe` of the first Git on the `PATH`, which
+/// keeps `git.exe` in `cmd`, `bin` or `mingw64\bin`.
+fn git_sftp_server() -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .filter(|dir| dir.join("git.exe").exists())
+        .find_map(|dir| {
+            dir.ancestors()
+                .map(|root| root.join(r"usr\lib\ssh\sftp-server.exe"))
+                .find(|server| server.exists())
+        })
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

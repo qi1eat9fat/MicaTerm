@@ -96,6 +96,16 @@ pub fn known_hosts_path() -> io::Result<PathBuf> {
     Ok(dir.join(KNOWN_HOSTS_FILE))
 }
 
+/// 上传的续传记录放在哪（工单 22）。
+pub fn upload_resume_dir() -> io::Result<PathBuf> {
+    Ok(data_dir()?.join("upload-resume"))
+}
+
+/// 下载的续传记录放在哪（工单 22）。
+pub fn download_resume_dir() -> io::Result<PathBuf> {
+    Ok(data_dir()?.join("download-resume"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;

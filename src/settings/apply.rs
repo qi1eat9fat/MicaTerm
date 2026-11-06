@@ -10,6 +10,7 @@ use gpui_kit::{App, Window, px};
 use qishell_terminal::{TerminalColors, TerminalFont, TerminalInteraction, is_font_installed};
 
 use super::{AppSettings, DEFAULT_TERMINAL_FONT_FAMILY};
+use crate::sftp_tab::{FileIconStyle, ShowHiddenFiles};
 use crate::theme::{component_theme, component_theme_name};
 
 /// 让窗口和设置一致：应用外观（跟随系统时看窗口当前的外观）、界面字号、终端主题、
@@ -34,6 +35,20 @@ pub fn apply(settings: &AppSettings, window: &mut Window, cx: &mut App) {
     }
 
     apply_terminal(settings, cx);
+    apply_sftp(settings, cx);
+}
+
+/// SFTP 读的全局量：文件图标风格和隐藏文件即时生效，并发数下一批生效。
+fn apply_sftp(settings: &AppSettings, cx: &mut App) {
+    let style = settings.sftp.file_icon_style;
+    if cx.try_global::<FileIconStyle>() != Some(&style) {
+        cx.set_global(style);
+    }
+    let hidden = settings.sftp.show_hidden;
+    if cx.try_global::<ShowHiddenFiles>() != Some(&hidden) {
+        cx.set_global(hidden);
+    }
+    qishell_ssh::sftp::set_parallel_transfers(settings.sftp.parallel);
 }
 
 /// 换成 `mode` 的界面主题（原型 token 映射出来的那套）；已经是它就不动。

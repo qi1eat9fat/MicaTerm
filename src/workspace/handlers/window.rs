@@ -2,7 +2,7 @@
 
 use gpui_kit::*;
 
-use crate::app::{OpenSftp, ToggleHostSidebar};
+use crate::app::ToggleHostSidebar;
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) fn bind_window_actions(
@@ -10,7 +10,6 @@ pub(in crate::workspace) fn bind_window_actions(
     cx: &mut Context<Workspace>,
 ) -> Stateful<Div> {
     root.on_action(cx.listener(Workspace::on_toggle_host_sidebar))
-        .on_action(cx.listener(Workspace::on_open_sftp))
 }
 
 impl Workspace {
@@ -23,7 +22,4 @@ impl Workspace {
         self.host_sidebar_open = !self.host_sidebar_open;
         cx.notify();
     }
-
-    /// SFTP 标签在 M3 接上。
-    fn on_open_sftp(&mut self, _: &OpenSftp, _: &mut Window, _: &mut Context<Self>) {}
 }

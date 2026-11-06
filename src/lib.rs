@@ -17,6 +17,7 @@
 //! - `credential`：凭据面板、凭据对话框和删除凭据的确认（工单 14）；
 //! - `secrets`：系统钥匙串（只存保险库的数据密钥）和打开数据目录里的保险库；
 //! - `vault`：保险库的界面（工单 13）：状态、设置主密码框、解锁小卡片、重置，和用到秘密之前弹哪个框；
+//! - `sftp_tab`：SFTP 标签（本地和远程两张文件卡片，工单 20 起）；`editor`：编辑器标签（工单 23）；
 //! - `ui`：功能模块共用的界面件：对话框的层（按身份关闭）、表单件、确认框；
 //! - `workspace`：窗口壳，持有全部 action 的处理器（`workspace/handlers/` 按领域分文件）。
 
@@ -25,11 +26,13 @@ pub mod backend;
 pub mod card;
 pub mod connect;
 pub mod credential;
+pub mod editor;
 pub mod host;
 pub mod i18n;
 pub mod programs;
 pub mod secrets;
 pub mod settings;
+pub mod sftp_tab;
 pub mod snippets;
 pub mod split;
 pub mod tabs;

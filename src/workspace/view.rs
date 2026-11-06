@@ -20,6 +20,10 @@ use super::remote::PromptQueue;
 use super::right_sidebar::{RightPanel, render_right_sidebar};
 use super::title_bar::render_title_bar;
 use crate::app::PRODUCT_NAME;
+use crate::backend::sftp::{
+    SharedLocalDirectoryProvider, SharedSftpTransportProvider, SshSftpTransportProvider,
+    SystemLocalDirectoryProvider,
+};
 use crate::backend::{
     SharedConnectionTester, SharedRemoteTerminals, SshConnectionTester, SshRemoteTerminals,
 };
@@ -30,7 +34,7 @@ use crate::i18n::t;
 use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
 use crate::snippets::SnippetPanel;
 use crate::split::NodeId;
-use crate::tabs::{TabId, TabList, TabRail, TabSnapshot, TerminalTab};
+use crate::tabs::{Tab, TabId, TabList, TabRail, TabSnapshot, TerminalTab};
 use crate::theme::{GAP, Tokens};
 use crate::vault::{Vault, VaultStore, VaultStoreEvent};
 
@@ -62,6 +66,10 @@ pub struct WorkspaceServices {
     pub vault: Option<std::sync::Arc<Vault>>,
     /// 保险库打不开时给用户看的原因（这次运行的秘密只在内存里）。窗口壳打开后弹出错误通知。
     pub vault_problem: Option<SharedString>,
+    /// SFTP 标签的连接（工单 20）：生产真的登录，测试注入假的。
+    pub sftp: SharedSftpTransportProvider,
+    /// SFTP 标签本地一侧的文件（工单 20）：生产是这台电脑，测试注入假的，不碰真实磁盘。
+    pub local_files: SharedLocalDirectoryProvider,
 }
 
 impl WorkspaceServices {
@@ -81,6 +89,14 @@ impl WorkspaceServices {
         let known_hosts = crate::app::known_hosts_path()
             .unwrap_or_else(|_| std::path::PathBuf::from(crate::app::KNOWN_HOSTS_FILE));
         let source = qishell_hosts::secrets::StoreSource::shared(secrets.clone());
+        let resume = |dir: std::io::Result<std::path::PathBuf>, name: &str| {
+            dir.unwrap_or_else(|_| std::path::PathBuf::from(name))
+        };
+        let sftp = std::sync::Arc::new(SshSftpTransportProvider::new(
+            qishell_ssh::SshConnector::new(known_hosts.clone(), source.clone()),
+            resume(crate::app::upload_resume_dir(), "upload-resume"),
+            resume(crate::app::download_resume_dir(), "download-resume"),
+        ));
         Self {
             local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
             hosts,
@@ -93,6 +109,8 @@ impl WorkspaceServices {
             secrets,
             vault,
             vault_problem,
+            sftp,
+            local_files: std::sync::Arc::new(SystemLocalDirectoryProvider),
         }
     }
 }
@@ -122,10 +140,14 @@ pub struct Workspace {
     pub(super) services: WorkspaceServices,
     /// 主机栏是否显示。
     pub(super) host_sidebar_open: bool,
-    /// 终端标签，从左到右，和在前的那个。
-    pub(super) tabs: TabList<TerminalTab>,
+    /// 标签（终端、SFTP、编辑器），从左到右，和在前的那个。
+    pub(super) tabs: TabList<Tab>,
     /// 下一张卡片的 id：从 1 起，不复用。
     pub(super) next_card_id: u64,
+    /// 下一个 SFTP 标签的 id：从 1 起，不复用。
+    pub(super) next_sftp_id: u64,
+    /// 关闭标签前问的那个框（`request_close_tabs`），开着时不再叠一个。
+    pub(super) close_dialog: Option<crate::ui::DialogLayer>,
     /// 每张卡片每类通知上一次发出的时间，用来限频（`notices`）。
     pub(super) notice_times: NoticeTimes,
     /// 标签轨道的滚动位置。
@@ -241,6 +263,8 @@ impl Workspace {
             host_sidebar_open: true,
             tabs: TabList::default(),
             next_card_id: 1,
+            next_sftp_id: 1,
+            close_dialog: None,
             notice_times: NoticeTimes::default(),
             tab_rail: TabRail::default(),
             window_active: window.is_window_active(),
@@ -368,19 +392,29 @@ impl Workspace {
         self.tabs.active()
     }
 
-    /// 一个标签里的卡片。
+    /// 在前的标签，是终端标签时。卡片的处理器都经它，在 SFTP、编辑器标签里自然什么都不做。
+    pub(super) fn active_terminal_tab(&self) -> Option<&TerminalTab> {
+        self.tabs.active_content().and_then(Tab::as_terminal)
+    }
+
+    /// 全部终端标签，从左到右。
+    pub(super) fn terminal_tabs(&self) -> impl Iterator<Item = &TerminalTab> {
+        self.tabs.iter().filter_map(|(_, tab)| tab.as_terminal())
+    }
+
+    /// 一个标签里的卡片。SFTP 标签和编辑器标签没有卡片。
     pub fn tab_cards(&self, tab: TabId) -> Vec<Entity<TerminalCard>> {
         self.tabs
             .get(tab)
+            .and_then(Tab::as_terminal)
             .map(|tab| tab.cards().cloned().collect())
             .unwrap_or_default()
     }
 
     /// id 为 `card` 的卡片，在哪个标签里都找。
     pub fn card(&self, card: CardId, cx: &App) -> Option<Entity<TerminalCard>> {
-        self.tabs
-            .iter()
-            .flat_map(|(_, tab)| tab.cards())
+        self.terminal_tabs()
+            .flat_map(|tab| tab.cards())
             .find(|entity| entity.read(cx).id() == card)
             .cloned()
     }
@@ -391,24 +425,21 @@ impl Workspace {
             .map(|entity| entity.read(cx).screen_text(cx))
     }
 
-    /// 在前那个标签的焦点卡片。
+    /// 在前那个标签的焦点卡片。SFTP 标签、编辑器标签和开始卡片没有焦点卡片。
     pub fn focused_card(&self, cx: &App) -> Option<CardId> {
-        self.tabs
-            .active_content()
+        self.active_terminal_tab()
             .map(|tab| tab.focused_card().read(cx).id())
     }
 
     /// 在前那个标签里放大着的卡片。
     pub fn zoomed_card(&self) -> Option<CardId> {
-        self.tabs
-            .active_content()
+        self.active_terminal_tab()
             .and_then(|tab| tab.tree().zoomed())
     }
 
     /// 在前那个标签里分隔线 `node` 的比例（左边或上边占的份额）。
     pub fn divider_ratio(&self, node: NodeId) -> Option<f32> {
-        self.tabs
-            .active_content()
+        self.active_terminal_tab()
             .and_then(|tab| tab.tree().ratio(node))
     }
 
@@ -464,17 +495,7 @@ impl Workspace {
         let active = self.tabs.active();
         self.tabs
             .iter()
-            .map(|(id, tab)| {
-                let card = tab.focused_card().read(cx);
-                TabSnapshot {
-                    id,
-                    name: card.name(),
-                    directory: card.directory_label().into(),
-                    active: active == Some(id),
-                    tiles: tab.tiles(cx),
-                    dot: tab.dot(cx),
-                }
-            })
+            .map(|(id, tab)| tab.snapshot(id, active == Some(id), cx))
             .collect()
     }
 }
@@ -494,7 +515,7 @@ impl Render for Workspace {
             .min_w_0()
             .when(!self.host_sidebar_open, |content| content.pl(GAP))
             .map(|content| match self.tabs.active_content() {
-                Some(tab) => content.child(tab.content()),
+                Some(tab) => content.child(tab.content(cx)),
                 None => content.child(self.render_start_card(&target, &tokens, window, cx)),
             });
         let main = div()
@@ -523,7 +544,12 @@ impl Render for Workspace {
                         RightPanel::Snippets => self.render_snippet_panel(&tokens, cx),
                         RightPanel::Credentials => self.credential_panel.clone().into_any_element(),
                     }))
-                    .child(render_right_sidebar(self.right_panel, &target, &tokens)),
+                    .child(render_right_sidebar(
+                        self.right_panel,
+                        self.files_button(cx),
+                        &target,
+                        &tokens,
+                    )),
             );
         div()
             .id("workspace")
@@ -540,6 +566,7 @@ impl Render for Workspace {
             .map(|root| handlers::bind_quick_connect_actions(root, cx))
             .map(|root| handlers::bind_vault_actions(root, cx))
             .map(|root| handlers::bind_credentials_actions(root, cx))
+            .map(|root| handlers::bind_sftp_actions(root, cx))
             .relative()
             .flex()
             .size_full()

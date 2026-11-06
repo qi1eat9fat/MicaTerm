@@ -213,7 +213,7 @@ fn login_reason(causes: &[Cause<'_>]) -> String {
 }
 
 /// 链上的一环。`rest` 是它下面的，说「在哪里失败」的那几环接着往下说。
-fn link(cause: Cause<'_>, rest: &[Cause<'_>]) -> String {
+pub(super) fn link(cause: Cause<'_>, rest: &[Cause<'_>]) -> String {
     if let Some(error) = link_as::<ConnectError>(cause) {
         return connect(error);
     }

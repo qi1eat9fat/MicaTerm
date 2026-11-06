@@ -41,8 +41,7 @@ impl Workspace {
         action: impl FnOnce(&mut TerminalView, &mut Context<TerminalView>),
     ) {
         if let Some(terminal) = self
-            .tabs
-            .active_content()
+            .active_terminal_tab()
             .map(|tab| tab.focused_terminal(cx))
         {
             terminal.update(cx, action);

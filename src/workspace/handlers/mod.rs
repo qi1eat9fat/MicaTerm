@@ -13,7 +13,8 @@
 //! - `snippets`：命令片段面板（19）；
 //! - `quick_connect`：快速连接弹层的开关（18）；
 //! - `vault`：保险库的锁定、解锁、主密码、重置（13）；
-//! - `credentials`：凭据面板、凭据对话框、删除凭据（14）。
+//! - `credentials`：凭据面板、凭据对话框、删除凭据（14）；
+//! - `sftp`：打开 SFTP 标签的三个入口、发给 SFTP 标签的命令（20）。
 //!
 //! 处理器里改了状态要 `cx.notify()`；在焦点监听器里改状态要 `defer_in`。
 
@@ -23,6 +24,7 @@ mod hosts;
 mod quick_connect;
 mod remote;
 mod settings;
+mod sftp;
 mod snippets;
 mod tabs;
 mod terminal;
@@ -35,6 +37,7 @@ pub(super) use hosts::bind_hosts_actions;
 pub(super) use quick_connect::bind_quick_connect_actions;
 pub(super) use remote::bind_remote_actions;
 pub(super) use settings::bind_settings_actions;
+pub(super) use sftp::bind_sftp_actions;
 pub(super) use snippets::bind_snippets_actions;
 pub(super) use tabs::bind_tabs_actions;
 pub(super) use terminal::bind_terminal_actions;

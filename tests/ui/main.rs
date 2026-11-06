@@ -22,19 +22,29 @@
 //! - `remote_activity`：远程卡片被动解析（17）
 //! - `credentials`：凭据（14）
 //! - `dialogs`：对话框的层（M2 code review）
+//! - `sftp_tab`：SFTP 标签的入口和浏览（20）
+//! - `sftp_files`：文件操作（21）
+//! - `sftp_transfer`：传输（22）
+//! - `editor`：编辑器标签（23）
+//! - `preview`：预览（24）
 
 mod support;
 
 mod credentials;
 mod dialogs;
+mod editor;
 mod host_dialog;
 mod hosts;
+mod preview;
 mod programs;
 mod quick_connect;
 mod remote_activity;
 mod remote_card;
 mod route;
 mod settings;
+mod sftp_files;
+mod sftp_tab;
+mod sftp_transfer;
 mod snippets;
 mod split;
 mod split_remote;

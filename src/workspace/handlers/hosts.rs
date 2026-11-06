@@ -1,7 +1,7 @@
 //! 主机的处理器（工单 11）：新建、编辑、创建副本、复制地址、删除、拖动排序、聚焦主机搜索。
 //!
 //! 连接类的 action：`ConnectHost`（12，在新标签里连接）、`ConnectHostRight`、`ConnectHostDown`
-//! （16，开在焦点卡片旁边，见 `split_open_host`）在这里，`OpenHostSftp` 由 M3 加。
+//! （16，开在焦点卡片旁边，见 `split_open_host`）在这里，`OpenHostSftp` 在 `sftp`（20）。
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;

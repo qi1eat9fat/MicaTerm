@@ -1,0 +1,26 @@
+_version: 2
+
+# 传输队列（工单 22 接着写）。
+
+sftp_transfer.queue.several_places:
+  zh-CN: 多个位置
+sftp_transfer.queue.status.pending:
+  zh-CN: 等待中
+sftp_transfer.queue.status.scanning:
+  zh-CN: 正在扫描
+sftp_transfer.queue.status.waiting:
+  zh-CN: 等待回答
+sftp_transfer.queue.status.reconnecting:
+  zh-CN: 正在重连
+sftp_transfer.queue.status.stopped:
+  zh-CN: 已停止
+sftp_transfer.queue.status.done:
+  zh-CN: 已完成
+sftp_transfer.queue.status.partly_failed:
+  zh-CN: 部分失败（%{count} 项）
+sftp_transfer.queue.status.discarded:
+  zh-CN: 已丢弃续传进度
+sftp_transfer.queue.status.not_started:
+  zh-CN: 无法开始：%{reason}
+sftp_transfer.queue.status.removed:
+  zh-CN: 已移出

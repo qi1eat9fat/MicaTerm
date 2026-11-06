@@ -266,42 +266,47 @@ impl RemoteCard {
     /// 拿不到程序名时卡片和标签上的图块：主机的系统徽章；还没探测出系统时是名称的首字，
     /// 底色按地址取（和主机栏的徽章一样）。
     pub(super) fn badge(&self) -> Program {
-        let own = mark_color(&self.host.address);
-        match self.os {
-            Some(os) => {
-                let (background, ink) = os
-                    .brand_color()
-                    .zip(os.brand_foreground())
-                    .unwrap_or((own, 0xffffff));
-                Program {
-                    name: os.label().to_string(),
-                    glyph: os.icon_path(),
-                    tile_bg: background,
-                    tile_fg: ink,
-                    border: false,
-                    shell: true,
-                    letter: None,
-                    off: false,
-                }
+        host_badge(&self.host, self.os)
+    }
+}
+
+/// 主机的系统徽章：`os` 不知道时是名称的首字，底色按地址取（和主机栏的徽章一样）。
+/// 远程卡片和 SFTP 标签的远程文件卡片共用。
+pub fn host_badge(host: &Host, os: Option<HostOs>) -> Program {
+    let own = mark_color(&host.address);
+    match os {
+        Some(os) => {
+            let (background, ink) = os
+                .brand_color()
+                .zip(os.brand_foreground())
+                .unwrap_or((own, 0xffffff));
+            Program {
+                name: os.label().to_string(),
+                glyph: os.icon_path(),
+                tile_bg: background,
+                tile_fg: ink,
+                border: false,
+                shell: true,
+                letter: None,
+                off: false,
             }
-            None => {
-                let letter = self
-                    .host
-                    .name
-                    .chars()
-                    .next()
-                    .map(|first| first.to_uppercase().to_string())
-                    .unwrap_or_default();
-                Program {
-                    name: letter.clone(),
-                    glyph: TERMINAL_GLYPH,
-                    tile_bg: own,
-                    tile_fg: 0xffffff,
-                    border: false,
-                    shell: true,
-                    letter: Some(letter),
-                    off: false,
-                }
+        }
+        None => {
+            let letter = host
+                .name
+                .chars()
+                .next()
+                .map(|first| first.to_uppercase().to_string())
+                .unwrap_or_default();
+            Program {
+                name: letter.clone(),
+                glyph: TERMINAL_GLYPH,
+                tile_bg: own,
+                tile_fg: 0xffffff,
+                border: false,
+                shell: true,
+                letter: Some(letter),
+                off: false,
             }
         }
     }
