@@ -2133,10 +2133,14 @@ fn a_save_over_a_file_changed_or_removed_since_is_refused() {
         let error = write_in_place(&remote, &path, b"mine 2\n".to_vec(), Some(file.stamp()))
             .await
             .unwrap_err();
-        assert_eq!(
-            SaveFailure::from_error(error, |why| why),
-            SaveFailure::Changed
-        );
+        // The refusal says what the file is now, for the question it leads to.
+        match SaveFailure::from_error(error, |why| why) {
+            SaveFailure::Changed { now: Some(now) } => {
+                assert_eq!(now.size(), b"someone else's\n".len() as u64);
+                assert_ne!(now, file.stamp());
+            }
+            other => panic!("{other:?}"),
+        }
         assert_eq!(remote.bytes("/etc/app.conf"), b"someone else's\n");
 
         remote.nodes.borrow_mut().remove("/etc/app.conf");
@@ -2145,7 +2149,7 @@ fn a_save_over_a_file_changed_or_removed_since_is_refused() {
             .unwrap_err();
         assert_eq!(
             SaveFailure::from_error(error, |why| why),
-            SaveFailure::Changed
+            SaveFailure::Changed { now: None }
         );
 
         // Saving anyway creates it again.
@@ -2230,10 +2234,10 @@ fn openssh_protocol_edits_in_place_through_links_keeping_mode_and_hard_links() {
         let error = write_in_place(&client, &link, b"mine\n".to_vec(), Some(stamp))
             .await
             .unwrap_err();
-        assert_eq!(
+        assert!(matches!(
             SaveFailure::from_error(error, |why| why),
-            SaveFailure::Changed
-        );
+            SaveFailure::Changed { now: Some(now) } if now.size() == 15
+        ));
         assert_eq!(std::fs::read(&real).unwrap(), b"theirs, longer\n");
 
         // Too large, without reading it.

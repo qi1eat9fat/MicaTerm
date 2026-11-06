@@ -186,7 +186,7 @@ impl LocalDirectoryProvider for SystemLocalDirectoryProvider {
         if let Some(expected) = expected {
             let now = std::fs::metadata(path).ok().map(|m| FileStamp::local(&m));
             if now != Some(expected) {
-                return Err(SaveFailure::Changed.into());
+                return Err(SaveFailure::Changed { now }.into());
             }
         }
         let mut file = std::fs::OpenOptions::new()
@@ -329,7 +329,9 @@ mod tests {
         std::fs::write(&real, b"theirs, longer\n").unwrap();
         assert_eq!(
             write_local_text(&provider, &link, b"mine\n", Some(stamp)),
-            Err(SaveFailure::Changed)
+            Err(SaveFailure::Changed {
+                now: Some(FileStamp::local(&std::fs::metadata(&real).unwrap()))
+            })
         );
         assert_eq!(
             read_local_text(&provider, temp.path()),

@@ -55,6 +55,9 @@ impl FileStamp {
     pub fn size(&self) -> u64 {
         self.size
     }
+    pub fn modified(&self) -> Option<SystemTime> {
+        self.modified
+    }
 }
 
 /// How a text file is laid out on disk, kept so that a save writes it back
@@ -210,9 +213,9 @@ impl<F> ReadFailure<F> {
 /// [`ReadFailure`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SaveFailure<F> {
-    /// The file is no longer what was read or last saved: changed, or gone.
-    /// Nothing was written.
-    Changed,
+    /// The file is no longer what was read or last saved: changed, or gone
+    /// (`now` is `None`). Nothing was written.
+    Changed { now: Option<FileStamp> },
     /// The file was truncated and then the write failed: what is on disk
     /// now is incomplete, and no longer what was read.
     Interrupted(F),
@@ -223,7 +226,7 @@ pub enum SaveFailure<F> {
 impl<F: fmt::Display> fmt::Display for SaveFailure<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SaveFailure::Changed => f.write_str("the file changed after it was opened"),
+            SaveFailure::Changed { .. } => f.write_str("the file changed after it was opened"),
             SaveFailure::Interrupted(failure) | SaveFailure::Failed(failure) => failure.fmt(f),
         }
     }
@@ -258,7 +261,7 @@ impl<F> SaveFailure<F> {
     /// The same failure, told another way.
     pub fn map_failed<G>(self, tell: impl FnOnce(F) -> G) -> SaveFailure<G> {
         match self {
-            SaveFailure::Changed => SaveFailure::Changed,
+            SaveFailure::Changed { now } => SaveFailure::Changed { now },
             SaveFailure::Interrupted(failure) => SaveFailure::Interrupted(tell(failure)),
             SaveFailure::Failed(failure) => SaveFailure::Failed(tell(failure)),
         }
@@ -387,9 +390,9 @@ pub(crate) async fn write_in_place<F: RemoteFs>(
     expected: Option<FileStamp>,
 ) -> Result<FileStamp> {
     if let Some(expected) = expected {
-        let now = fs.stat(path).await?;
-        if now.as_ref().map(FileStamp::of) != Some(expected) {
-            return Err(SaveFailure::<Reason>::Changed.into());
+        let now = fs.stat(path).await?.as_ref().map(FileStamp::of);
+        if now != Some(expected) {
+            return Err(SaveFailure::<Reason>::Changed { now }.into());
         }
     }
     let handle = fs.open_replace(path).await?;
@@ -494,10 +497,11 @@ mod tests {
             ReadFailure::<String>::from_error(anyhow!("connection lost"), told),
             ReadFailure::Failed("connection lost".into())
         );
-        let error: anyhow::Error = SaveFailure::<Reason>::Changed.into();
+        let now = Some(FileStamp::new(9, None));
+        let error: anyhow::Error = SaveFailure::<Reason>::Changed { now }.into();
         assert_eq!(
             SaveFailure::<Reason>::from_error(error, |reason| reason),
-            SaveFailure::Changed
+            SaveFailure::Changed { now }
         );
         // Interrupted is a layer over the cause, which stays findable and
         // is what the failure tells.
