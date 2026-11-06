@@ -40,6 +40,8 @@ struct Remote {
     fault: Cell<Option<Fault>>,
     in_flight: Cell<usize>,
     max_in_flight: Cell<usize>,
+    /// 设了的话，写入先等到有两个同时在途才放行：证明并发不靠时序，串行的话一直等到看门狗超时。
+    wait_for_overlap: Cell<bool>,
     writes: Cell<usize>,
     reads: Cell<usize>,
     short_reads: Cell<bool>,
@@ -53,6 +55,7 @@ impl Remote {
             fault: Cell::new(None),
             in_flight: Cell::new(0),
             max_in_flight: Cell::new(0),
+            wait_for_overlap: Cell::new(false),
             writes: Cell::new(0),
             reads: Cell::new(0),
             short_reads: Cell::new(false),
@@ -212,6 +215,9 @@ impl RemoteFs for Remote {
             .set(self.max_in_flight.get().max(in_flight));
         let _guard = WriteGuard(&self.in_flight);
         tokio::task::yield_now().await;
+        while self.wait_for_overlap.get() && self.max_in_flight.get() < 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
         let mut nodes = self.nodes.borrow_mut();
         let node = nodes.get_mut(handle).unwrap();
         let end = offset as usize + bytes.len();
@@ -444,6 +450,9 @@ impl Drop for Answers {
 fn temp_root() -> std::path::PathBuf {
     dunce::canonicalize(std::env::temp_dir()).unwrap()
 }
+/// 传输挂死才会超时：满载时慢不算失败，这里只防测试永远不结束。
+const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(120);
+
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -468,12 +477,9 @@ async fn run(
     remote: &impl RemoteFs,
     control: &TransferControl,
 ) -> Result<()> {
-    tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        batch.run(remote, control),
-    )
-    .await
-    .expect("upload did not finish")
+    tokio::time::timeout(WATCHDOG, batch.run(remote, control))
+        .await
+        .expect("upload did not finish")
 }
 
 #[test]
@@ -547,12 +553,13 @@ fn winscp_style_upload_finishes_without_a_verification_phase() {
         )
         .await;
         let remote = Remote::new();
+        // 一个文件的写入也是几块同时在途。
+        remote.wait_for_overlap.set(true);
 
         run(&mut batch, &remote, &answers.control).await.unwrap();
         tokio::task::yield_now().await;
 
         assert_eq!(remote.bytes("/dest/file"), data);
-        assert!(remote.max_in_flight.get() > 1);
         assert_eq!(batch.meter.progress.succeeded(), 1);
         let progress = answers.progress.lock().unwrap();
         assert!(progress.iter().all(|snapshot| matches!(
@@ -629,6 +636,8 @@ fn small_files_go_straight_to_their_names_several_at_once() {
         let answers = Answers::new(vec![]);
         let mut upload = batch(&root, Journal::new(journal.clone()), &answers.control).await;
         let remote = Remote::new();
+        // 两个文件同时在途才放行：串行传的话这里等到看门狗超时。
+        remote.wait_for_overlap.set(true);
 
         run(&mut upload, &remote, &answers.control).await.unwrap();
 
@@ -651,7 +660,6 @@ fn small_files_go_straight_to_their_names_several_at_once() {
                 .map(u128::from),
             Some(local_time)
         );
-        assert!(remote.max_in_flight.get() > 1, "one file at a time");
         assert!(
             !remote
                 .nodes
@@ -1530,12 +1538,9 @@ async fn run_download(
     remote: &Remote,
     control: &TransferControl,
 ) -> Result<()> {
-    tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        batch.run(remote, control),
-    )
-    .await
-    .expect("download did not finish")
+    tokio::time::timeout(WATCHDOG, batch.run(remote, control))
+        .await
+        .expect("download did not finish")
 }
 
 #[test]
@@ -1901,13 +1906,10 @@ fn openssh_protocol_downloads_lists_owners_and_changes_files_without_following_l
         )
         .await
         .unwrap();
-        tokio::time::timeout(
-            std::time::Duration::from_secs(20),
-            download.run(&client, &answers.control),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        tokio::time::timeout(WATCHDOG, download.run(&client, &answers.control))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(std::fs::read(out.join("树/文件.bin")).unwrap(), data);
         assert!(out.join("树/空目录").is_dir());
         assert_eq!(

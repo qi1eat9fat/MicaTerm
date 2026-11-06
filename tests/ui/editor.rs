@@ -508,10 +508,7 @@ fn a_file_changed_on_the_server_asks_and_shows_both_stamps(cx: &mut TestAppConte
     // 什么都没写。打开时和现在都写出来。
     assert_eq!(fixture.sftp.file(REMOTE_FILE), b"someone else's\n");
     let text = label(cx, &fixture, "editor-changed-text");
-    assert!(
-        text.contains("打开之后，远程的这个文件被改过"),
-        "{text}"
-    );
+    assert!(text.contains("打开之后，远程的这个文件被改过"), "{text}");
     assert!(text.contains("打开时 5 B"), "{text}");
     assert!(text.contains("现在 15 B"), "{text}");
     assert!(text.contains("覆盖会丢掉别人的修改"), "{text}");
