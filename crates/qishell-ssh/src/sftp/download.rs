@@ -8,9 +8,9 @@
 //! flushed to the disk on its own.
 
 use super::{
-    DownloadError, DownloadRequest, EntryKind, FileMetadata, RESUME_THRESHOLD, Reason, RemotePath,
-    SftpError, TransferAnswer, TransferChoice, TransferDetail, TransferDirection, TransferPhase,
-    TransferQuestionKind,
+    ConflictFacts, DownloadError, DownloadRequest, EntryKind, FileMetadata, RESUME_THRESHOLD,
+    Reason, RemotePath, SftpError, TransferAnswer, TransferChoice, TransferDetail,
+    TransferDirection, TransferPhase, TransferQuestionKind,
     client::{RemoteFs, is_network_error},
     control::{Cancelled, TargetGuard, TransferControl},
     file_size,
@@ -399,7 +399,7 @@ impl<R: RemoteFs> Download<'_, R> {
         message: Reason,
     ) -> Result<TransferAnswer> {
         let _turn = self.asking.lock().await;
-        self.question(kind, path, message).await
+        self.question(kind, path, message, None).await
     }
 
     /// Ask, holding the turn already.
@@ -408,11 +408,12 @@ impl<R: RemoteFs> Download<'_, R> {
         kind: TransferQuestionKind,
         path: &str,
         message: Reason,
+        conflict: Option<ConflictFacts>,
     ) -> Result<TransferAnswer> {
         self.meter
             .borrow_mut()
             .phase(TransferPhase::Waiting, self.control);
-        let answer = self.control.ask(kind, path, message).await?;
+        let answer = self.control.ask(kind, path, message, conflict).await?;
         self.meter
             .borrow_mut()
             .phase(TransferPhase::Transferring, self.control);
@@ -424,6 +425,7 @@ impl<R: RemoteFs> Download<'_, R> {
     async fn approve(
         &self,
         target: &Path,
+        incoming: &FileMetadata,
         existing: &std::fs::Metadata,
         changed: bool,
     ) -> Result<bool> {
@@ -455,6 +457,11 @@ impl<R: RemoteFs> Download<'_, R> {
                 TransferQuestionKind::Conflict,
                 &target.display().to_string(),
                 Reason::new(message),
+                Some(ConflictFacts::new(
+                    incoming.into(),
+                    Some(existing.into()),
+                    changed,
+                )),
             )
             .await?;
         if answer.apply_to_all() && !changed {
@@ -477,7 +484,9 @@ impl<R: RemoteFs> Download<'_, R> {
             EntryKind::Symlink => {
                 let link = self.control.run(self.fs.readlink(&item.source)).await?;
                 if let Some(existing) = &existing
-                    && !self.approve(&item.target, existing, false).await?
+                    && !self
+                        .approve(&item.target, &item.metadata, existing, false)
+                        .await?
                 {
                     return Ok(false);
                 }
@@ -504,7 +513,9 @@ impl<R: RemoteFs> Download<'_, R> {
         let answered = self.approved_resumes.borrow().contains(&item.target);
         if !answered
             && let Some(existing) = &existing
-            && !self.approve(&item.target, existing, false).await?
+            && !self
+                .approve(&item.target, &item.metadata, existing, false)
+                .await?
         {
             return Ok(false);
         }
@@ -547,7 +558,9 @@ impl<R: RemoteFs> Download<'_, R> {
         if !answered
             && !resumable
             && let Some(existing) = &existing
-            && !self.approve(&item.target, existing, false).await?
+            && !self
+                .approve(&item.target, &item.metadata, existing, false)
+                .await?
         {
             return Ok(false);
         }
@@ -626,7 +639,9 @@ impl<R: RemoteFs> Download<'_, R> {
         let current = local_metadata(&item.target).await?;
         if let Some(current) = &current
             && changed(existing, current)
-            && !self.approve(&item.target, current, true).await?
+            && !self
+                .approve(&item.target, &item.metadata, current, true)
+                .await?
         {
             return Ok(false);
         }

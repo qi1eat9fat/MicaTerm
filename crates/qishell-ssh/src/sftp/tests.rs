@@ -380,6 +380,8 @@ struct Answers {
     control: TransferControl,
     cancel: watch::Sender<bool>,
     questions: Arc<Mutex<Vec<TransferQuestionKind>>>,
+    /// 问冲突时带的对比：要传的、已有的。
+    conflicts: Arc<Mutex<Vec<Option<ConflictFacts>>>>,
     progress: Arc<Mutex<Vec<TransferProgress>>>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -394,6 +396,8 @@ impl Answers {
         let (cancel, watch) = watch::channel(false);
         let questions = Arc::new(Mutex::new(vec![]));
         let seen_questions = questions.clone();
+        let conflicts = Arc::new(Mutex::new(vec![]));
+        let seen_conflicts = conflicts.clone();
         let progress = Arc::new(Mutex::new(vec![]));
         let seen_progress = progress.clone();
         let task = tokio::spawn(async move {
@@ -402,6 +406,7 @@ impl Answers {
                 match event {
                     EngineEvent::Question(q) => {
                         seen_questions.lock().unwrap().push(q.kind());
+                        seen_conflicts.lock().unwrap().push(q.conflict().copied());
                         let (choice, for_all) =
                             choices.next().unwrap_or((TransferChoice::Cancel, false));
                         let _ = answers
@@ -423,6 +428,7 @@ impl Answers {
             },
             cancel,
             questions,
+            conflicts,
             progress,
             task,
         }
@@ -666,6 +672,72 @@ fn overwriting_small_files_asks_once_for_all_of_them() {
             vec![TransferQuestionKind::Conflict]
         );
         assert_eq!(upload.meter.progress.succeeded(), 13);
+    });
+}
+
+/// 冲突框要照原型写「要传的」「已有的」两行：问题带着两边的大小和修改时间。
+#[test]
+fn an_upload_conflict_says_what_goes_up_and_what_is_there() {
+    runtime().block_on(async {
+        let tmp = tempfile::tempdir_in(temp_root()).unwrap();
+        let source = tmp.path().join("file");
+        std::fs::write(&source, b"new contents").unwrap();
+        let modified = std::fs::metadata(&source)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let remote = Remote::new();
+        remote.file("/dest/file", b"old");
+        let answers = Answers::new(vec![TransferChoice::Skip]);
+        let mut upload = batch(
+            &source,
+            Journal::new(tmp.path().join("journal")),
+            &answers.control,
+        )
+        .await;
+
+        run(&mut upload, &remote, &answers.control).await.unwrap();
+
+        let conflicts = answers.conflicts.lock().unwrap();
+        let facts = conflicts[0].expect("the conflict says what is on both sides");
+        assert_eq!(facts.incoming().size(), 12);
+        assert_eq!(facts.incoming().modified(), Some(modified));
+        assert_eq!(facts.existing().map(|existing| existing.size()), Some(3));
+        assert!(!facts.changed());
+    });
+}
+
+/// 下载也一样：要传的是远程的，已有的是本地的。别的问题不带对比。
+#[test]
+fn a_download_conflict_says_what_comes_down_and_what_is_there() {
+    runtime().block_on(async {
+        let tmp = tempfile::tempdir_in(temp_root()).unwrap();
+        let target = tmp.path().join("in");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("file"), b"local").unwrap();
+        let remote = Remote::new();
+        remote.file("/src/file", b"from the server");
+        let answers = Answers::new(vec![TransferChoice::Skip]);
+        let mut download = download_batch(
+            &["/src/file"],
+            &target,
+            DownloadJournal::new(tmp.path().join("journal")),
+            &remote,
+            &answers.control,
+        )
+        .await;
+
+        run_download(&mut download, &remote, &answers.control)
+            .await
+            .unwrap();
+
+        let conflicts = answers.conflicts.lock().unwrap();
+        let facts = conflicts[0].expect("the conflict says what is on both sides");
+        assert_eq!(facts.incoming().size(), 15);
+        assert_eq!(facts.existing().map(|existing| existing.size()), Some(5));
     });
 }
 

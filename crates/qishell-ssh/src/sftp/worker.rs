@@ -376,6 +376,13 @@ impl SftpWorker {
                     continue;
                 }
             };
+            // 不用连接：断开时移出队列也不该连上去。
+            if matches!(operation, SftpCommand::Forget) {
+                batch = None;
+                busy.store(false, Ordering::Release);
+                events.send(EngineEvent::Idle).await?;
+                continue;
+            }
             if client.read().await.is_none() {
                 match control
                     .run(self.connect(prompts.clone(), &events, &shutdown, &client))

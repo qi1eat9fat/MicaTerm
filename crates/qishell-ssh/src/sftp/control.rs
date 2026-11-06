@@ -1,8 +1,8 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/control.rs
 
 use super::{
-    EngineEvent, EventSink, Reason, TransferAnswer, TransferChoice, TransferQuestion,
-    TransferQuestionKind,
+    ConflictFacts, EngineEvent, EventSink, Reason, TransferAnswer, TransferChoice,
+    TransferQuestion, TransferQuestionKind,
 };
 use anyhow::Result;
 use async_channel::Receiver;
@@ -50,18 +50,20 @@ impl TransferControl {
             } => Err(Cancelled.into())
         }
     }
+    /// 问。问冲突时带上冲突框要的对比。
     pub async fn ask(
         &self,
         kind: TransferQuestionKind,
         path: &str,
         message: impl Into<Reason>,
+        conflict: Option<ConflictFacts>,
     ) -> Result<TransferAnswer> {
         self.check()?;
         let id = NEXT_QUESTION.fetch_add(1, Ordering::Relaxed);
         self.events
-            .send(EngineEvent::Question(TransferQuestion::new(
-                id, kind, path, message,
-            )))
+            .send(EngineEvent::Question(
+                TransferQuestion::new(id, kind, path, message).with_conflict(conflict),
+            ))
             .await?;
         self.run(async {
             loop {

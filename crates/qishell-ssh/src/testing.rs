@@ -428,7 +428,18 @@ impl server::Handler for Handler {
         session.channel_success(channel)?;
         let mut child = {
             let _forks = no_forks();
-            tokio::process::Command::new(executable)
+            let mut command = tokio::process::Command::new(executable);
+            // Git 的 `sftp-server.exe` 要 `usr\\bin` 里的 `msys-2.0.dll`。PATH 上常常只有 `cmd`，
+            // 那样进程一启动就退出，看起来是通道断了。
+            #[cfg(windows)]
+            if let Some(usr) = executable.ancestors().nth(3) {
+                let path = std::env::var_os("PATH").unwrap_or_default();
+                let paths = std::iter::once(usr.join("bin")).chain(std::env::split_paths(&path));
+                if let Ok(paths) = std::env::join_paths(paths) {
+                    command.env("PATH", paths);
+                }
+            }
+            command
                 .current_dir(&self.directory)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
