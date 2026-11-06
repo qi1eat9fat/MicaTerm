@@ -265,6 +265,14 @@ impl SftpTab {
         }
     }
 
+    /// 有写回在等工作线程回答。
+    pub(super) fn writing_file(&self) -> bool {
+        self.file_open
+            .pending
+            .values()
+            .any(|pending| matches!(pending, PendingFile::Write(_)))
+    }
+
     /// 连接断了：还在等的读写不会有回答了，发起的人各自收到失败。
     pub(super) fn abandon_file_requests(&mut self) {
         self.file_open.pending.clear();

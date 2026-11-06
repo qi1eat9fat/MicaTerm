@@ -143,6 +143,7 @@ impl Workspace {
         match event {
             EditorTabEvent::Changed => cx.notify(),
             EditorTabEvent::Saved => self.refresh_cards_showing(editor, window, cx),
+            EditorTabEvent::SaveEnded { saved } => self.on_save_ended(*saved, window, cx),
             EditorTabEvent::CloseRequested => {
                 let tab = self.tabs.find(|tab| tab.as_editor() == Some(editor));
                 if let Some(tab) = tab {

@@ -87,6 +87,8 @@ pub enum EditorTabEvent {
     Changed,
     /// 文件写好了：显示着它所在目录的文件卡片要重读。
     Saved,
+    /// 这次写回结束了，不管成败（失败已经告诉用户了）：等着它的关闭、退出可以接着走了。
+    SaveEnded { saved: bool },
     /// 问过了（或者不用问）：可以关掉这个标签。
     CloseRequested,
 }
@@ -217,6 +219,11 @@ impl EditorTab {
         self.unsaved
     }
 
+    /// 正在写回：写回是截断重写，写完之前不能关，也不能退出。
+    pub fn is_saving(&self) -> bool {
+        self.phase == Phase::Saving
+    }
+
     /// 文件名。
     pub fn file_name(&self) -> SharedString {
         self.name.clone()
@@ -335,6 +342,7 @@ impl EditorTab {
         self.phase = Phase::Idle;
         let close = std::mem::take(&mut self.close_after_save);
         let name = self.name.clone();
+        let saved = result.is_ok();
         match result {
             Ok(stamp) => {
                 self.stamp = Some(stamp);
@@ -360,6 +368,7 @@ impl EditorTab {
                 cx,
             ),
         }
+        cx.emit(EditorTabEvent::SaveEnded { saved });
         cx.notify();
     }
 

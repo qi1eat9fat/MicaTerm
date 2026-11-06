@@ -967,3 +967,152 @@ fn closing_the_window_with_only_a_transfer_left_asks_too(cx: &mut TestAppContext
     click(cx, &fixture, "quit-confirm-confirm");
     assert!(!visible(cx, &fixture, "quit-confirm"));
 }
+
+// ---------- 写回进行中 ----------
+
+const HELD_FILE: &str = "/hold-write/文件 甲.txt";
+
+/// 打开 `HELD_FILE`，改一个字，保存：写回卡在半路。
+fn start_held_save(cx: &mut TestAppContext) -> Fixture {
+    let fixture = open_server(cx, &[(HELD_FILE, b"text\n")]);
+    open_file(cx, &fixture, true, HELD_FILE);
+    type_text(cx, &fixture, "1");
+    press(cx, &fixture, "ctrl-s");
+    let held = fixture.sftp.held_writes.clone();
+    assert!(
+        wait_until(cx, fixture.handle, |_| !held.lock().unwrap().is_empty()),
+        "写回没有开始"
+    );
+    fixture
+}
+
+/// 写回有了结果。
+fn finish_held_save(
+    cx: &mut TestAppContext,
+    fixture: &Fixture,
+    result: Result<(), qishell::backend::sftp::SaveFailure>,
+) {
+    let request_id = fixture.sftp.held_writes.lock().unwrap().remove(0);
+    let bytes = b"1text\n";
+    fixture
+        .sftp
+        .emit(qishell::backend::sftp::SftpEvent::FileWritten {
+            request_id,
+            result: result.map(|()| fake_stamp(bytes, 101)),
+        });
+    for _ in 0..5 {
+        cx.executor().advance_clock(Duration::from_millis(20));
+        in_frame(cx, fixture.handle, |_, _| {});
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// 写回是截断重写：写到一半关 SFTP 标签，标签要等它写完才关，不能断开连接。
+#[gpui_kit::test]
+fn closing_the_sftp_tab_during_a_save_waits_for_it(cx: &mut TestAppContext) {
+    let fixture = start_held_save(cx);
+    let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
+
+    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    assert!(visible(cx, &fixture, "save-wait"));
+    let text = label(cx, &fixture, "save-wait-text");
+    assert!(text.contains("文件 甲.txt"), "{text}");
+    assert_eq!(tab_count(cx, &fixture), 2, "写完之前标签都在");
+
+    finish_held_save(cx, &fixture, Ok(()));
+    assert!(!visible(cx, &fixture, "save-wait"));
+    assert_eq!(tab_count(cx, &fixture), 0, "写完了就关");
+}
+
+/// 编辑器自己也一样：不能「不保存」扔下写了一半的文件。
+#[gpui_kit::test]
+fn closing_an_editor_during_its_save_waits_instead_of_asking(cx: &mut TestAppContext) {
+    let fixture = start_held_save(cx);
+    dispatch(cx, fixture.handle, CloseFocusedCard);
+    assert!(visible(cx, &fixture, "save-wait"));
+    assert!(!visible(cx, &fixture, "editor-close"));
+    finish_held_save(cx, &fixture, Ok(()));
+    assert_eq!(tab_count(cx, &fixture), 1);
+}
+
+/// 写回失败了：不走，错误显示着，文件可能不完整，用户得看到。
+#[gpui_kit::test]
+fn a_save_that_fails_while_waiting_keeps_everything_open_and_says_so(cx: &mut TestAppContext) {
+    let fixture = start_held_save(cx);
+    let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
+    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    finish_held_save(
+        cx,
+        &fixture,
+        Err(qishell::backend::sftp::SaveFailure::Interrupted(
+            "连接断开".into(),
+        )),
+    );
+    assert!(!visible(cx, &fixture, "save-wait"));
+    assert_eq!(tab_count(cx, &fixture), 2);
+    let notes = in_frame(cx, fixture.handle, |window, cx| {
+        window.notifications(cx).len()
+    });
+    assert_eq!(notes, 1);
+}
+
+/// 用户可以不等了：标签都留着，写完也不关。
+#[gpui_kit::test]
+fn the_wait_can_be_called_off(cx: &mut TestAppContext) {
+    let fixture = start_held_save(cx);
+    let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
+    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    click(cx, &fixture, "save-wait-cancel");
+    assert!(!visible(cx, &fixture, "save-wait"));
+    assert_eq!(tab_count(cx, &fixture), 2);
+    finish_held_save(cx, &fixture, Ok(()));
+    assert_eq!(tab_count(cx, &fixture), 2);
+}
+
+/// 退出也等：写完才接着走。退出还有别的要问（这里是一批传输），写完再问。
+#[gpui_kit::test]
+fn quitting_during_a_save_waits_and_then_asks_about_the_rest(cx: &mut TestAppContext) {
+    let fixture = start_held_save(cx);
+    enqueue_upload(cx, &fixture);
+    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    assert!(visible(cx, &fixture, "save-wait"));
+    assert!(!visible(cx, &fixture, "quit-confirm"));
+    // 再要求一次：还是拦着，不多叠一个框。
+    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+
+    finish_held_save(cx, &fixture, Ok(()));
+    assert!(!visible(cx, &fixture, "save-wait"));
+    assert!(visible(cx, &fixture, "quit-confirm"));
+    let text = label(cx, &fixture, "quit-confirm-text");
+    assert!(text.contains("还有 1 批传输没完成"), "{text}");
+    assert!(!text.contains("未保存"), "{text}");
+}
+
+/// 退出时写回失败：不退出。
+#[gpui_kit::test]
+fn a_save_that_fails_while_quitting_stops_the_quit(cx: &mut TestAppContext) {
+    let fixture = start_held_save(cx);
+    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    finish_held_save(
+        cx,
+        &fixture,
+        Err(qishell::backend::sftp::SaveFailure::Failed(
+            "权限不足".into(),
+        )),
+    );
+    assert!(!visible(cx, &fixture, "save-wait"));
+    assert!(!visible(cx, &fixture, "quit-confirm"));
+    assert_eq!(tab_count(cx, &fixture), 2);
+}
+
+/// 写回时不重新连接：工作线程还在写，编辑器不能以为写断了。
+#[gpui_kit::test]
+fn reconnecting_waits_for_the_save(cx: &mut TestAppContext) {
+    let fixture = start_held_save(cx);
+    sftp_command(cx, &fixture, SftpTabCommand::Reconnect);
+    assert_eq!(*fixture.sftp.reconnects.lock().unwrap(), 0);
+    let tab = sftp_tab(cx, &fixture);
+    assert!(!cx.update(|cx| tab.read(cx).can_reconnect()));
+    finish_held_save(cx, &fixture, Ok(()));
+    assert!(cx.update(|cx| tab.read(cx).can_reconnect()));
+}

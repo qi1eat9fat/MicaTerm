@@ -150,6 +150,8 @@ pub struct Workspace {
     pub(super) close_dialog: Option<crate::ui::DialogLayer>,
     /// 开着的退出询问框，不再叠一个。
     pub(super) quit_dialog: Option<crate::ui::DialogLayer>,
+    /// 关标签或退出正等着写回结束。
+    pub(super) save_wait: Option<super::handlers::SaveWait>,
     /// 每张卡片每类通知上一次发出的时间，用来限频（`notices`）。
     pub(super) notice_times: NoticeTimes,
     /// 标签轨道的滚动位置。
@@ -279,6 +281,7 @@ impl Workspace {
             next_sftp_id: 1,
             close_dialog: None,
             quit_dialog: None,
+            save_wait: None,
             notice_times: NoticeTimes::default(),
             tab_rail: TabRail::default(),
             window_active: window.is_window_active(),

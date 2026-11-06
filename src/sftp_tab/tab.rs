@@ -328,11 +328,13 @@ impl SftpTab {
         self.card(self.last_remote).read(cx).focus_handle(cx)
     }
 
-    /// 能不能重新连接：正在连接、批次在跑或者停着（它有自己的「继续」）时不行。
+    /// 能不能重新连接：正在连接、批次在跑或者停着（它有自己的「继续」）时不行；
+    /// 正在写回时也不行，编辑器会以为写断了，其实还在写。
     pub fn can_reconnect(&self) -> bool {
         self.state != ConnectionState::Connecting
             && !self.transfers.engine_busy
             && !self.head_stopped()
+            && !self.writing_file()
     }
 
     /// 关掉标签：断开连接，工作线程退出。标签随后由窗口壳移走。

@@ -102,3 +102,13 @@ quit.cancel:
   zh-CN: 取消
 quit.confirm:
   zh-CN: 仍要退出
+save_wait.title:
+  zh-CN: 正在保存
+save_wait.saving:
+  zh-CN: 「%{name}」正在写回，中途停下文件会不完整。
+save_wait.then_close:
+  zh-CN: 写完就关闭。
+save_wait.then_quit:
+  zh-CN: 写完就退出。
+save_wait.cancel:
+  zh-CN: 不等了，留在这里
