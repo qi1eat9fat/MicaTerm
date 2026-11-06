@@ -364,8 +364,9 @@ macro_rules! file_list_keys {
             file_list_key!("f5", "f5", $list, Transfer { remote: $remote }),
             file_list_key!("f2", "f2", $list, Rename { remote: $remote }),
             file_list_key!("f7", "f7", $list, New { remote: $remote, kind: NewEntryKind::Folder }),
-            file_list_key!("delete", "cmd-backspace", $list, Delete { remote: $remote }),
+            // 后写的优先：菜单上要写 Delete（原型），所以它排在 F8 后面。
             file_list_key!("f8", "f8", $list, Delete { remote: $remote }),
+            file_list_key!("delete", "cmd-backspace", $list, Delete { remote: $remote }),
             file_list_key!("f9", "cmd-i", $list, Properties { remote: $remote }),
             file_list_key!("backspace", "backspace", $list, Up { remote: $remote }),
             file_list_key!("ctrl-r", "cmd-r", $list, Refresh { remote: $remote }),
