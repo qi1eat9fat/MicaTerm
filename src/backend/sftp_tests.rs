@@ -3,6 +3,7 @@
 //! 下载、冲突、停下后续传、断线自动重连（工单 22）。
 //! 这台机器上没有 `sftp-server` 时跳过。路径当不透明的前缀用：Git 的 `sftp-server` 报的是 MSYS 风格。
 
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -36,7 +37,7 @@ struct Session {
 /// 服务器和它的运行时。
 struct Served {
     server: TestServer,
-    runtime: tokio::runtime::Runtime,
+    _runtime: tokio::runtime::Runtime,
 }
 
 fn serve(directory: &Path) -> Arc<Served> {
@@ -44,7 +45,10 @@ fn serve(directory: &Path) -> Arc<Served> {
     let server = runtime
         .block_on(TestServer::start(directory.to_path_buf()))
         .expect("server");
-    Arc::new(Served { server, runtime })
+    Arc::new(Served {
+        server,
+        _runtime: runtime,
+    })
 }
 
 impl Session {
@@ -228,29 +232,26 @@ fn assert_same(path: &Path, expected: &[u8]) {
 /// 在客户端和服务器之间转发 TCP：`kick` 掐断现在的连接，新连接照常转发。
 struct Relay {
     port: u16,
-    connections: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
+    connections: Arc<Mutex<Vec<TcpStream>>>,
 }
 
 impl Relay {
-    fn start(served: &Served) -> Self {
-        let target = served.server.port;
+    fn start(target: u16) -> Self {
         let connections = Arc::new(Mutex::new(Vec::new()));
-        let listener = served
-            .runtime
-            .block_on(tokio::net::TcpListener::bind(("127.0.0.1", 0)))
-            .unwrap();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         let tracked = connections.clone();
-        served.runtime.spawn(async move {
-            while let Ok((mut client, _)) = listener.accept().await {
-                let task = tokio::spawn(async move {
-                    if let Ok(mut server) =
-                        tokio::net::TcpStream::connect(("127.0.0.1", target)).await
-                    {
-                        let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
-                    }
-                });
-                tracked.lock().unwrap().push(task.abort_handle());
+        std::thread::spawn(move || {
+            for client in listener.incoming() {
+                let Ok(client) = client else { return };
+                let Ok(server) = TcpStream::connect(("127.0.0.1", target)) else {
+                    return;
+                };
+                let _ = (client.set_nodelay(true), server.set_nodelay(true));
+                tracked.lock().unwrap().extend(client.try_clone());
+                tracked.lock().unwrap().extend(server.try_clone());
+                pump(&client, &server);
+                pump(&server, &client);
             }
         });
         Self { port, connections }
@@ -258,9 +259,20 @@ impl Relay {
 
     fn kick(&self) {
         for connection in self.connections.lock().unwrap().drain(..) {
-            connection.abort();
+            let _ = connection.shutdown(std::net::Shutdown::Both);
         }
     }
+}
+
+/// 一个方向。一边断了就断另一边。
+fn pump(from: &TcpStream, to: &TcpStream) {
+    let (Ok(mut from), Ok(mut to)) = (from.try_clone(), to.try_clone()) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut from, &mut to);
+        let _ = to.shutdown(std::net::Shutdown::Both);
+    });
 }
 
 fn directories() -> Option<(TempDir, TempDir)> {
@@ -483,7 +495,7 @@ fn a_dropped_connection_reconnects_on_its_own_and_the_upload_finishes() {
     let source = state.path().join("up.bin");
     let bytes = large_file(&source);
     let served = serve(directory.path());
-    let relay = Relay::start(&served);
+    let relay = Relay::start(served.server.port);
     let session = Session::attach(served.clone(), relay.port, state.path());
 
     session.upload(&source);
