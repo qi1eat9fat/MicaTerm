@@ -1,0 +1,102 @@
+_version: 2
+
+# SFTP 文件操作（工单 21）：新建、重命名、删除、属性。
+
+sftp_files.cancel:
+  zh-CN: 取消
+sftp_files.new.folder_title:
+  zh-CN: 新建文件夹
+sftp_files.new.file_title:
+  zh-CN: 新建文件
+sftp_files.new.folder_name:
+  zh-CN: 新建文件夹
+sftp_files.new.file_name:
+  zh-CN: 新建文件.txt
+sftp_files.new.label:
+  zh-CN: 名称
+sftp_files.new.commit:
+  zh-CN: 创建
+sftp_files.rename.title:
+  zh-CN: 重命名
+sftp_files.rename.label:
+  zh-CN: 新名称
+sftp_files.rename.commit:
+  zh-CN: 重命名
+sftp_files.name.empty:
+  zh-CN: 名称不能为空
+sftp_files.name.dots:
+  zh-CN: 名称不能是「.」或「..」
+sftp_files.name.slash:
+  zh-CN: 名称不能包含「/」
+sftp_files.name.windows_chars:
+  zh-CN: 名称不能包含这些字符：\ / ： * ? " < > |
+sftp_files.name.unchanged:
+  zh-CN: 名称未改变
+sftp_files.name.exists:
+  zh-CN: 已有名为「%{name}」的项目
+sftp_files.delete.title:
+  zh-CN: 删除
+sftp_files.delete.question_one:
+  zh-CN: 确定删除「%{name}」吗？
+sftp_files.delete.question_many:
+  zh-CN: 确定删除选中的 %{count} 项吗？
+sftp_files.delete.remote:
+  zh-CN: 远程文件无法恢复，目录会连同其中全部内容一起删除。
+sftp_files.delete.recycle_bin:
+  zh-CN: 项目会移到回收站。
+sftp_files.delete.trash:
+  zh-CN: 项目会移到废纸篓。
+sftp_files.delete.confirm:
+  zh-CN: 删除
+sftp_files.operation.delete_failed:
+  zh-CN: 删除失败
+sftp_files.operation.rename_failed:
+  zh-CN: 重命名失败
+sftp_files.operation.create_failed:
+  zh-CN: 新建失败
+sftp_files.operation.permissions_failed:
+  zh-CN: 修改权限失败
+sftp_files.properties.title:
+  zh-CN: 属性
+sftp_files.properties.subtitle_one:
+  zh-CN: "%{name} · %{place}"
+sftp_files.properties.subtitle_many:
+  zh-CN: "%{count} 项 · %{place}"
+sftp_files.properties.location:
+  zh-CN: 位置
+sftp_files.properties.owner:
+  zh-CN: 所有者
+sftp_files.properties.owner_group:
+  zh-CN: "%{owner} : %{group}"
+sftp_files.properties.mixed:
+  zh-CN: （不一致）
+sftp_files.properties.unknown:
+  zh-CN: —
+sftp_files.properties.rights:
+  zh-CN: 权限
+sftp_files.properties.class_owner:
+  zh-CN: 所有者
+sftp_files.properties.class_group:
+  zh-CN: 组
+sftp_files.properties.class_others:
+  zh-CN: 其他
+sftp_files.properties.read:
+  zh-CN: 读
+sftp_files.properties.write:
+  zh-CN: 写
+sftp_files.properties.execute:
+  zh-CN: 执行
+sftp_files.properties.octal:
+  zh-CN: 八进制
+sftp_files.properties.links:
+  zh-CN: 符号链接没有独立的权限。
+sftp_files.properties.no_rights:
+  zh-CN: 服务器没有告诉这些项目的权限。
+sftp_files.properties.recursive:
+  zh-CN: 递归应用到子目录和文件
+sftp_files.properties.dir_x:
+  zh-CN: 为目录添加执行权限（X）
+sftp_files.properties.commit:
+  zh-CN: 确定
+sftp_files.properties.unsupported:
+  zh-CN: 这台电脑的系统不支持修改权限

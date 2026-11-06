@@ -436,6 +436,11 @@ impl FileCard {
         self.busy
     }
 
+    /// 目录正在读。
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
     /// 下一次列目录后选中这一行。
     pub fn select_after_load(&mut self, name: String) {
         self.select_after_load = Some(name);
@@ -740,7 +745,6 @@ impl FileCard {
         let entries = self.selected_entries(cx);
         CardMenuState {
             remote: self.is_remote(),
-            tab: self.tab,
             edits_file: match entries.as_slice() {
                 [entry] if !entry.is_dir() && !entry.is_parent() => {
                     Some(self.child_path_of(&entry.name))
@@ -752,6 +756,7 @@ impl FileCard {
             can_modify: self.takes_commands() && !self.busy,
             can_transfer: self.transfer_enabled,
             show_hidden: ShowHiddenFiles::get(self.side, cx),
+            has_properties: self.is_remote() || !cfg!(windows),
         }
     }
 
@@ -992,8 +997,9 @@ impl Render for FileCard {
         let focused = self.current;
         let card = cx.entity().downgrade();
         let menu_hit = self.menu_hit.clone();
-        let dispatch = self.dispatch.clone();
         let list_focus = self.focus_handle(cx);
+        // 菜单的命令从列表派发：做完焦点还在列表，菜单上也查得到列表的按键。
+        let menu_focus = list_focus.clone();
         let drop_highlight = tokens.selection_solid;
         let header_focus = list_focus.clone();
         div()
@@ -1091,7 +1097,7 @@ impl Render for FileCard {
                 })
                 // 行、列标题和空白处共用一个菜单，挂在容器上：两个菜单会一起开。
                 .context_menu(move |menu, _, cx| {
-                    let menu = menu.action_context(dispatch.clone());
+                    let menu = menu.action_context(menu_focus.clone());
                     let Some(state) = card.upgrade().map(|card| card.read(cx).menu_state(cx))
                     else {
                         return menu;
