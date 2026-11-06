@@ -36,7 +36,7 @@ pub fn set_parallel_transfers(count: usize) {
     );
 }
 
-pub(crate) fn parallel_transfers() -> usize {
+pub fn parallel_transfers() -> usize {
     PARALLEL_TRANSFERS.load(Ordering::Relaxed)
 }
 

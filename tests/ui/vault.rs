@@ -517,10 +517,10 @@ fn open_security(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     dispatch(cx, handle, OpenSettings);
     in_frame(cx, handle, |window, cx| {
         assert_eq!(
-            window.find(("settings-category", 2_usize)).label(),
+            window.find(("settings-category", 3_usize)).label(),
             Some("安全")
         );
-        window.click(("settings-category", 2_usize), cx);
+        window.click(("settings-category", 3_usize), cx);
     });
 }
 
