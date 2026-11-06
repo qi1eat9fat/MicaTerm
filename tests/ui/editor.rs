@@ -286,6 +286,30 @@ fn the_editor_has_find_and_replace_on_its_own_keys(cx: &mut TestAppContext) {
     assert_eq!(text_of(cx, &fixture), "alpha beta\n");
 }
 
+/// 深浅色下编辑器都用原型的颜色和随包的等宽字体：行号栏不能是默认主题的底色，和卡片不搭。
+#[gpui_kit::test]
+fn the_editor_takes_its_colors_and_font_from_the_prototype_in_both_modes(cx: &mut TestAppContext) {
+    for appearance in [Appearance::Dark, Appearance::Light] {
+        let mut store = settings_store();
+        store.update_unnotified(|settings| settings.appearance = appearance);
+        let (handle, _) = open_workspace_with(cx, store, fake_services());
+        in_frame(cx, handle, |_, cx| {
+            let tokens = Tokens::current(cx);
+            let theme = cx.theme();
+            assert_eq!(theme.mono_font_family.as_ref(), "JetBrains Mono");
+            let style = &theme.highlight_theme.style;
+            assert_eq!(style.editor_background, Some(tokens.card_focused));
+            assert_eq!(style.editor_gutter_background, Some(tokens.card_focused));
+            assert_eq!(style.editor_foreground, Some(tokens.terminal));
+            assert_eq!(style.editor_active_line, Some(tokens.hover));
+            assert_eq!(style.editor_line_number, Some(tokens.faint));
+            assert_eq!(style.editor_active_line_number, Some(tokens.text));
+            // 语法的颜色还在：不是整个换掉。
+            assert!(style.syntax.keyword.is_some() || style.syntax.string.is_some());
+        });
+    }
+}
+
 /// 标签轨道上写「文件名 主机名」。
 fn rail_label(cx: &mut TestAppContext, fixture: &Fixture) -> String {
     let tab = cx.update(|cx| fixture.workspace.read(cx).active_tab().unwrap());
