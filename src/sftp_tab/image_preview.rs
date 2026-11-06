@@ -142,7 +142,7 @@ impl ImageView {
     pub(super) fn mode(&self) -> usize {
         match self.zoom {
             Zoom::Fit => 0,
-            Zoom::Scale(scale) if scale == 1.0 => 1,
+            Zoom::Scale(1.0) => 1,
             Zoom::Scale(_) => usize::MAX,
         }
     }
