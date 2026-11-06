@@ -1116,3 +1116,37 @@ fn reconnecting_waits_for_the_save(cx: &mut TestAppContext) {
     finish_held_save(cx, &fixture, Ok(()));
     assert!(cx.update(|cx| tab.read(cx).can_reconnect()));
 }
+
+// ---------- 关闭其他 ----------
+
+/// 「关闭其他」对着远程编辑器：它自己永远留下，所以它所属的 SFTP 标签也留着（关了会把它连带关掉）。
+#[gpui_kit::test]
+fn closing_the_others_of_a_remote_editor_keeps_it_and_its_sftp_tab(cx: &mut TestAppContext) {
+    let fixture = open_server(
+        cx,
+        &[(REMOTE_FILE, b"one\n"), (OTHER_REMOTE_FILE, b"two\n")],
+    );
+    open_file(cx, &fixture, true, REMOTE_FILE);
+    open_file(cx, &fixture, true, OTHER_REMOTE_FILE);
+    let (sftp, kept) = cx.update(|cx| {
+        let workspace = fixture.workspace.read(cx);
+        (workspace.tab_ids()[0], workspace.active_tab().unwrap())
+    });
+
+    dispatch(cx, fixture.handle, qishell::app::CloseOtherTabs(kept));
+    assert_eq!(
+        cx.update(|cx| fixture.workspace.read(cx).tab_ids()),
+        [sftp, kept]
+    );
+    assert_eq!(
+        cx.update(|cx| fixture.workspace.read(cx).active_tab()),
+        Some(kept)
+    );
+
+    // 只剩它和它的 SFTP 标签：没什么可关的。
+    dispatch(cx, fixture.handle, qishell::app::CloseOtherTabs(kept));
+    assert_eq!(
+        cx.update(|cx| fixture.workspace.read(cx).tab_ids()),
+        [sftp, kept]
+    );
+}

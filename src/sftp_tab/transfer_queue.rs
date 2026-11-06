@@ -147,6 +147,31 @@ impl QueueEntry {
         }
     }
 
+    /// 关闭确认框的括号：在传的文件（没开始传就是这一批的来源），和这一批的百分比（还不知道总量就没有）。
+    fn detail(&self) -> (String, Option<String>) {
+        let progress = self.progress.as_ref();
+        let current = progress.map_or("", TransferProgress::current_source);
+        let current = if current.is_empty() {
+            progress.map_or("", TransferProgress::current)
+        } else {
+            current
+        };
+        let path = if current.is_empty() {
+            self.job.source_label()
+        } else {
+            current.to_string()
+        };
+        let name = path
+            .rsplit(['/', '\\'])
+            .find(|part| !part.is_empty())
+            .unwrap_or(&path)
+            .to_string();
+        let percent = progress
+            .filter(|progress| progress.total_bytes() > 0)
+            .map(|progress| percent(progress.fraction()));
+        (name, percent)
+    }
+
     /// The 进度 column in words, for everything but a running transfer's
     /// bar, which shows the percentage beside it.
     pub fn status(&self) -> String {
@@ -332,6 +357,17 @@ impl TransferQueue {
             .count()
     }
 
+    /// 关闭确认框的括号：说队头那批，没有队头就说等着的第一批。
+    pub fn unfinished_detail(&self) -> Option<(String, Option<String>)> {
+        self.head()
+            .or_else(|| {
+                self.entries
+                    .iter()
+                    .find(|entry| entry.state() == QueueState::Pending)
+            })
+            .map(QueueEntry::detail)
+    }
+
     /// Which way the batch at the head goes, or the next one, for questions
     /// and the close confirmation.
     pub fn direction(&self) -> Option<TransferDirection> {
@@ -484,6 +520,38 @@ mod tests {
             ]),
         );
         assert_eq!(status(&queue, 1), "部分失败（1 项）");
+    }
+
+    /// 关闭确认框的括号：在传的文件和这一批的百分比。
+    #[test]
+    fn the_close_confirmation_names_the_file_and_how_far_it_got() {
+        let mut queue = TransferQueue::default();
+        assert_eq!(queue.unfinished_detail(), None);
+        queue.push(upload("a.zip"));
+        // 还没轮到：只有来源。
+        assert_eq!(queue.unfinished_detail(), Some(("a.zip".into(), None)));
+        queue.start_next();
+        report(&mut queue, TransferPhase::Scanning);
+        assert_eq!(queue.unfinished_detail(), Some(("a.zip".into(), None)));
+        queue.on_progress(
+            TransferProgress::new(TransferPhase::Transferring)
+                .with_bytes(37, 100)
+                .with_current("/local/b.tar.gz", "/srv/b.tar.gz", 1, 2),
+        );
+        assert_eq!(
+            queue.unfinished_detail(),
+            Some(("b.tar.gz".into(), Some("37%".into())))
+        );
+        // Windows 的本地路径也只取文件名。
+        queue.on_progress(
+            TransferProgress::new(TransferPhase::Stopped)
+                .with_bytes(50, 100)
+                .with_current("C:\\data\\c.bin", "/srv/c.bin", 1, 2),
+        );
+        assert_eq!(
+            queue.unfinished_detail(),
+            Some(("c.bin".into(), Some("50%".into())))
+        );
     }
 
     #[test]

@@ -861,6 +861,26 @@ fn closing_with_a_transfer_running_asks_and_closes_its_dialogs(cx: &mut TestAppC
     assert!(text.contains("还有 1 批传输没完成"), "{text}");
     assert!(text.contains("续传记录保留"), "{text}");
     click(cx, &fixture, "close-tabs-cancel");
+
+    // 原型：框里说正在传哪个文件、这一批传到多少。
+    fixture.sftp.emit(SftpEvent::Progress(
+        TransferProgress::new(TransferPhase::Transferring)
+            .with_bytes(37, 100)
+            .with_current(
+                "/local/backup.tar.gz",
+                "/home/tester/backup.tar.gz",
+                37,
+                100,
+            ),
+    ));
+    wait_head(cx, &fixture, "37%");
+    dispatch(cx, fixture.handle, CloseFocusedCard);
+    let text = label(cx, &fixture, "close-tabs-text").unwrap();
+    assert!(
+        text.contains("还有 1 批传输没完成（backup.tar.gz，37%）"),
+        "{text}"
+    );
+    click(cx, &fixture, "close-tabs-cancel");
     assert!(cx.update(|cx| fixture.workspace.read(cx).active_sftp_tab().is_some()));
 
     // 问题框开着时确认关闭：框跟着标签一起走，不留下没人回答的框。

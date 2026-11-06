@@ -93,7 +93,7 @@ editor.refused.download:
 quit.title:
   zh-CN: 退出 QiShell
 quit.transfers:
-  zh-CN: "%{name} 还有 %{count} 批传输没完成。"
+  zh-CN: "%{name} 还有 %{count} 批传输没完成%{detail}。"
 quit.transfers_note:
   zh-CN: 退出后队列清空；续传记录保留，下次传同一个文件会问是否续传。
 quit.unsaved:

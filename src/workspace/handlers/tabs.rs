@@ -20,8 +20,8 @@ use crate::workspace::Workspace;
 
 /// 关闭标签前要问的事。
 struct CloseQuestion {
-    /// 还有传输没完成的 SFTP 标签：`(主机名, 几批)`。
-    transfers: Vec<(SharedString, usize)>,
+    /// 还有传输没完成的 SFTP 标签。
+    transfers: Vec<Unfinished>,
     /// 有未保存修改的文件。
     unsaved: Vec<SharedString>,
 }
@@ -36,8 +36,13 @@ impl CloseQuestion {
         let mut lines: Vec<_> = self
             .transfers
             .iter()
-            .map(|(name, count)| {
-                ConfirmLine::Text(t!("sftp_tab.close.transfers", name = name, count = count))
+            .map(|tab| {
+                ConfirmLine::Text(t!(
+                    "sftp_tab.close.transfers",
+                    name = tab.name,
+                    count = tab.count,
+                    detail = tab.detail
+                ))
             })
             .collect();
         if !self.transfers.is_empty() {
@@ -50,6 +55,16 @@ impl CloseQuestion {
         );
         lines
     }
+}
+
+/// 一个还有传输没完成的 SFTP 标签。
+struct Unfinished {
+    /// 主机名。
+    name: SharedString,
+    /// 几批。
+    count: usize,
+    /// 括号里的：正在传的文件和百分比（原型「关闭 SFTP 标签」）。
+    detail: SharedString,
 }
 
 /// 写回结束后接着做什么。
@@ -164,14 +179,14 @@ impl Workspace {
         }
     }
 
-    /// 只留下 `id`，它到前面来。
+    /// 只留下 `id`（和它所属的 SFTP 标签），它到前面来。
     fn on_close_other_tabs(
         &mut self,
         &CloseOtherTabs(id): &CloseOtherTabs,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let others = self.tabs.others(id);
+        let others = self.without_owner_of(id, self.tabs.others(id), cx);
         if others.is_empty() {
             return;
         }
@@ -185,7 +200,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let right = self.tabs.right_of(id);
+        let right = self.without_owner_of(id, self.tabs.right_of(id), cx);
         if right.is_empty() {
             return;
         }
@@ -359,8 +374,13 @@ impl Workspace {
         }
         let mut lines: Vec<_> = transfers
             .iter()
-            .map(|(name, count)| {
-                ConfirmLine::Text(t!("quit.transfers", name = name, count = count))
+            .map(|tab| {
+                ConfirmLine::Text(t!(
+                    "quit.transfers",
+                    name = tab.name,
+                    count = tab.count,
+                    detail = tab.detail
+                ))
             })
             .collect();
         if !transfers.is_empty() {
@@ -497,13 +517,44 @@ impl Workspace {
         }
     }
 
-    /// 这些标签里还有传输没完成的 SFTP 标签：`(主机名, 几批)`。工单 22 填的是 `SftpTab::unfinished_transfers`。
-    fn unfinished_transfers(&self, ids: &[TabId], cx: &App) -> Vec<(SharedString, usize)> {
+    /// 这些标签里还有传输没完成的 SFTP 标签。工单 22 填的是 `SftpTab::unfinished_transfers`。
+    fn unfinished_transfers(&self, ids: &[TabId], cx: &App) -> Vec<Unfinished> {
         ids.iter()
             .filter_map(|id| self.tabs.get(*id)?.as_sftp())
             .map(|tab| tab.read(cx))
             .filter(|tab| tab.unfinished_transfers() > 0)
-            .map(|tab| (tab.rail_name(), tab.unfinished_transfers()))
+            .map(|tab| Unfinished {
+                name: tab.rail_name(),
+                count: tab.unfinished_transfers(),
+                detail: match tab.transfer_queue().unfinished_detail() {
+                    Some((file, Some(percent))) => {
+                        t!("sftp_tab.close.detail", file = file, percent = percent)
+                    }
+                    Some((file, None)) => t!("sftp_tab.close.detail_file", file = file),
+                    None => SharedString::default(),
+                },
+            })
+            .collect()
+    }
+
+    /// 留下 `kept` 时不能关的去掉：远程编辑器所属的 SFTP 标签，关了会把它连带关掉。
+    fn without_owner_of(&self, kept: TabId, ids: Vec<TabId>, cx: &App) -> Vec<TabId> {
+        let owner = self
+            .tabs
+            .get(kept)
+            .and_then(Tab::as_editor)
+            .and_then(|editor| editor.read(cx).sftp())
+            .map(|sftp| sftp.entity_id());
+        let Some(owner) = owner else {
+            return ids;
+        };
+        ids.into_iter()
+            .filter(|id| {
+                self.tabs
+                    .get(*id)
+                    .and_then(Tab::as_sftp)
+                    .is_none_or(|tab| tab.entity_id() != owner)
+            })
             .collect()
     }
 
