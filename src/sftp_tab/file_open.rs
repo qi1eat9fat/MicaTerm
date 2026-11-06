@@ -52,13 +52,18 @@ impl SftpTab {
         }
     }
 
-    /// `path` 说的文件，没写就是这一侧光标所在的文件；目录或者什么都没有是 `None`。
+    /// `path` 说的文件；没写就是这一侧只选中的那一个（右键菜单对着的就是它），否则是光标所在的文件。
+    /// 目录或者什么都没有是 `None`。
     fn edit_target(&self, remote: bool, path: Option<&str>, cx: &App) -> Option<EditorLocation> {
         let card = self.card(remote).read(cx);
         let path = match path {
             Some(path) => path.to_string(),
             None => {
-                let entry = card.cursor_entry(cx)?;
+                let selected = card.selected_entries(cx);
+                let entry = match selected.as_slice() {
+                    [only] => only.clone(),
+                    _ => card.cursor_entry(cx)?,
+                };
                 if entry.is_dir() || entry.is_parent() {
                     return None;
                 }

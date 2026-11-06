@@ -269,6 +269,81 @@ fn f4_enter_and_a_double_click_open_the_file_under_the_cursor(cx: &mut TestAppCo
     assert_eq!(fixture.sftp.reads.lock().unwrap().len(), 1);
 }
 
+/// 右键菜单的「编辑」和 F4 是同一个 action，菜单对着的是选中的文件：光标不在它上面也开它。
+#[gpui_kit::test]
+fn the_one_selected_file_opens_even_with_the_cursor_elsewhere(cx: &mut TestAppContext) {
+    let fixture = open_server(
+        cx,
+        &[
+            (REMOTE_FILE, b"selected\n"),
+            (OTHER_REMOTE_FILE, b"cursor\n"),
+        ],
+    );
+    let name = gpui_kit::ElementId::Name("name:文件 甲.txt".into());
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.within("remote-card").click(name, cx)
+    });
+    // 甲、乙都选上，光标到乙，再取消乙：只选中甲，光标在乙。
+    sftp_command(
+        cx,
+        &fixture,
+        SftpTabCommand::MoveCursor {
+            remote: true,
+            motion: qishell::sftp_tab::CursorMotion::Up,
+            extend: true,
+        },
+    );
+    sftp_command(
+        cx,
+        &fixture,
+        SftpTabCommand::ToggleSelection { remote: true },
+    );
+
+    dispatch(
+        cx,
+        fixture.handle,
+        qishell::app::SftpShortcut(SftpTabCommand::Edit {
+            remote: true,
+            path: None,
+        }),
+    );
+    let workspace = fixture.workspace.clone();
+    assert!(wait_until(cx, fixture.handle, |cx| {
+        cx.update(|cx| workspace.read(cx).active_editor_tab().is_some())
+    }));
+    assert_eq!(text_of(cx, &fixture), "selected\n");
+}
+
+/// 工单 21 的「新建文件」：建好了直接在编辑器里打开。
+#[gpui_kit::test]
+fn a_new_file_opens_in_the_editor(cx: &mut TestAppContext) {
+    let fixture = open_server(cx, &[]);
+    sftp_command(
+        cx,
+        &fixture,
+        SftpTabCommand::New {
+            remote: true,
+            kind: qishell::sftp_tab::NewEntryKind::File,
+        },
+    );
+    type_text(cx, &fixture, "a.txt");
+    press(cx, &fixture, "enter");
+    let workspace = fixture.workspace.clone();
+    assert!(
+        wait_until(cx, fixture.handle, |cx| {
+            cx.update(|cx| {
+                workspace
+                    .read(cx)
+                    .active_editor_tab()
+                    .is_some_and(|editor| editor.read(cx).file_name() == "a.txt")
+            })
+        }),
+        "新建的文件没有打开"
+    );
+    assert_eq!(text_of(cx, &fixture), "");
+    assert!(!unsaved(cx, &fixture));
+}
+
 #[gpui_kit::test]
 fn the_editor_has_find_and_replace_on_its_own_keys(cx: &mut TestAppContext) {
     let fixture = open_server(cx, &[(REMOTE_FILE, b"alpha beta\n")]);
