@@ -3,6 +3,7 @@
 // 本地名称在 Windows 上多查一道非法字符。
 //! 删除的确认框，和重命名、新建共用的名称框。
 
+use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -93,6 +94,20 @@ pub(super) fn dialog_title(
         }))
 }
 
+/// 对话框的按钮：靠右，小号（原型 `.dlg .df`）。库的两个按钮外面都是撑满的盒子，要各包一层才不把宽度分掉。
+pub(super) fn dialog_footer(
+    commit_id: &'static str,
+    commit: SharedString,
+) -> impl IntoElement + use<> {
+    DialogFooter::new()
+        .child(div().flex_none().child(
+            DialogClose::new().trigger(|button| button.small().label(t!("sftp_files.cancel"))),
+        ))
+        .child(div().flex_none().child(
+            DialogAction::new().child(Button::new(commit_id).primary().small().label(commit)),
+        ))
+}
+
 /// 名称框是做什么的。
 #[derive(Clone)]
 enum NameIntent {
@@ -152,13 +167,14 @@ impl Render for NameForm {
             .text_size(px(12.5))
             .child(form_field(
                 Some(self.label.clone()),
-                text_input(
+                // 和左边 30 高的字段名对齐。
+                div().flex().items_center().min_h(px(30.)).child(text_input(
                     NAME_FIELD,
                     self.label.clone(),
                     &self.input,
                     self.error.is_some(),
                     &tokens,
-                ),
+                )),
                 notes,
                 &tokens,
             ))
@@ -303,20 +319,7 @@ impl SftpTab {
                     // 只由按钮和 Esc 关，点旁边不关。
                     .overlay_closable(false)
                     .child(form.clone())
-                    .footer(
-                        DialogFooter::new()
-                            .child(
-                                DialogClose::new()
-                                    .trigger(|button| button.label(t!("sftp_files.cancel"))),
-                            )
-                            .child(
-                                DialogAction::new().child(
-                                    Button::new("entry-name-commit")
-                                        .primary()
-                                        .label(commit.clone()),
-                                ),
-                            ),
-                    )
+                    .footer(dialog_footer("entry-name-commit", commit.clone()))
                     .on_ok(move |_, window, cx| {
                         let operation = form_ok.update(cx, |form, cx| form.operation(cx));
                         match operation {

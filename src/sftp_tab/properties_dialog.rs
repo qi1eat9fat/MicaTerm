@@ -3,9 +3,7 @@
 // 不一致的位画成「混合」，八进制的那一位写 `?`（原型 `7?5`），而不是整个清空。
 //! 属性：选中项的 rwx 权限，3×3 复选框和八进制数字同步。多选时不一致的位保持每项原样，除非用户改了它。
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, notification::Notification,
@@ -13,7 +11,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::file_dialogs::{SMALL_DIALOG_WIDTH, dialog_title};
+use super::file_dialogs::{SMALL_DIALOG_WIDTH, dialog_footer, dialog_title};
 use super::{FileEntry, FileKind, FileOperation, SftpTab};
 use crate::backend::sftp::PermissionEdit;
 use crate::i18n::t;
@@ -481,20 +479,10 @@ impl SftpTab {
                     .rounded(px(14.))
                     .overlay_closable(false)
                     .child(form.clone())
-                    .footer(
-                        DialogFooter::new()
-                            .child(
-                                DialogClose::new()
-                                    .trigger(|button| button.label(t!("sftp_files.cancel"))),
-                            )
-                            .child(
-                                DialogAction::new().child(
-                                    Button::new("perm-commit")
-                                        .primary()
-                                        .label(t!("sftp_files.properties.commit")),
-                                ),
-                            ),
-                    )
+                    .footer(dialog_footer(
+                        "perm-commit",
+                        t!("sftp_files.properties.commit"),
+                    ))
                     .on_ok(move |_, window, cx| {
                         if let Some(operation) = form_ok.read(cx).operation() {
                             send.send(operation, window, cx);
