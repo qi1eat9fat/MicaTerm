@@ -1147,3 +1147,39 @@ fn closing_the_others_of_a_remote_editor_keeps_it_and_its_sftp_tab(cx: &mut Test
         [sftp, kept]
     );
 }
+
+// ---------- 文件卡片的右键菜单 ----------
+
+/// 右键文件，点「编辑」：开编辑器。
+///
+/// 文件卡片的菜单是 gpui-component 的 `context_menu`，它的状态和关菜单的订阅互相持有（上游
+/// `context_menu.rs:331` 的 Rc 环），菜单实体放不掉，退出时泄漏检测会 panic。菜单只持弱引用，影响很小，
+/// 上游不修：这里让这个测试的 App 不析构，检测器就不跑，别的测试不受影响。
+#[gpui_kit::test]
+fn the_file_menu_opens_the_editor(cx: &mut TestAppContext) {
+    std::mem::forget(cx.app.clone());
+    let fixture = open_server(cx, &[(REMOTE_FILE, b"text\n")]);
+    in_frame(cx, fixture.handle, |window, cx| {
+        window
+            .within("remote-card")
+            .right_click(ElementId::Name("name:文件 甲.txt".into()), cx)
+    });
+    in_frame(cx, fixture.handle, |window, cx| {
+        let mut popup = window.within("popup-menu");
+        assert_eq!(popup.find(0_usize).label(), Some("编辑"));
+        popup.click(0_usize, cx);
+    });
+    let workspace = fixture.workspace.clone();
+    assert!(
+        wait_until(cx, fixture.handle, |cx| {
+            cx.update(|cx| {
+                workspace
+                    .read(cx)
+                    .active_editor_tab()
+                    .is_some_and(|editor| editor.read(cx).location().path() == REMOTE_FILE)
+            })
+        }),
+        "编辑器标签没有打开"
+    );
+    assert_eq!(text_of(cx, &fixture), "text\n");
+}
