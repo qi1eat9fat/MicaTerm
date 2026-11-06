@@ -436,6 +436,11 @@ impl FileCard {
         self.busy
     }
 
+    /// 目录正在读。
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
     /// 下一次列目录后选中这一行。
     pub fn select_after_load(&mut self, name: String) {
         self.select_after_load = Some(name);

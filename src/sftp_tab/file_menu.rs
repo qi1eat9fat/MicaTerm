@@ -20,7 +20,7 @@ pub const SHOW_PREVIEW: bool = false;
 /// 「上传…」「下载…」：工单 22 接上 `SftpTabCommand::Transfer`、`ChooseFiles` 后改成 `true`。
 pub const SHOW_TRANSFER: bool = false;
 /// 「删除」「重命名…」「属性…」「新建文件夹…」「新建文件…」：工单 21 接上后改成 `true`。
-pub const SHOW_FILE_OPERATIONS: bool = false;
+pub const SHOW_FILE_OPERATIONS: bool = true;
 
 /// 菜单要知道的卡片的事，开菜单时读。
 #[derive(Clone, Debug)]
