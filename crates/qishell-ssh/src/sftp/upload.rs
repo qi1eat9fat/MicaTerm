@@ -2,7 +2,7 @@
 // 裁剪：去掉外部 CLI 的 `sync`（跳过没变的文件、`add_pruned`）。
 
 use super::{
-    EntryKind, FileMetadata, RESUME_THRESHOLD, Reason, RemotePath, SftpError, TransferAnswer,
+    ConflictFacts, EntryKind, FileFacts, FileMetadata, RESUME_THRESHOLD, Reason, RemotePath, SftpError, TransferAnswer,
     TransferChoice, TransferDetail, TransferDirection, TransferPhase, TransferQuestionKind,
     UploadError, UploadRequest,
     client::{RemoteFs, is_network_error},
@@ -355,7 +355,7 @@ impl<R: RemoteFs> Upload<'_, R> {
         message: Reason,
     ) -> Result<TransferAnswer> {
         let _turn = self.asking.lock().await;
-        self.question(kind, path, message).await
+        self.question(kind, path, message, None).await
     }
 
     /// Ask, holding the turn already.
@@ -364,11 +364,12 @@ impl<R: RemoteFs> Upload<'_, R> {
         kind: TransferQuestionKind,
         path: &str,
         message: Reason,
+        conflict: Option<ConflictFacts>,
     ) -> Result<TransferAnswer> {
         self.meter
             .borrow_mut()
             .phase(TransferPhase::Waiting, self.control);
-        let answer = self.control.ask(kind, path, message).await?;
+        let answer = self.control.ask(kind, path, message, conflict).await?;
         self.meter
             .borrow_mut()
             .phase(TransferPhase::Transferring, self.control);
@@ -378,6 +379,7 @@ impl<R: RemoteFs> Upload<'_, R> {
     async fn approve(
         &self,
         target: &RemotePath,
+        incoming: FileFacts,
         original: &Option<FileMetadata>,
         changed: bool,
     ) -> Result<bool> {
@@ -410,11 +412,13 @@ impl<R: RemoteFs> Upload<'_, R> {
             }
             None => UploadError::TargetGone,
         };
+        let existing = original.as_ref().map(FileFacts::from);
         let answer = self
             .question(
                 TransferQuestionKind::Conflict,
                 target.as_str(),
                 Reason::new(message),
+                Some(ConflictFacts::new(incoming, existing, changed)),
             )
             .await?;
         if answer.apply_to_all() && !changed {
@@ -528,7 +532,8 @@ impl<R: RemoteFs> Upload<'_, R> {
                 Some(metadata)
                     if matches!(metadata.kind(), EntryKind::File | EntryKind::Directory) =>
                 {
-                    if !self.approve(target, &existing, false).await? {
+                    let incoming = FileFacts::from(&item.metadata);
+                    if !self.approve(target, incoming, &existing, false).await? {
                         return Ok(Small::Settled(false));
                     }
                     match control.run(fs.open_replace(target)).await {
@@ -673,7 +678,12 @@ impl<R: RemoteFs> Upload<'_, R> {
             } else {
                 control.run(fs.metadata(&item.target)).await?
             };
-            if !approved && !self.approve(&item.target, &original, false).await? {
+            let incoming = FileFacts::from(&item.metadata);
+            if !approved
+                && !self
+                    .approve(&item.target, incoming, &original, false)
+                    .await?
+            {
                 return Ok(false);
             }
             let mut record = ResumeRecord::new(
@@ -918,7 +928,18 @@ impl<R: RemoteFs> Upload<'_, R> {
         if current == record.original {
             return Ok(true);
         }
-        if !self.approve(&record.target, &current, true).await? {
+        // 要传的是 `.filepart` 的来源；链接没有来源信息，大小算 0。
+        let incoming = record
+            .source_metadata
+            .as_ref()
+            .map_or(FileFacts::new(0, None), |source| {
+                let modified = u64::try_from(source.modified_ns / 1_000_000_000).ok();
+                FileFacts::new(source.size, modified)
+            });
+        if !self
+            .approve(&record.target, incoming, &current, true)
+            .await?
+        {
             self.discard_record(record).await?;
             return Ok(false);
         }

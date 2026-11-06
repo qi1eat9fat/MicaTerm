@@ -87,6 +87,9 @@ pub enum SftpCommand {
     Cancel,
     Resume,
     Discard,
+    /// 忘掉停着的一批，`.filepart` 和续传记录都留着（移出队列）：
+    /// 否则之后的 `Resume`（重新连接也发它）会把移出去的那批接着传。答 `Idle`。
+    Forget,
     Disconnect,
     Shutdown,
 }

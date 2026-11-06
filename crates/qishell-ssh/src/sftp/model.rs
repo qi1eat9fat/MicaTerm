@@ -551,6 +551,65 @@ pub enum TransferQuestionKind {
     InvalidResume,
     Error,
 }
+/// 冲突框上一边的文件：大小和修改时间（Unix 秒）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileFacts {
+    size: u64,
+    modified: Option<u64>,
+}
+impl FileFacts {
+    pub fn new(size: u64, modified: Option<u64>) -> Self {
+        Self { size, modified }
+    }
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+    pub fn modified(&self) -> Option<u64> {
+        self.modified
+    }
+}
+impl From<&FileMetadata> for FileFacts {
+    fn from(metadata: &FileMetadata) -> Self {
+        Self::new(metadata.size(), metadata.modified().map(u64::from))
+    }
+}
+impl From<&std::fs::Metadata> for FileFacts {
+    fn from(metadata: &std::fs::Metadata) -> Self {
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|time| time.as_secs());
+        Self::new(metadata.len(), modified)
+    }
+}
+/// 冲突框的对比（原型 `.fp`）：要传的，和目标那里已有的。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConflictFacts {
+    incoming: FileFacts,
+    /// `None`：目标在传输期间没了。
+    existing: Option<FileFacts>,
+    /// 目标在传输期间变了，这是再问一次。
+    changed: bool,
+}
+impl ConflictFacts {
+    pub fn new(incoming: FileFacts, existing: Option<FileFacts>, changed: bool) -> Self {
+        Self {
+            incoming,
+            existing,
+            changed,
+        }
+    }
+    pub fn incoming(&self) -> FileFacts {
+        self.incoming
+    }
+    pub fn existing(&self) -> Option<FileFacts> {
+        self.existing
+    }
+    pub fn changed(&self) -> bool {
+        self.changed
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransferQuestion {
     id: u64,
@@ -559,6 +618,8 @@ pub struct TransferQuestion {
     /// What is asked, worded as its first link: a failure's says what lies
     /// under it.
     message: Reason,
+    /// 问冲突时两边的文件。
+    conflict: Option<ConflictFacts>,
 }
 impl TransferQuestion {
     pub fn new(
@@ -572,7 +633,16 @@ impl TransferQuestion {
             kind,
             path: path.into(),
             message: message.into(),
+            conflict: None,
         }
+    }
+    /// 带上冲突的对比。
+    pub fn with_conflict(mut self, conflict: Option<ConflictFacts>) -> Self {
+        self.conflict = conflict;
+        self
+    }
+    pub fn conflict(&self) -> Option<&ConflictFacts> {
+        self.conflict.as_ref()
     }
     pub fn id(&self) -> u64 {
         self.id
