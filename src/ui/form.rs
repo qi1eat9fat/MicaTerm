@@ -3,6 +3,8 @@
 //! （spec 第 4 节「编辑表单」）。
 
 use gpui_kit::component::Sizable as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -207,4 +209,45 @@ pub fn locked_secret(
                 .on_click(|_, window, cx| window.dispatch_action(Box::new(UnlockVault), cx))
                 .child(t!("vault.field.unlock")),
         )
+}
+
+/// 对话框的标题：粗体，后面可以跟灰字（原型 `.dh .s`）。
+pub fn dialog_title(
+    title: SharedString,
+    subtitle: Option<SharedString>,
+    tokens: &Tokens,
+) -> impl IntoElement + use<> {
+    let faint = tokens.faint;
+    div()
+        .flex()
+        .items_baseline()
+        .gap(px(8.))
+        .min_w_0()
+        .child(div().flex_none().child(title))
+        .children(subtitle.map(|subtitle| {
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(px(12.))
+                .font_weight(FontWeight::NORMAL)
+                .text_color(faint)
+                .child(subtitle)
+        }))
+}
+
+/// 对话框的按钮：靠右，小号（原型 `.dlg .df`）。库的两个按钮外面都是撑满的盒子，要各包一层才不把宽度分掉。
+pub fn dialog_footer(
+    commit_id: &'static str,
+    commit: SharedString,
+    cancel: SharedString,
+) -> impl IntoElement + use<> {
+    DialogFooter::new()
+        .child(
+            div().flex_none().child(
+                DialogClose::new().trigger(move |button| button.small().label(cancel.clone())),
+            ),
+        )
+        .child(div().flex_none().child(
+            DialogAction::new().child(Button::new(commit_id).primary().small().label(commit)),
+        ))
 }

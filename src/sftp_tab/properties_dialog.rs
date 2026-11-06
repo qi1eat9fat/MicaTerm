@@ -11,13 +11,13 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::file_dialogs::{SMALL_DIALOG_WIDTH, dialog_footer, dialog_title};
+use super::file_dialogs::SMALL_DIALOG_WIDTH;
 use super::{FileEntry, FileKind, FileOperation, SftpTab};
 use crate::backend::sftp::PermissionEdit;
 use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
-use crate::ui::form::{FieldNote, form_field};
+use crate::ui::form::{FieldNote, dialog_footer, dialog_title, form_field};
 
 /// 九个 rwx 位，从所有者的读开始。
 const BITS: [u32; 9] = [
@@ -482,6 +482,7 @@ impl SftpTab {
                     .footer(dialog_footer(
                         "perm-commit",
                         t!("sftp_files.properties.commit"),
+                        t!("sftp_files.cancel"),
                     ))
                     .on_ok(move |_, window, cx| {
                         if let Some(operation) = form_ok.read(cx).operation() {

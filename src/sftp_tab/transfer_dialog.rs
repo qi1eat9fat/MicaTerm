@@ -7,8 +7,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -22,7 +21,7 @@ use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Choice, ChoiceButton, ChoiceTone, ConfirmLine};
-use crate::ui::form::{FieldNote, form_field};
+use crate::ui::form::{FieldNote, dialog_footer, form_field};
 
 /// 确认框的宽（原型 `.dlg.small`）。
 const DIALOG_WIDTH: Pixels = px(480.);
@@ -354,17 +353,11 @@ pub(super) fn open_form_dialog(
                 .rounded(px(14.))
                 .overlay_closable(false)
                 .child(form.clone())
-                .footer(
-                    DialogFooter::new()
-                        .child(
-                            DialogClose::new()
-                                .trigger(|button| button.label(t!("sftp_transfer.confirm.cancel"))),
-                        )
-                        .child(
-                            DialogAction::new()
-                                .child(Button::new(confirm_id).primary().label(confirm.clone())),
-                        ),
-                )
+                .footer(dialog_footer(
+                    confirm_id,
+                    confirm.clone(),
+                    t!("sftp_transfer.confirm.cancel"),
+                ))
                 .on_ok(
                     move |_, window, cx| match commit.update(cx, |form, cx| form.commit(cx)) {
                         Some(target) => {

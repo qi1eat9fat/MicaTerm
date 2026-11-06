@@ -7,9 +7,9 @@
 //! - `operations`：做确认过的文件操作；`file_dialogs`、`properties_dialog`：问用户的框（工单 21）。
 //!
 //! 后面的工单只填自己的文件，不用改 `tab.rs` 的大 match：
-//! - 工单 21（文件操作）：`operations.rs`（`OperationState`），打开 `file_menu::SHOW_FILE_OPERATIONS`；
-//! - 工单 22（传输）：`transfers.rs`（`TransferState`），打开 `file_menu::SHOW_TRANSFER`；
-//! - 工单 23（编辑器）、24（预览）：`file_open.rs`（`FileOpenState`），打开 `file_menu::SHOW_EDIT`、`SHOW_PREVIEW`；
+//! - 工单 21（文件操作）：`operations.rs`（`OperationState`），
+//! - 工单 22（传输）：`transfers.rs`（`TransferState`），
+//! - 工单 23（编辑器）、24（预览）：`file_open.rs`（`FileOpenState`）；
 //!   预览的框在 `preview`、`image_preview`。
 
 mod file_card;

@@ -6,6 +6,7 @@
 // 改造：对话框走 `DialogLayer`；文件在不在已开的编辑器里由窗口壳判断（`SftpTabEvent::EditFile`）。
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::rc::Rc;
 
 use futures::channel::oneshot;
@@ -16,8 +17,8 @@ use super::preview::{IMAGE_LIMIT, Preview, PreviewContent, PreviewKind, open_pre
 use super::{ConnectionState, SftpTab, SftpTabEvent, format_size};
 use crate::app::{SftpAction, SftpDispatch as _, SftpTabCommand};
 use crate::backend::sftp::{
-    EDIT_LIMIT, FileBytes, FileStamp, ReadFailure, RemotePath, SaveFailure, SftpCommand, TextFile,
-    read_local_bytes, read_local_text,
+    EDIT_LIMIT, FileBytes, FileStamp, LocalDirectoryProvider, ReadFailure, RemotePath, SaveFailure,
+    SftpCommand, TextFile, read_local_bytes, read_local_text,
 };
 use crate::editor::EditorLocation;
 use crate::i18n::t;
@@ -156,30 +157,14 @@ impl SftpTab {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Task<Result<TextFile, ReadFailure>>> {
-        match location {
-            EditorLocation::Local(path) => {
-                let (provider, path) = (self.local_files.clone(), path.clone());
-                Some(cx.background_spawn(async move { read_local_text(provider.as_ref(), &path) }))
-            }
-            EditorLocation::Remote(path) => {
-                if !self.reachable(window, cx) {
-                    return None;
-                }
-                let (sender, receiver) = oneshot::channel();
-                let request_id = self.next_file_request(PendingFile::Read(sender));
-                self.send(SftpCommand::ReadFile {
-                    request_id,
-                    path: path.clone(),
-                });
-                Some(cx.spawn(async move |_, _| {
-                    receiver.await.unwrap_or_else(|_| {
-                        Err(ReadFailure::Failed(
-                            t!("editor.file.connection_lost").to_string(),
-                        ))
-                    })
-                }))
-            }
-        }
+        self.read_with(
+            location,
+            read_local_text,
+            |request_id, path| SftpCommand::ReadFile { request_id, path },
+            PendingFile::Read,
+            window,
+            cx,
+        )
     }
 
     /// 读整个文件，不管是不是文本，比 `limit` 大就不读。远程没连着时是 `None`，这里已经告诉用户了。
@@ -190,24 +175,44 @@ impl SftpTab {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Task<Result<FileBytes, ReadFailure>>> {
+        self.read_with(
+            location,
+            move |provider, path| read_local_bytes(provider, path, limit),
+            move |request_id, path| SftpCommand::ReadBytes {
+                request_id,
+                path,
+                limit,
+            },
+            PendingFile::Bytes,
+            window,
+            cx,
+        )
+    }
+
+    /// 本地文件放到后台读（`local`），远程文件发给工作线程（`remote` 做出命令，`pending` 记下谁在等）。
+    fn read_with<T: Send + 'static>(
+        &mut self,
+        location: &EditorLocation,
+        local: impl FnOnce(&dyn LocalDirectoryProvider, &Path) -> Result<T, ReadFailure>
+        + Send
+        + 'static,
+        remote: impl FnOnce(u64, RemotePath) -> SftpCommand,
+        pending: impl FnOnce(oneshot::Sender<Result<T, ReadFailure>>) -> PendingFile,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Task<Result<T, ReadFailure>>> {
         match location {
             EditorLocation::Local(path) => {
                 let (provider, path) = (self.local_files.clone(), path.clone());
-                Some(cx.background_spawn(async move {
-                    read_local_bytes(provider.as_ref(), &path, limit)
-                }))
+                Some(cx.background_spawn(async move { local(provider.as_ref(), &path) }))
             }
             EditorLocation::Remote(path) => {
                 if !self.reachable(window, cx) {
                     return None;
                 }
                 let (sender, receiver) = oneshot::channel();
-                let request_id = self.next_file_request(PendingFile::Bytes(sender));
-                self.send(SftpCommand::ReadBytes {
-                    request_id,
-                    path: path.clone(),
-                    limit,
-                });
+                let request_id = self.next_file_request(pending(sender));
+                self.send(remote(request_id, path.clone()));
                 Some(cx.spawn(async move |_, _| {
                     receiver.await.unwrap_or_else(|_| {
                         Err(ReadFailure::Failed(

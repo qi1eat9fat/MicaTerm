@@ -96,7 +96,6 @@ pub struct SftpTab {
     /// 归工单 22 的状态（`transfers.rs`）。
     pub(super) transfers: TransferState,
     /// 归工单 23、24 的状态（`file_open.rs`）。
-    #[allow(dead_code)]
     pub(super) file_open: FileOpenState,
     /// 问要不要重新连接的那个框，开着时不再叠一个。
     reconnect_dialog: Option<DialogLayer>,

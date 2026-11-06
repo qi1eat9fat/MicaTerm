@@ -1,9 +1,6 @@
 // 参考 since2006/shell-rs @ b2a307a: src/explorer/pane_menu.rs 改写
 // 裁剪：去掉书签、查找文件、「前往」子菜单和大小格式；空白处的菜单按全部界面原型重排。
 //! 文件卡片的右键菜单（原型「文件右键菜单」「空白处右键菜单」）。
-//!
-//! 菜单项全部按原型的顺序写好；实现还没接上的项用下面的开关藏起来，工单 21、22、23、24 接上实现后
-//! 只要把自己的开关改成 `true`（做法同 `host::menu`）。
 
 use gpui_kit::Action;
 use gpui_kit::component::menu::PopupMenu;
@@ -12,15 +9,6 @@ use gpui_kit::prelude::FluentBuilder as _;
 use super::{CardSide, NewEntryKind, PreviewKind};
 use crate::app::{SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
 use crate::i18n::t;
-
-/// 「编辑」：工单 23 接上了 `SftpTabCommand::Edit`。
-pub const SHOW_EDIT: bool = true;
-/// 「预览」：工单 24 接上了 `SftpTabCommand::Preview`。
-pub const SHOW_PREVIEW: bool = true;
-/// 「上传…」「下载…」（工单 22）。
-pub const SHOW_TRANSFER: bool = true;
-/// 「删除」「重命名…」「属性…」「新建文件夹…」「新建文件…」：工单 21 接上后改成 `true`。
-pub const SHOW_FILE_OPERATIONS: bool = true;
 
 /// 菜单要知道的卡片的事，开菜单时读。
 #[derive(Clone, Debug)]
@@ -55,14 +43,14 @@ impl CardMenuState {
             .as_deref()
             .and_then(PreviewKind::of)
             .is_some_and(PreviewKind::preview_only);
-        SHOW_EDIT && self.edits_file.is_some() && !picture
+        self.edits_file.is_some() && !picture
     }
 
     /// 「预览」对着的文件：只选中一个能预览的文件时有。Markdown 和 SVG 两项都有。
     fn previewed_file(&self) -> Option<String> {
         self.edits_file
             .clone()
-            .filter(|path| SHOW_PREVIEW && PreviewKind::of(path).is_some())
+            .filter(|path| PreviewKind::of(path).is_some())
     }
 }
 
@@ -93,41 +81,34 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
             }),
         )
     })
-    .when(
-        (SHOW_EDIT || SHOW_PREVIEW) && state.edits_file.is_some(),
-        |menu| menu.separator(),
+    .when(state.edits_file.is_some(), |menu| menu.separator())
+    .menu_with_disabled(
+        transfer,
+        state.action(SftpTabCommand::Transfer { remote }),
+        state.targets.is_empty() || !state.can_transfer,
     )
-    .when(SHOW_TRANSFER, |menu| {
-        menu.menu_with_disabled(
-            transfer,
-            state.action(SftpTabCommand::Transfer { remote }),
-            state.targets.is_empty() || !state.can_transfer,
-        )
-    })
     .menu_with_disabled(
         t!("sftp_tab.menu.copy_path"),
         state.action(SftpTabCommand::CopySelectedPaths { remote }),
         state.targets.is_empty(),
     )
-    .when(SHOW_FILE_OPERATIONS, |menu| {
-        menu.separator()
-            .menu_with_disabled(
-                t!("sftp_tab.menu.delete"),
-                state.action(SftpTabCommand::Delete { remote }),
-                none,
-            )
-            .menu_with_disabled(
-                t!("sftp_tab.menu.rename"),
-                state.action(SftpTabCommand::Rename { remote }),
-                none || state.targets.len() != 1,
-            )
-            .when(state.has_properties, |menu| {
-                menu.menu_with_disabled(
-                    t!("sftp_tab.menu.properties"),
-                    state.action(SftpTabCommand::Properties { remote }),
-                    none,
-                )
-            })
+    .separator()
+    .menu_with_disabled(
+        t!("sftp_tab.menu.delete"),
+        state.action(SftpTabCommand::Delete { remote }),
+        none,
+    )
+    .menu_with_disabled(
+        t!("sftp_tab.menu.rename"),
+        state.action(SftpTabCommand::Rename { remote }),
+        none || state.targets.len() != 1,
+    )
+    .when(state.has_properties, |menu| {
+        menu.menu_with_disabled(
+            t!("sftp_tab.menu.properties"),
+            state.action(SftpTabCommand::Properties { remote }),
+            none,
+        )
     })
 }
 
@@ -143,33 +124,29 @@ pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMen
             state.targets.is_empty() || !state.can_transfer,
         )
     };
-    menu.when(SHOW_FILE_OPERATIONS, |menu| {
-        menu.menu_with_disabled(
-            t!("sftp_tab.menu.new_folder"),
-            state.action(SftpTabCommand::New {
-                remote,
-                kind: NewEntryKind::Folder,
-            }),
-            !state.can_modify,
-        )
-        .menu_with_disabled(
-            t!("sftp_tab.menu.new_file"),
-            state.action(SftpTabCommand::New {
-                remote,
-                kind: NewEntryKind::File,
-            }),
-            !state.can_modify,
-        )
-        .separator()
-    })
-    .when(SHOW_TRANSFER, |menu| {
-        menu.menu_with_disabled(
-            t!("sftp_tab.menu.upload"),
-            state.action(upload),
-            upload_disabled,
-        )
-        .separator()
-    })
+    menu.menu_with_disabled(
+        t!("sftp_tab.menu.new_folder"),
+        state.action(SftpTabCommand::New {
+            remote,
+            kind: NewEntryKind::Folder,
+        }),
+        !state.can_modify,
+    )
+    .menu_with_disabled(
+        t!("sftp_tab.menu.new_file"),
+        state.action(SftpTabCommand::New {
+            remote,
+            kind: NewEntryKind::File,
+        }),
+        !state.can_modify,
+    )
+    .separator()
+    .menu_with_disabled(
+        t!("sftp_tab.menu.upload"),
+        state.action(upload),
+        upload_disabled,
+    )
+    .separator()
     .menu(
         t!("sftp_tab.menu.refresh"),
         state.action(SftpTabCommand::Refresh { remote }),

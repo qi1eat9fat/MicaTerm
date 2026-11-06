@@ -3,9 +3,6 @@
 // 本地名称在 Windows 上多查一道非法字符。
 //! 删除的确认框，和重命名、新建共用的名称框。
 
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 
@@ -14,7 +11,7 @@ use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Confirm, ConfirmLine, open_confirm_dialog};
-use crate::ui::form::{FieldNote, form_field, text_input};
+use crate::ui::form::{FieldNote, dialog_footer, dialog_title, form_field, text_input};
 
 /// 小对话框的宽（原型 `.dlg.small`）。
 pub(super) const SMALL_DIALOG_WIDTH: Pixels = px(470.);
@@ -68,44 +65,6 @@ impl NewEntryKind {
             NewEntryKind::File => t!("sftp_files.new.file_name"),
         }
     }
-}
-
-/// 对话框的标题：粗体，后面可以跟灰字（原型 `.dh .s`）。
-pub(super) fn dialog_title(
-    title: SharedString,
-    subtitle: Option<SharedString>,
-    tokens: &Tokens,
-) -> impl IntoElement + use<> {
-    let faint = tokens.faint;
-    div()
-        .flex()
-        .items_baseline()
-        .gap(px(8.))
-        .min_w_0()
-        .child(div().flex_none().child(title))
-        .children(subtitle.map(|subtitle| {
-            div()
-                .min_w_0()
-                .truncate()
-                .text_size(px(12.))
-                .font_weight(FontWeight::NORMAL)
-                .text_color(faint)
-                .child(subtitle)
-        }))
-}
-
-/// 对话框的按钮：靠右，小号（原型 `.dlg .df`）。库的两个按钮外面都是撑满的盒子，要各包一层才不把宽度分掉。
-pub(super) fn dialog_footer(
-    commit_id: &'static str,
-    commit: SharedString,
-) -> impl IntoElement + use<> {
-    DialogFooter::new()
-        .child(div().flex_none().child(
-            DialogClose::new().trigger(|button| button.small().label(t!("sftp_files.cancel"))),
-        ))
-        .child(div().flex_none().child(
-            DialogAction::new().child(Button::new(commit_id).primary().small().label(commit)),
-        ))
 }
 
 /// 名称框是做什么的。
@@ -319,7 +278,11 @@ impl SftpTab {
                     // 只由按钮和 Esc 关，点旁边不关。
                     .overlay_closable(false)
                     .child(form.clone())
-                    .footer(dialog_footer("entry-name-commit", commit.clone()))
+                    .footer(dialog_footer(
+                        "entry-name-commit",
+                        commit.clone(),
+                        t!("sftp_files.cancel"),
+                    ))
                     .on_ok(move |_, window, cx| {
                         let operation = form_ok.update(cx, |form, cx| form.operation(cx));
                         match operation {
