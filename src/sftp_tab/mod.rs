@@ -3,7 +3,8 @@
 //! - `tab`：`SftpTab`，持有两张文件卡片、连接的命令通道；`execute` 是全部命令的入口；
 //! - `file_card`：一侧的状态和界面；`path_bar`：路径栏；`file_listing`：表格的行和列，渲染回调只用快照；
 //! - `model`、`selection`、`transfer_queue`：纯逻辑，没有 gpui 实体；`marquee`：框选；`file_icons`：文件图标；
-//! - `file_menu`：右键菜单，还没实现的项用开关藏着。
+//! - `file_menu`：右键菜单，还没实现的项用开关藏着；
+//! - `operations`：做确认过的文件操作；`file_dialogs`、`properties_dialog`：问用户的框（工单 21）。
 //!
 //! 后面的工单只填自己的文件，不用改 `tab.rs` 的大 match：
 //! - 工单 21（文件操作）：`operations.rs`（`OperationState`），打开 `file_menu::SHOW_FILE_OPERATIONS`；
@@ -11,6 +12,7 @@
 //! - 工单 23（编辑器）、24（预览）：`file_open.rs`（`FileOpenState`），打开 `file_menu::SHOW_EDIT`、`SHOW_PREVIEW`。
 
 mod file_card;
+mod file_dialogs;
 mod file_icons;
 mod file_icons_table;
 mod file_listing;
@@ -20,6 +22,7 @@ mod marquee;
 mod model;
 mod operations;
 mod path_bar;
+mod properties_dialog;
 mod queue_card;
 mod selection;
 mod tab;

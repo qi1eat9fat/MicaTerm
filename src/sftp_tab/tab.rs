@@ -85,7 +85,6 @@ pub struct SftpTab {
     /// 还没用掉的远程初始目录。
     start_directory: Option<String>,
     /// 归工单 21 的状态（`operations.rs`）。
-    #[allow(dead_code)]
     pub(super) operations: OperationState,
     /// 归工单 22 的状态（`transfers.rs`）。
     pub(super) transfers: TransferState,
@@ -335,6 +334,7 @@ impl SftpTab {
             layer.close(window, cx);
         }
         self.close_transfer_dialogs(window, cx);
+        self.close_operation_dialog(window, cx);
         self.send(SftpCommand::Disconnect);
         self.send(SftpCommand::Shutdown);
     }

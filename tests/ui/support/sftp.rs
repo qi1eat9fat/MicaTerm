@@ -179,6 +179,11 @@ impl SftpTransport for FakeSftpTransport {
                     operation,
                 } => {
                     let refused = format!("{operation:?}").contains("denied");
+                    // 名字里有这个的操作永远不回答：测试等答复的那段时间（工单 21）。
+                    if format!("{operation:?}").contains("hold-answer") {
+                        self.operations.lock().unwrap().push(operation);
+                        continue;
+                    }
                     if let RemoteOperation::CreateFile { path } = &operation {
                         self.files
                             .lock()
@@ -359,6 +364,9 @@ impl LocalDirectoryProvider for FakeLocalDirectory {
             .any(|bad| bad == path)
         {
             anyhow::bail!("找不到这个目录");
+        }
+        if path.ends_with("dotfiles") {
+            return Ok(dotfiles_listing());
         }
         Ok(fake_listing(path.to_str().unwrap()))
     }
