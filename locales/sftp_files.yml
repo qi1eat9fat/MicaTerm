@@ -1,6 +1,7 @@
 _version: 2
 
 # SFTP 文件操作（工单 21）：新建、重命名、删除、属性。
+# 部分文案来自 since2006/shell-rs @ b2a307a: locales/explorer.yml
 
 sftp_files.cancel:
   zh-CN: 取消
@@ -91,7 +92,7 @@ sftp_files.properties.octal:
 sftp_files.properties.links:
   zh-CN: 符号链接没有独立的权限。
 sftp_files.properties.no_rights:
-  zh-CN: 服务器没有告诉这些项目的权限。
+  zh-CN: 主机没有告诉这些项目的权限。
 sftp_files.properties.recursive:
   zh-CN: 递归应用到子目录和文件
 sftp_files.properties.dir_x:

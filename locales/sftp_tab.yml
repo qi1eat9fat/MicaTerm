@@ -1,6 +1,7 @@
 _version: 2
 
 # SFTP 标签（工单 20）：文件卡片、路径栏、状态栏、右键菜单、关闭确认。
+# 部分文案来自 since2006/shell-rs @ b2a307a: locales/explorer.yml
 
 sftp_tab.local_name:
   zh-CN: 本机
@@ -128,3 +129,5 @@ sftp_tab.close.cancel:
   zh-CN: 取消
 sftp_tab.close.confirm:
   zh-CN: 关闭
+sftp_tab.connection.no_resume_folder:
+  zh-CN: 找不到数据目录，这次的传输不会记续传记录，断了不能接着传：%{error}

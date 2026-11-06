@@ -372,7 +372,7 @@ impl EditorTab {
         cx.notify();
     }
 
-    /// 保存时发现文件被别人改过（原型「文件在服务器上被改过」）：重新加载、取消或者覆盖。
+    /// 保存时发现文件被别人改过（原型的冲突框）：重新加载、取消或者覆盖。
     fn ask_about_conflict(
         &mut self,
         now: Option<FileStamp>,

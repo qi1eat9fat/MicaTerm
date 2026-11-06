@@ -213,8 +213,7 @@ impl<F> ReadFailure<F> {
 /// [`ReadFailure`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SaveFailure<F> {
-    /// The file is no longer what was read or last saved: changed, or gone
-    /// (`now` is `None`). Nothing was written.
+    /// 文件已经不是读到或上次存下的样子：被改过，或者没了（`now` 是 `None`）。什么都没写。
     Changed { now: Option<FileStamp> },
     /// The file was truncated and then the write failed: what is on disk
     /// now is incomplete, and no longer what was read.

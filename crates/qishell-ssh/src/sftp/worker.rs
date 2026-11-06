@@ -69,6 +69,17 @@ impl SftpWorker {
             download_journal: DownloadJournal::new(download_resume_dir),
         }
     }
+
+    /// 不记续传记录：没有地方放的时候（取不到数据目录）。传输照样能做，断了不能接着传。
+    pub fn without_resume_records(connector: SshConnector, login: HostLogin) -> Self {
+        Self {
+            connector,
+            endpoint: login.endpoint(),
+            login,
+            journal: Journal::disabled(),
+            download_journal: DownloadJournal::disabled(),
+        }
+    }
 }
 
 /// The host's one transfer batch, whichever way it goes.

@@ -70,6 +70,8 @@ pub struct WorkspaceServices {
     pub sftp: SharedSftpTransportProvider,
     /// SFTP 标签本地一侧的文件（工单 20）：生产是这台电脑，测试注入假的，不碰真实磁盘。
     pub local_files: SharedLocalDirectoryProvider,
+    /// 续传记录没有地方放时给用户看的原因（这次运行的传输不能续传）。窗口壳打开后弹出错误通知。
+    pub sftp_problem: Option<SharedString>,
 }
 
 impl WorkspaceServices {
@@ -89,14 +91,11 @@ impl WorkspaceServices {
         let known_hosts = crate::app::known_hosts_path()
             .unwrap_or_else(|_| std::path::PathBuf::from(crate::app::KNOWN_HOSTS_FILE));
         let source = qishell_hosts::secrets::StoreSource::shared(secrets.clone());
-        let resume = |dir: std::io::Result<std::path::PathBuf>, name: &str| {
-            dir.unwrap_or_else(|_| std::path::PathBuf::from(name))
-        };
-        let sftp = std::sync::Arc::new(SshSftpTransportProvider::new(
+        let (sftp, sftp_problem) = sftp_provider(
             qishell_ssh::SshConnector::new(known_hosts.clone(), source.clone()),
-            resume(crate::app::upload_resume_dir(), "upload-resume"),
-            resume(crate::app::download_resume_dir(), "download-resume"),
-        ));
+            crate::app::upload_resume_dir(),
+            crate::app::download_resume_dir(),
+        );
         Self {
             local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
             hosts,
@@ -109,9 +108,29 @@ impl WorkspaceServices {
             secrets,
             vault,
             vault_problem,
-            sftp,
+            sftp: std::sync::Arc::new(sftp),
             local_files: std::sync::Arc::new(SystemLocalDirectoryProvider),
+            sftp_problem,
         }
+    }
+}
+
+/// 建 SFTP 连接。续传记录只放在数据目录里（ADR 0003）：取不到数据目录就不记，告诉用户，
+/// 不要静默写到当前工作目录。
+fn sftp_provider(
+    connector: qishell_ssh::SshConnector,
+    upload: std::io::Result<std::path::PathBuf>,
+    download: std::io::Result<std::path::PathBuf>,
+) -> (SshSftpTransportProvider, Option<SharedString>) {
+    match (upload, download) {
+        (Ok(upload), Ok(download)) => (
+            SshSftpTransportProvider::new(connector, upload, download),
+            None,
+        ),
+        (Err(error), _) | (_, Err(error)) => (
+            SshSftpTransportProvider::without_resume_records(connector),
+            Some(t!("sftp_tab.connection.no_resume_folder", error = error)),
+        ),
     }
 }
 
@@ -339,7 +358,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Entity<VaultStore>, Vec<Subscription>) {
-        if let Some(problem) = services.vault_problem.take() {
+        for problem in [services.vault_problem.take(), services.sftp_problem.take()]
+            .into_iter()
+            .flatten()
+        {
             window.defer(cx, move |window, cx| {
                 window.push_notification(Notification::error(problem), cx);
             });
@@ -630,5 +652,40 @@ pub fn window_options(cx: &App) -> WindowOptions {
         window_background: WindowBackgroundAppearance::Opaque,
         app_id: Some(crate::app::APP_IDENTITY.into()),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::sftp_provider;
+
+    fn connector() -> qishell_ssh::SshConnector {
+        qishell_ssh::SshConnector::new(
+            std::path::PathBuf::from("known_hosts"),
+            qishell_hosts::secrets::StoreSource::shared(Arc::new(
+                qishell_hosts::secrets::InMemorySecretStore::default(),
+            )),
+        )
+    }
+
+    /// 取不到数据目录不是静默写到当前工作目录：不记续传记录，说明原因。
+    #[test]
+    fn without_a_data_folder_resuming_is_off_and_says_why() {
+        let lost = || Err(std::io::Error::other("没有可执行文件的路径"));
+        let (_, problem) = sftp_provider(connector(), lost(), Ok("/data/download-resume".into()));
+        let problem = problem.expect("the user is told");
+        assert!(problem.contains("续传"), "{problem}");
+        assert!(problem.contains("没有可执行文件的路径"), "{problem}");
+        let (_, problem) = sftp_provider(connector(), Ok("/data/upload-resume".into()), lost());
+        assert!(problem.is_some());
+
+        let (_, problem) = sftp_provider(
+            connector(),
+            Ok("/data/upload-resume".into()),
+            Ok("/data/download-resume".into()),
+        );
+        assert_eq!(problem, None);
     }
 }

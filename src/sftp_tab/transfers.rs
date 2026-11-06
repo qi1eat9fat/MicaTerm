@@ -1,5 +1,6 @@
+// 参考 since2006/shell-rs @ b2a307a: src/explorer/explorer_panel.rs 改写
 //! 传输：把确认框、问题框和队列串起来。框的内容在 `transfer_dialog`，队列卡片在 `queue_card`，
-//! 排队的记账在 `transfer_queue`。上游参考 shell-rs 的 `src/explorer/explorer_panel.rs`。
+//! 排队的记账在 `transfer_queue`。
 //!
 //! 引擎一次跑一批（一批内的并发数是设置里的 `parallel`，`settings::apply` 设给引擎），标签把下一批交给它；
 //! 引擎说 `Idle` 才能交下一批。停着的一批占着队头，等「继续」「移出队列」或「丢弃续传进度」。

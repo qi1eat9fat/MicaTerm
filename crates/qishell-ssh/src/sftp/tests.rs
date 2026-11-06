@@ -583,6 +583,34 @@ fn winscp_style_upload_finishes_without_a_verification_phase() {
 
 /// Files under 100 KB go straight to their names, as WinSCP sends them: no
 /// `.filepart`, no resume record, and several at once.
+/// 没有地方放续传记录（取不到数据目录）：照样传完，只是什么记录都不写，也不会写到别处。
+#[test]
+fn without_a_journal_transfers_finish_and_keep_no_records() {
+    runtime().block_on(async {
+        let tmp = tempfile::tempdir_in(temp_root()).unwrap();
+        let bytes: Vec<u8> = (0..2 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+        let source = tmp.path().join("big.bin");
+        std::fs::write(&source, &bytes).unwrap();
+        let answers = Answers::new(vec![]);
+        let remote = Remote::new();
+
+        let mut upload = batch(&source, Journal::disabled(), &answers.control).await;
+        run(&mut upload, &remote, &answers.control).await.unwrap();
+        assert_eq!(remote.bytes("/dest/big.bin"), bytes);
+        upload.discard(&remote).await.unwrap();
+
+        let journal = DownloadJournal::disabled();
+        let out = tmp.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let mut download =
+            download_batch(&["/dest/big.bin"], &out, journal, &remote, &answers.control).await;
+        run_download(&mut download, &remote, &answers.control)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(out.join("big.bin")).unwrap(), bytes);
+    });
+}
+
 #[test]
 fn small_files_go_straight_to_their_names_several_at_once() {
     runtime().block_on(async {
@@ -2205,7 +2233,7 @@ fn a_save_over_a_file_changed_or_removed_since_is_refused() {
         let error = write_in_place(&remote, &path, b"mine 2\n".to_vec(), Some(file.stamp()))
             .await
             .unwrap_err();
-        // The refusal says what the file is now, for the question it leads to.
+        // 拒绝时说清文件现在的样子，冲突框要用。
         match SaveFailure::from_error(error, |why| why) {
             SaveFailure::Changed { now: Some(now) } => {
                 assert_eq!(now.size(), b"someone else's\n".len() as u64);

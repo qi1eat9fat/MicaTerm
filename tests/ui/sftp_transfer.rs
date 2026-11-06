@@ -906,6 +906,18 @@ fn quitting_with_a_stopped_batch_asks(cx: &mut TestAppContext) {
     assert!(text.contains("还有 1 批传输没完成"), "{text}");
 }
 
+/// 续传记录没有地方放（取不到数据目录）：窗口出来就告诉用户。
+#[gpui_kit::test]
+fn a_missing_resume_folder_is_reported_once_the_window_is_up(cx: &mut TestAppContext) {
+    let services = WorkspaceServices {
+        sftp_problem: Some("找不到数据目录，这次的传输不能续传：无法读取".into()),
+        ..fake_services()
+    };
+    let (handle, _) = open_workspace_with(cx, settings_store(), services);
+    let shown = in_frame(cx, handle, |window, cx| window.notifications(cx).len());
+    assert_eq!(shown, 1);
+}
+
 /// 编辑器打不开的文件，框里的「下载…」走同一个确认框，目标是本地一侧的当前目录。
 #[gpui_kit::test]
 fn a_file_the_editor_refuses_can_be_downloaded(cx: &mut TestAppContext) {
