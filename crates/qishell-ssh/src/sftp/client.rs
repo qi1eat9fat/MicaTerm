@@ -63,7 +63,9 @@ pub(crate) trait RemoteFs {
 pub(crate) struct SftpClient {
     raw: RawSftpSession,
     ssh: Option<SshHandle>,
-    /// Turns true once the server side of the SFTP stream has ended.
+    /// 连接断了就置 true：SFTP 流读到了头，或者有个请求因为连接出错失败了。
+    lost: Arc<watch::Sender<bool>>,
+    /// Turns true once the connection is gone, as `lost` says.
     closed: watch::Receiver<bool>,
     fingerprint: String,
 }
@@ -73,23 +75,28 @@ impl SftpClient {
         config: &SshConnectionConfig,
         prompts: Arc<SshPrompts>,
     ) -> Result<Self> {
-        let (ssh, fingerprint) = connector.connect(config, prompts).await?;
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            let channel = ssh.channel_open_session().await?;
-            channel.request_subsystem(true, "sftp").await?;
-            Self::initialize(channel.into_stream(), Some(ssh), fingerprint).await
+        let (connector, config) = (connector.clone(), config.clone());
+        on_own_thread(async move {
+            let (ssh, fingerprint) = connector.connect(&config, prompts).await?;
+            tokio::time::timeout(std::time::Duration::from_secs(15), async {
+                let channel = ssh.channel_open_session().await?;
+                channel.request_subsystem(true, "sftp").await?;
+                Self::initialize(channel.into_stream(), Some(ssh), fingerprint).await
+            })
+            .await
+            .map_err(|_| anyhow!(SftpError::StartTimeout))?
         })
         .await
-        .map_err(|_| anyhow!(SftpError::StartTimeout))?
     }
     async fn initialize<S>(stream: S, ssh: Option<SshHandle>, fingerprint: String) -> Result<Self>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        let (closed_tx, closed) = watch::channel(false);
+        let lost = Arc::new(watch::Sender::new(false));
+        let closed = lost.subscribe();
         let raw = RawSftpSession::new(WatchedStream {
             inner: stream,
-            closed: closed_tx,
+            closed: lost.clone(),
         });
         let version = raw.init().await?;
         if version.version != 3 {
@@ -101,9 +108,25 @@ impl SftpClient {
         Ok(Self {
             raw,
             ssh,
+            lost,
             closed,
             fingerprint,
         })
+    }
+    /// 发一个请求。连接已经断了就不发，马上失败；请求因为连接出错失败了，就记下连接断了。
+    /// 卡住的连接（网断了，没有 FIN 也没有 RST）只有请求超时才看得出来：一个请求等满了超时，
+    /// 后面的请求（比如出错后关文件句柄）就不该在同一条死连接上再各等一遍，引擎好马上说断了、去重连。
+    async fn request<T>(&self, request: impl Future<Output = Result<T>>) -> Result<T> {
+        if *self.closed.borrow() {
+            return Err(Error::UnexpectedBehavior("session closed".into()).into());
+        }
+        let result = request.await;
+        if let Err(error) = &result
+            && is_network_error(error)
+        {
+            self.lost.send_replace(true);
+        }
+        result
     }
     /// Only the Unix tests have a local `sftp-server` to talk to.
     #[cfg(all(test, unix))]
@@ -134,8 +157,9 @@ impl SftpClient {
         Some(crate::round_trip(self.ssh.as_ref()?).await)
     }
     /// Resolves once the server side of the SFTP session has gone, which
-    /// russh-sftp otherwise only tells the next request. It does not hold on
-    /// to the client, so dropping the client still closes the connection.
+    /// russh-sftp otherwise only tells the next request, or once a request
+    /// found the connection lost. It does not hold on to the client, so
+    /// dropping the client still closes the connection.
     pub fn closed(&self) -> impl Future<Output = ()> + Send + 'static {
         let mut closed = self.closed.clone();
         async move {
@@ -144,14 +168,17 @@ impl SftpClient {
         }
     }
     pub async fn canonicalize(&self, path: &RemotePath) -> Result<RemotePath> {
-        let response = self.raw.realpath(path.as_str()).await?;
-        RemotePath::new(checked_text(
-            &response
-                .files
-                .first()
-                .ok_or_else(|| anyhow!(SftpError::NoPath))?
-                .filename,
-        )?)
+        self.request(async {
+            let response = self.raw.realpath(path.as_str()).await?;
+            RemotePath::new(checked_text(
+                &response
+                    .files
+                    .first()
+                    .ok_or_else(|| anyhow!(SftpError::NoPath))?
+                    .filename,
+            )?)
+        })
+        .await
     }
     /// A directory for the browser: canonical path, owners, and what each
     /// link points to (resolved concurrently, one `stat` per link).
@@ -186,104 +213,187 @@ impl SftpClient {
         Ok(DirectoryListing::new(path.as_str(), entries))
     }
 }
+
+/// 在一条自己的线程上建连接：SSH 会话和 SFTP 流的任务都跑在那里，等连接断了（或者客户端放下了）线程才结束。
+///
+/// 引擎（命令、计时、事件）留在调用的线程上，不跟着套接字一起卡住。套接字照理不会挡住线程，
+/// 可是有的机器上（装了过滤网络的驱动，比如 AdGuard）往一条对面不收的连接写，非阻塞的 `send`
+/// 也会一直挡着；会话任务和引擎在同一条线程上的话，整个 SFTP 工作线程就停了：请求超时、
+/// 「停止」「断开」都没人管，界面上一点动静都没有。
+async fn on_own_thread(
+    start: impl Future<Output = Result<SftpClient>> + Send + 'static,
+) -> Result<SftpClient> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("qishell-sftp-io".into())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    let _ = sender.send(Err(error.into()));
+                    return;
+                }
+            };
+            runtime.block_on(async move {
+                let mut sender = sender;
+                // 没人等了（停止、关标签）就别再连下去。
+                let client = tokio::select! {
+                    client = start => client,
+                    () = sender.closed() => return,
+                };
+                let mut closed = match &client {
+                    Ok(client) => client.closed.clone(),
+                    Err(_) => {
+                        let _ = sender.send(client);
+                        return;
+                    }
+                };
+                if sender.send(client).is_err() {
+                    return;
+                }
+                // 客户端放下了，发送端跟着没了，`wait_for` 也就返回了。
+                let _ = closed.wait_for(|closed| *closed).await;
+            });
+        })?;
+    receiver
+        .await
+        .map_err(|_| anyhow!("the SFTP connection thread ended"))?
+}
+
 impl RemoteFs for SftpClient {
     async fn metadata(&self, path: &RemotePath) -> Result<Option<FileMetadata>> {
-        match self.raw.lstat(path.as_str()).await {
-            Ok(attrs) => Ok(Some(metadata(&attrs.attrs))),
-            Err(Error::Status(status)) if status.status_code == StatusCode::NoSuchFile => Ok(None),
-            Err(error) => Err(error.into()),
-        }
+        self.request(async {
+            match self.raw.lstat(path.as_str()).await {
+                Ok(attrs) => Ok(Some(metadata(&attrs.attrs))),
+                Err(Error::Status(status)) if status.status_code == StatusCode::NoSuchFile => {
+                    Ok(None)
+                }
+                Err(error) => Err(error.into()),
+            }
+        })
+        .await
     }
     async fn stat(&self, path: &RemotePath) -> Result<Option<FileMetadata>> {
-        match self.raw.stat(path.as_str()).await {
-            Ok(attrs) => Ok(Some(metadata(&attrs.attrs))),
-            Err(Error::Status(status)) if status.status_code == StatusCode::NoSuchFile => Ok(None),
-            Err(error) => Err(error.into()),
-        }
+        self.request(async {
+            match self.raw.stat(path.as_str()).await {
+                Ok(attrs) => Ok(Some(metadata(&attrs.attrs))),
+                Err(Error::Status(status)) if status.status_code == StatusCode::NoSuchFile => {
+                    Ok(None)
+                }
+                Err(error) => Err(error.into()),
+            }
+        })
+        .await
     }
     async fn read_dir(&self, path: &RemotePath) -> Result<Vec<DirectoryEntry>> {
-        let handle = self.raw.opendir(path.as_str()).await?.handle;
-        let result: Result<Vec<DirectoryEntry>> = async {
-            let mut entries = Vec::new();
-            loop {
-                match self.raw.readdir(&handle).await {
-                    Ok(page) => {
-                        for entry in page.files {
-                            if matches!(entry.filename.as_str(), "." | "..") {
-                                continue;
+        self.request(async {
+            let handle = self.raw.opendir(path.as_str()).await?.handle;
+            let result: Result<Vec<DirectoryEntry>> = async {
+                let mut entries = Vec::new();
+                loop {
+                    match self.raw.readdir(&handle).await {
+                        Ok(page) => {
+                            for entry in page.files {
+                                if matches!(entry.filename.as_str(), "." | "..") {
+                                    continue;
+                                }
+                                checked_text(&entry.filename)?;
+                                path.join(&entry.filename)?;
+                                let (owner, group) = parse_longname(&entry.longname)
+                                    .map(|(owner, group)| (Some(owner), Some(group)))
+                                    .unwrap_or_else(|| {
+                                        (
+                                            entry.attrs.uid.map(|id| id.to_string()),
+                                            entry.attrs.gid.map(|id| id.to_string()),
+                                        )
+                                    });
+                                entries.push(
+                                    DirectoryEntry::new(entry.filename, metadata(&entry.attrs))
+                                        .with_owner(owner, group),
+                                );
                             }
-                            checked_text(&entry.filename)?;
-                            path.join(&entry.filename)?;
-                            let (owner, group) = parse_longname(&entry.longname)
-                                .map(|(owner, group)| (Some(owner), Some(group)))
-                                .unwrap_or_else(|| {
-                                    (
-                                        entry.attrs.uid.map(|id| id.to_string()),
-                                        entry.attrs.gid.map(|id| id.to_string()),
-                                    )
-                                });
-                            entries.push(
-                                DirectoryEntry::new(entry.filename, metadata(&entry.attrs))
-                                    .with_owner(owner, group),
-                            );
                         }
+                        Err(Error::Status(status)) if status.status_code == StatusCode::Eof => {
+                            break;
+                        }
+                        Err(error) => return Err(error.into()),
                     }
-                    Err(Error::Status(status)) if status.status_code == StatusCode::Eof => break,
-                    Err(error) => return Err(error.into()),
                 }
+                Ok(entries)
             }
+            .await;
+            let closed = self.raw.close(handle).await;
+            let entries = result?;
+            closed?;
             Ok(entries)
-        }
-        .await;
-        let closed = self.raw.close(handle).await;
-        let entries = result?;
-        closed?;
-        Ok(entries)
+        })
+        .await
     }
     async fn open(&self, path: &RemotePath, create: bool) -> Result<String> {
-        let flags = if create {
-            OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE
-        } else {
-            OpenFlags::WRITE
-        };
-        Ok(self
-            .raw
-            .open(path.as_str(), flags, FileAttributes::empty())
-            .await?
-            .handle)
+        self.request(async {
+            let flags = if create {
+                OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE
+            } else {
+                OpenFlags::WRITE
+            };
+            Ok(self
+                .raw
+                .open(path.as_str(), flags, FileAttributes::empty())
+                .await?
+                .handle)
+        })
+        .await
     }
     async fn open_replace(&self, path: &RemotePath) -> Result<String> {
-        Ok(self
-            .raw
-            .open(
-                path.as_str(),
-                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
-                FileAttributes::empty(),
-            )
-            .await?
-            .handle)
+        self.request(async {
+            Ok(self
+                .raw
+                .open(
+                    path.as_str(),
+                    OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+                    FileAttributes::empty(),
+                )
+                .await?
+                .handle)
+        })
+        .await
     }
     async fn open_read(&self, path: &RemotePath) -> Result<String> {
-        Ok(self
-            .raw
-            .open(path.as_str(), OpenFlags::READ, FileAttributes::empty())
-            .await?
-            .handle)
+        self.request(async {
+            Ok(self
+                .raw
+                .open(path.as_str(), OpenFlags::READ, FileAttributes::empty())
+                .await?
+                .handle)
+        })
+        .await
     }
     async fn read(&self, handle: &str, offset: u64, len: u32) -> Result<Option<Vec<u8>>> {
-        match self.raw.read(handle, offset, len).await {
-            Ok(data) => Ok(Some(data.data)),
-            Err(Error::Status(status)) if status.status_code == StatusCode::Eof => Ok(None),
-            Err(error) => Err(error.into()),
-        }
+        self.request(async {
+            match self.raw.read(handle, offset, len).await {
+                Ok(data) => Ok(Some(data.data)),
+                Err(Error::Status(status)) if status.status_code == StatusCode::Eof => Ok(None),
+                Err(error) => Err(error.into()),
+            }
+        })
+        .await
     }
     async fn write(&self, handle: &str, offset: u64, bytes: Vec<u8>) -> Result<()> {
-        self.raw.write(handle, offset, bytes).await?;
-        Ok(())
+        self.request(async {
+            self.raw.write(handle, offset, bytes).await?;
+            Ok(())
+        })
+        .await
     }
     async fn close(&self, handle: &str) -> Result<()> {
-        self.raw.close(handle).await?;
-        Ok(())
+        self.request(async {
+            self.raw.close(handle).await?;
+            Ok(())
+        })
+        .await
     }
 
     async fn attributes(
@@ -292,67 +402,91 @@ impl RemoteFs for SftpClient {
         modified: Option<u32>,
         permissions: Option<u32>,
     ) -> Result<()> {
-        self.raw
-            .setstat(
-                path.as_str(),
-                FileAttributes {
-                    mtime: modified,
-                    atime: modified,
-                    permissions: permissions.map(|p| p & 0o777),
-                    ..FileAttributes::empty()
-                },
-            )
-            .await?;
-        Ok(())
+        self.request(async {
+            self.raw
+                .setstat(
+                    path.as_str(),
+                    FileAttributes {
+                        mtime: modified,
+                        atime: modified,
+                        permissions: permissions.map(|p| p & 0o777),
+                        ..FileAttributes::empty()
+                    },
+                )
+                .await?;
+            Ok(())
+        })
+        .await
     }
     async fn mkdir(&self, path: &RemotePath) -> Result<()> {
-        self.raw
-            .mkdir(path.as_str(), FileAttributes::empty())
-            .await?;
-        Ok(())
+        self.request(async {
+            self.raw
+                .mkdir(path.as_str(), FileAttributes::empty())
+                .await?;
+            Ok(())
+        })
+        .await
     }
     async fn symlink(&self, target: &str, path: &RemotePath) -> Result<()> {
-        self.raw.symlink(target, path.as_str()).await?;
-        Ok(())
+        self.request(async {
+            self.raw.symlink(target, path.as_str()).await?;
+            Ok(())
+        })
+        .await
     }
     async fn readlink(&self, path: &RemotePath) -> Result<String> {
-        checked_text(
-            &self
-                .raw
-                .readlink(path.as_str())
-                .await?
-                .files
-                .first()
-                .ok_or_else(|| anyhow!(SftpError::NoLinkTarget))?
-                .filename,
-        )
+        self.request(async {
+            checked_text(
+                &self
+                    .raw
+                    .readlink(path.as_str())
+                    .await?
+                    .files
+                    .first()
+                    .ok_or_else(|| anyhow!(SftpError::NoLinkTarget))?
+                    .filename,
+            )
+        })
+        .await
     }
     async fn rename(&self, from: &RemotePath, to: &RemotePath) -> Result<()> {
-        self.raw.rename(from.as_str(), to.as_str()).await?;
-        Ok(())
+        self.request(async {
+            self.raw.rename(from.as_str(), to.as_str()).await?;
+            Ok(())
+        })
+        .await
     }
     async fn remove(&self, path: &RemotePath) -> Result<()> {
-        match self.raw.remove(path.as_str()).await {
-            Ok(_) => Ok(()),
-            Err(Error::Status(s)) if s.status_code == StatusCode::NoSuchFile => Ok(()),
-            Err(error) => Err(error.into()),
-        }
+        self.request(async {
+            match self.raw.remove(path.as_str()).await {
+                Ok(_) => Ok(()),
+                Err(Error::Status(s)) if s.status_code == StatusCode::NoSuchFile => Ok(()),
+                Err(error) => Err(error.into()),
+            }
+        })
+        .await
     }
     async fn rmdir(&self, path: &RemotePath) -> Result<()> {
-        self.raw.rmdir(path.as_str()).await?;
-        Ok(())
+        self.request(async {
+            self.raw.rmdir(path.as_str()).await?;
+            Ok(())
+        })
+        .await
     }
     async fn set_permissions(&self, path: &RemotePath, permissions: u32) -> Result<()> {
-        self.raw
-            .setstat(
-                path.as_str(),
-                FileAttributes {
-                    permissions: Some(permissions & 0o7777),
-                    ..FileAttributes::empty()
-                },
-            )
-            .await?;
-        Ok(())
+        self.request(async {
+            self.raw
+                .setstat(
+                    path.as_str(),
+                    FileAttributes {
+                        permissions: Some(permissions & 0o7777),
+                        ..FileAttributes::empty()
+                    },
+                )
+                .await?;
+            Ok(())
+        })
+        .await
     }
 }
 fn metadata(attrs: &FileAttributes) -> FileMetadata {
@@ -378,7 +512,8 @@ fn metadata(attrs: &FileAttributes) -> FileMetadata {
 /// notice at the same moment a terminal on the same host does.
 struct WatchedStream<S> {
     inner: S,
-    closed: watch::Sender<bool>,
+    /// 和客户端的 `lost` 是同一个。
+    closed: Arc<watch::Sender<bool>>,
 }
 
 impl<S: AsyncRead + Unpin> AsyncRead for WatchedStream<S> {
@@ -538,5 +673,142 @@ mod network_error_tests {
         assert!(is_network_error(&closed));
         let other = anyhow::Error::new(Error::UnexpectedBehavior("bad packet".into()));
         assert!(!is_network_error(&other));
+    }
+}
+
+#[cfg(test)]
+mod lost_connection_tests {
+    use super::{RemoteFs as _, SftpClient, is_network_error, on_own_thread};
+    use std::{
+        pin::Pin,
+        sync::{Arc, Condvar, Mutex, mpsc},
+        task::{Context, Poll},
+        time::Duration,
+    };
+    use tokio::io::{
+        AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, DuplexStream, ReadBuf,
+    };
+
+    /// 关着的时候，往流里写的线程就挡在那里：像有的机器上往一条对面不收的连接写，非阻塞的 `send` 也不返回。
+    #[derive(Clone, Default)]
+    struct Gate(Arc<(Mutex<bool>, Condvar)>);
+
+    impl Gate {
+        fn close(&self) {
+            *self.0.0.lock().unwrap() = true;
+        }
+        fn open(&self) {
+            *self.0.0.lock().unwrap() = false;
+            self.0.1.notify_all();
+        }
+        fn pass(&self) {
+            let mut closed = self.0.0.lock().unwrap();
+            while *closed {
+                closed = self.0.1.wait(closed).unwrap();
+            }
+        }
+    }
+
+    struct Gated {
+        inner: DuplexStream,
+        gate: Gate,
+    }
+
+    impl AsyncRead for Gated {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.inner).poll_read(cx, buf)
+        }
+    }
+
+    impl AsyncWrite for Gated {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.gate.pass();
+            Pin::new(&mut self.inner).poll_write(cx, buf)
+        }
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.inner).poll_flush(cx)
+        }
+        fn poll_shutdown(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
+    /// 对面：答一个 SFTP v3 的 VERSION，之后收下什么都不答，像网断了。
+    async fn silent_server(mut stream: DuplexStream) {
+        let mut init = [0; 9];
+        if stream.read_exact(&mut init).await.is_err() {
+            return;
+        }
+        if stream
+            .write_all(&[0, 0, 0, 5, 2, 0, 0, 0, 3])
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let mut sink = vec![0; 64 * 1024];
+        while matches!(stream.read(&mut sink).await, Ok(read) if read > 0) {}
+    }
+
+    /// 网卡住了，写连接的线程也挡住了：引擎不跟着停，一个请求等满超时就知道连接断了，
+    /// 之后出错关句柄不在死连接上再等一遍，`closed` 也马上说断了，工作线程好去重连。
+    #[test]
+    fn a_stuck_connection_is_given_up_after_one_request_timeout_without_stopping_the_engine() {
+        let gate = Gate::default();
+        // 引擎真被挡住的话，过一阵放开，测试失败而不是挂死。
+        let (done, watchdog) = mpsc::channel::<()>();
+        let opener = gate.clone();
+        std::thread::spawn(move || {
+            let _ = watchdog.recv_timeout(Duration::from_secs(20));
+            opener.open();
+        });
+        let engine = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .unwrap();
+        engine.block_on(async {
+            let io_gate = gate.clone();
+            let client = on_own_thread(async move {
+                let (near, far) = tokio::io::duplex(64 * 1024);
+                tokio::spawn(silent_server(far));
+                let stream = Gated {
+                    inner: near,
+                    gate: io_gate,
+                };
+                SftpClient::initialize(stream, None, "key".into()).await
+            })
+            .await
+            .unwrap();
+            gate.close();
+            let real = std::time::Instant::now();
+            let started = tokio::time::Instant::now();
+
+            let written = client.write("handle", 0, vec![0; 1024]).await;
+            assert!(written.as_ref().is_err_and(is_network_error), "{written:?}");
+            let gave_up = started.elapsed();
+            assert!(gave_up >= Duration::from_secs(10), "{gave_up:?}");
+            let closed = client.close("handle").await;
+            assert!(closed.as_ref().is_err_and(is_network_error), "{closed:?}");
+            assert_eq!(started.elapsed(), gave_up, "关句柄不再等一遍超时");
+            client.closed().await;
+            assert!(
+                real.elapsed() < Duration::from_secs(20),
+                "the engine was held up by the stuck connection"
+            );
+        });
+        let _ = done.send(());
+        gate.open();
     }
 }
