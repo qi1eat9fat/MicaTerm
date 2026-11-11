@@ -1,9 +1,12 @@
 //! 多标签（工单 04）的 UI 测试：新建、点标签和快捷键切换、×、右键菜单的三种关闭、
-//! 关掉最后一个回到开始卡片、标签宽度固定和轨道横向滚动。本地终端一律用假传输。
+//! 关掉最后一个回到开始卡片、标签宽度固定和轨道横向滚动；拖动排序（工单 29）。本地终端一律用假传输。
 //!
 //! 每个标签里只有一张卡片（分屏是工单 05），所以第 n 个新开的标签里是第 n 张卡片。
 
-use gpui_kit::{ScrollDelta, point};
+use gpui_kit::{
+    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput,
+    Point, ScrollDelta, Window, point,
+};
 use qishell::app::{
     ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NextTab, SwitchToTab,
 };
@@ -415,6 +418,239 @@ fn actions_for_a_tab_that_is_gone_do_nothing(cx: &mut TestAppContext) {
     assert_eq!(tab_ids(cx, &workspace), [TabId(1), TabId(2)]);
     // 只有 Ctrl+Tab 动了：从 2 绕回 1。
     assert_eq!(active_tab(cx, &workspace), Some(TabId(1)));
+}
+
+/// 把第 `source` 个标签拖到第 `target` 个标签的左半边（`before`）或右半边，松开。
+fn drag_tab(
+    cx: &mut TestAppContext,
+    handle: WindowHandle<Root>,
+    source: u64,
+    target: u64,
+    before: bool,
+) {
+    in_frame(cx, handle, |window, cx| {
+        let from = window.find(tab(source)).bounds().center();
+        let bounds = window.find(tab(target)).bounds();
+        let x = if before {
+            bounds.left() + bounds.size.width * 0.25
+        } else {
+            bounds.left() + bounds.size.width * 0.75
+        };
+        window.drag(from, point(x, bounds.center().y), cx);
+    });
+}
+
+/// 标签在轨道里从左到右的顺序（按画出来的位置），和窗口壳里的顺序一致。
+fn assert_order(
+    cx: &mut TestAppContext,
+    handle: WindowHandle<Root>,
+    workspace: &Entity<Workspace>,
+    order: &[u64],
+) {
+    let ids: Vec<TabId> = order.iter().map(|id| TabId(*id)).collect();
+    assert_eq!(tab_ids(cx, workspace), ids);
+    in_frame(cx, handle, |window, _| {
+        let lefts: Vec<_> = order
+            .iter()
+            .map(|id| window.find(tab(*id)).bounds().left())
+            .collect();
+        assert!(lefts.windows(2).all(|pair| pair[0] < pair[1]), "{lefts:?}");
+    });
+}
+
+/// 拖动排序（工单 29）：拖到别的标签的右半边放在它后面，左半边放在它前面；
+/// 拖动不切换在前的标签，松开后在前的还是原来那个。
+#[gpui_kit::test]
+fn dragging_a_tab_moves_it_and_keeps_the_front_one(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_tabs(cx, 4);
+
+    drag_tab(cx, handle, 1, 3, false);
+    assert_order(cx, handle, &workspace, &[2, 3, 1, 4]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(4)));
+
+    drag_tab(cx, handle, 4, 2, true);
+    assert_order(cx, handle, &workspace, &[4, 2, 3, 1]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(4)));
+    assert_in_front(cx, handle, 4);
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("tab-drop-line").is_none())
+    });
+}
+
+/// 拖回自己身上、或自己两边的缝：顺序不变，也不切到前面（拖动不是点击）。
+#[gpui_kit::test]
+fn dragging_a_tab_onto_itself_changes_nothing(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_tabs(cx, 3);
+
+    drag_tab(cx, handle, 2, 2, false);
+    drag_tab(cx, handle, 2, 3, true);
+    drag_tab(cx, handle, 2, 1, false);
+
+    assert_order(cx, handle, &workspace, &[1, 2, 3]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(3)));
+    assert_in_front(cx, handle, 3);
+}
+
+/// 不经 `window.drag`，一步一步发鼠标事件：拖到半路看插入线。
+fn pointer(window: &mut Window, input: PlatformInput, cx: &mut App) {
+    window.dispatch_event(input, cx);
+    window.render_frame(cx);
+}
+
+fn press_at(window: &mut Window, position: Point<Pixels>, cx: &mut App) {
+    pointer(
+        window,
+        PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        }),
+        cx,
+    );
+    pointer(
+        window,
+        PlatformInput::MouseDown(MouseDownEvent {
+            button: MouseButton::Left,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+            first_mouse: false,
+        }),
+        cx,
+    );
+}
+
+fn move_to(window: &mut Window, position: Point<Pixels>, cx: &mut App) {
+    pointer(
+        window,
+        PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::default(),
+        }),
+        cx,
+    );
+}
+
+fn release_at(window: &mut Window, position: Point<Pixels>, cx: &mut App) {
+    pointer(
+        window,
+        PlatformInput::MouseUp(MouseUpEvent {
+            button: MouseButton::Left,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        }),
+        cx,
+    );
+}
+
+/// 拖动中有插入线：落在要放下的缝上；拖回自己身上没有；拖出标题栏没有，
+/// 在那里松开就取消，什么都不变。
+#[gpui_kit::test]
+fn dragging_shows_where_the_tab_will_go(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_tabs(cx, 3);
+
+    in_frame(cx, handle, |window, cx| {
+        let first = window.find(tab(1)).bounds();
+        let third = window.find(tab(3)).bounds();
+        press_at(window, first.center(), cx);
+        move_to(window, point(third.right() - px(20.), third.center().y), cx);
+        move_to(window, point(third.right() - px(10.), third.center().y), cx);
+        // 第三个的右半边：线在它右边。
+        let line = window.find("tab-drop-line").bounds();
+        assert!(
+            (line.center().x - third.right()).abs() < px(2.),
+            "{line:?} {third:?}"
+        );
+
+        let second = window.find(tab(2)).bounds();
+        move_to(
+            window,
+            point(second.left() + px(10.), second.center().y),
+            cx,
+        );
+        // 第二个的左半边，就是第一个自己右边的缝：不挪，没有线。
+        assert!(window.try_find("tab-drop-line").is_none());
+
+        move_to(
+            window,
+            point(second.right() - px(10.), second.center().y),
+            cx,
+        );
+        let line = window.find("tab-drop-line").bounds();
+        assert!(
+            (line.center().x - second.right()).abs() < px(2.),
+            "{line:?}"
+        );
+
+        // 拖到终端里：不在标题栏，没有线；在那里松开就取消。
+        let card = window.find(("card", 3usize)).bounds().center();
+        move_to(window, card, cx);
+        assert!(window.try_find("tab-drop-line").is_none());
+        release_at(window, card, cx);
+    });
+
+    assert_order(cx, handle, &workspace, &[1, 2, 3]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(3)));
+    assert_in_front(cx, handle, 3);
+}
+
+/// 拖过轨道右端，放在「+」或拖动区上：放到最后。
+#[gpui_kit::test]
+fn dropping_past_the_track_puts_the_tab_last(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_tabs(cx, 3);
+
+    in_frame(cx, handle, |window, cx| {
+        let from = window.find(tab(1)).bounds().center();
+        let to = window.find("new-tab").bounds().center();
+        window.drag(from, to, cx);
+    });
+    assert_order(cx, handle, &workspace, &[2, 3, 1]);
+
+    in_frame(cx, handle, |window, cx| {
+        let from = window.find(tab(2)).bounds().center();
+        let to = window.find("title-drag").bounds().center();
+        window.drag(from, to, cx);
+    });
+    assert_order(cx, handle, &workspace, &[3, 1, 2]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(3)));
+}
+
+/// 轨道放不下时，拖到轨道左端停住：轨道自己往回滚，滚到头放下就是第一个。
+#[gpui_kit::test]
+fn dragging_to_the_end_of_the_track_scrolls_it(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_tabs(cx, 10);
+
+    in_frame(cx, handle, |window, cx| {
+        assert!(!window.find(tab(1)).visible());
+        let track = window.find("tab-track").bounds();
+        let from = window.find(tab(10)).bounds().center();
+        let edge = point(track.left() + px(6.), from.y);
+        press_at(window, from, cx);
+        move_to(window, point(from.x - px(40.), from.y), cx);
+        move_to(window, edge, cx);
+        // 鼠标停着不动，一帧帧滚回最左边。
+        for _ in 0..400 {
+            window.render_frame(cx);
+        }
+        let track = window.find("tab-track").bounds();
+        assert!(track.contains(&window.find(tab(1)).bounds().center()));
+        let line = window.find("tab-drop-line").bounds();
+        assert!(
+            (line.center().x - window.find(tab(1)).bounds().left()).abs() < px(2.),
+            "{line:?}"
+        );
+        release_at(window, edge, cx);
+    });
+
+    let mut order: Vec<u64> = vec![10];
+    order.extend(1..=9);
+    assert_eq!(
+        tab_ids(cx, &workspace),
+        order.into_iter().map(TabId).collect::<Vec<_>>()
+    );
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(10)));
 }
 
 /// Esc 关掉右键菜单：什么都不关，焦点回到在前标签的终端。

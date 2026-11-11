@@ -1,4 +1,4 @@
-//! 标签的 action：新建（02），切换、关闭（04）。
+//! 标签的 action：新建（02），切换、关闭（04），拖动排序（29）。
 
 use gpui_kit::{Action, Pixels, Point};
 
@@ -49,4 +49,12 @@ pub struct CloseTabsToRight(pub TabId);
 pub struct OpenTabMenu {
     pub tab: TabId,
     pub position: Point<Pixels>,
+}
+
+/// 把这个标签挪到第 `to` 个（从 0 数起，超出的放到最后），在前的标签不变（拖动排序，工单 29）。
+#[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
+#[action(namespace = qishell, no_json)]
+pub struct MoveTab {
+    pub tab: TabId,
+    pub to: usize,
 }
