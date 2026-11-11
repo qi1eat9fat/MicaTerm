@@ -1,9 +1,9 @@
 //! 设置 › 应用（工单 26，原型「设置 › 应用」）：窗口（记住窗口大小和位置）、
 //! 数据（数据目录的路径和「打开文件夹」）、关于（版本、许可证）。
 
+use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::*;
 
 use super::controls::{group, row, row_with_note, section_title};
@@ -45,16 +45,10 @@ pub(super) fn app(
                 .outline()
                 .small()
                 .on_click(move |_, _, cx| cx.open_with_system(&dir));
-            (shown, button)
+            (shown, Some(button))
         }
-        None => (
-            t!("settings.app.no_data_dir").to_string(),
-            Button::new("open-data-dir")
-                .label(t!("settings.app.open_data_dir"))
-                .outline()
-                .small()
-                .disabled(true),
-        ),
+        // 没有数据目录：没有可以打开的文件夹。
+        None => (t!("settings.app.no_data_dir").to_string(), None),
     };
     // 路径单独放一个带 id 的元素：测试读它的无障碍名。
     let data_path = div()
@@ -106,7 +100,7 @@ pub(super) fn app(
                         .child(data_contents)
                         .into_any_element(),
                 ),
-                open_folder,
+                div().children(open_folder),
             )],
             tokens,
         )
