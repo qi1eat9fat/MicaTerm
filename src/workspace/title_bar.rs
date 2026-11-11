@@ -16,6 +16,7 @@ use super::quick_connect::QuickConnectAnchor;
 use super::window_buttons::render_window_buttons;
 use crate::app::{CatalogIcon, NewLocalTerminalTab, QuickConnect, ToggleHostSidebar};
 use crate::i18n::t;
+use crate::tabs::TabRail;
 use crate::theme::{GAP, TITLE_BAR_HEIGHT, Tokens};
 
 /// macOS 上主机栏收起时，给红绿灯让出的宽度。
@@ -23,17 +24,21 @@ const TRAFFIC_LIGHTS_WIDTH: Pixels = px(72.);
 
 /// `quick_connect_open`：快速连接开着，「+ ⌄」显示成按下的底色（原型 `.plusgrp.open`）；
 /// `anchor` 记下这组按钮画在哪里，弹层挂在它下面。
+/// 拖着的标签由整条标题栏接住（`rail`，工单 29）：松开在轨道右端以外（`+`、拖动区）算放到最后。
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_title_bar(
     host_sidebar_open: bool,
     quick_connect_open: bool,
     anchor: &Rc<QuickConnectAnchor>,
     tabs: Option<impl IntoElement>,
+    rail: &TabRail,
     target: &FocusHandle,
     tokens: &Tokens,
     window: &Window,
 ) -> impl IntoElement {
     div()
         .id("title-bar")
+        .map(|bar| rail.accept_drops(bar, target))
         .test_support()
         .flex()
         .flex_none()
@@ -106,6 +111,7 @@ pub(super) fn render_title_bar(
         )
         .child(
             // 拖动区：Windows 上按住拖动窗口，双击最大化或还原，都由系统完成。
+            // 不挂任何处理器（拖着的标签由外面的标题栏接住），免得影响系统拖窗口。
             div()
                 .id("title-drag")
                 .test_support()
