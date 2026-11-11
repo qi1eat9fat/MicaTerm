@@ -8,6 +8,7 @@
 //! 却照样把窗口清成全透明，窗口就成了一块玻璃；所以这里先看系统版本，
 //! 不支持时开关开着也保持不透明（静默不生效）。
 
+use gpui_kit::component::ThemeMode;
 use gpui_kit::{App, Global, Window, WindowBackgroundAppearance};
 
 /// 窗口现在用的背景。`apply` 设它，窗口壳画根节点时读它。
@@ -45,8 +46,18 @@ impl WindowBackdrop {
     }
 }
 
-/// 让窗口的背景和设置一致；没变的不动。
-pub(super) fn apply_backdrop(wanted: bool, window: &mut Window, cx: &mut App) {
+/// 让窗口的背景和设置一致；没变的不动。`mode` 是应用现在的深浅色。
+pub(super) fn apply_backdrop(wanted: bool, mode: ThemeMode, window: &mut Window, cx: &mut App) {
+    // Mica 的底色跟着窗口的「深色模式」属性走，GPUI 按系统的深浅色设它；应用外观单独设成
+    // 深色（或浅色）时要改成应用的，否则深色界面下透出来的是浅色 Mica。系统换深浅色时 GPUI
+    // 先通知窗口（这里跟着应用设置）、再按系统改一遍这个属性，所以等这一轮消息处理完再设一次。
+    sync_dark_frame(mode, window);
+    window
+        .spawn(cx, async move |cx| {
+            cx.update(|window, _| sync_dark_frame(mode, window)).ok();
+        })
+        .detach();
+
     let backdrop = WindowBackdrop::for_setting(wanted);
     if cx.try_global::<WindowBackdrop>() == Some(&backdrop) {
         return;
@@ -55,6 +66,40 @@ pub(super) fn apply_backdrop(wanted: bool, window: &mut Window, cx: &mut App) {
     cx.set_global(backdrop);
     window.refresh();
 }
+
+/// 把窗口的「深色模式」属性（`DWMWA_USE_IMMERSIVE_DARK_MODE`）设成应用的深浅色：
+/// 它决定 Mica 和窗口边框的底色。拿不到窗口句柄（无头测试）就什么都不做。
+#[cfg(windows)]
+fn sync_dark_frame(mode: ThemeMode, window: &Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+
+    // `Window` 自己也有个 `window_handle`（GPUI 的窗口 id），这里要的是系统的句柄。
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(handle.hwnd.get() as *mut std::ffi::c_void);
+    // Win32 的 BOOL：4 字节整数。
+    let dark: i32 = (mode == ThemeMode::Dark).into();
+    // SAFETY: `hwnd` 是这个窗口自己的句柄；属性值指向一个活着的 4 字节 BOOL，长度如实给出。
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            (&dark as *const i32).cast(),
+            std::mem::size_of::<i32>() as u32,
+        )
+    };
+    // 设不上只是边框和 Mica 的色调不对，不影响使用。
+    result.ok();
+}
+
+#[cfg(not(windows))]
+fn sync_dark_frame(_: ThemeMode, _: &Window) {}
 
 /// 有 Mica 的最早的 Windows build（Windows 11 22H2），和 GPUI 的判断一致。
 pub const MICA_MIN_BUILD: u32 = 22621;

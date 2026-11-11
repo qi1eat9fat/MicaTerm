@@ -6115,6 +6115,7 @@ dependencies = [
  "qishell-hosts",
  "qishell-ssh",
  "qishell-terminal",
+ "raw-window-handle",
  "regex",
  "russh",
  "rust-i18n",

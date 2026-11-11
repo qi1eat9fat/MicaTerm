@@ -36,7 +36,7 @@ pub fn apply(settings: &AppSettings, window: &mut Window, cx: &mut App) {
     }
 
     // Mica 背景（工单 26）：系统不支持时保持不透明。
-    apply_backdrop(settings.interface.mica, window, cx);
+    apply_backdrop(settings.interface.mica, mode, window, cx);
 
     apply_terminal(settings, cx);
     apply_sftp(settings, cx);
