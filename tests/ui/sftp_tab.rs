@@ -1077,3 +1077,109 @@ fn disconnected_a_remote_command_offers_to_reconnect(cx: &mut TestAppContext) {
         label(cx, fixture.handle, "remote-status")
     );
 }
+
+// ---------- 拖动排序（工单 29）：终端、SFTP、编辑器标签混排 ----------
+
+fn tab_element(id: TabId) -> (&'static str, usize) {
+    ("tab", id.0 as usize)
+}
+
+fn tab_ids(cx: &mut TestAppContext, fixture: &Fixture) -> Vec<TabId> {
+    cx.update(|cx| fixture.workspace.read(cx).tab_ids())
+}
+
+/// 把标签 `source` 拖到标签 `target` 的左四分之一（`before`）或右四分之一处松开。
+fn drag_tab(
+    cx: &mut TestAppContext,
+    fixture: &Fixture,
+    source: TabId,
+    target: TabId,
+    before: bool,
+) {
+    in_frame(cx, fixture.handle, |window, cx| {
+        let from = window.find(tab_element(source)).bounds().center();
+        let bounds = window.find(tab_element(target)).bounds();
+        let x = if before {
+            bounds.left() + bounds.size.width * 0.25
+        } else {
+            bounds.left() + bounds.size.width * 0.75
+        };
+        window.drag(from, gpui_kit::point(x, bounds.center().y), cx);
+    });
+}
+
+/// 三种标签混排时照样能拖动排序，拖动不切换在前的标签；拖完悬停 ×、右键菜单照常，
+/// 点标签切过去，焦点落到它的内容：终端、文件列表、编辑器的文字。
+#[gpui_kit::test]
+fn tabs_of_every_kind_reorder_by_dragging_and_keep_working(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    open_tab(cx, &fixture);
+    open_local_editor(cx, &fixture);
+    let [terminal, sftp, editor] = tab_ids(cx, &fixture)[..] else {
+        panic!("应有终端、SFTP、编辑器三个标签");
+    };
+
+    drag_tab(cx, &fixture, editor, terminal, true);
+    assert_eq!(tab_ids(cx, &fixture), [editor, terminal, sftp]);
+    drag_tab(cx, &fixture, terminal, sftp, false);
+    assert_eq!(tab_ids(cx, &fixture), [editor, sftp, terminal]);
+    let front = cx.update(|cx| fixture.workspace.read(cx).active_tab());
+    assert_eq!(front, Some(editor), "拖动不切换在前的标签");
+
+    // 悬停 ×：只出现在悬停的那个标签上。
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.hover(tab_element(sftp), cx);
+        assert!(window.find(("tab-close", sftp.0 as usize)).visible());
+        assert!(!window.find(("tab-close", terminal.0 as usize)).visible());
+    });
+
+    // 右键菜单：还是那三项，Esc 关掉什么都不关。
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.right_click(tab_element(terminal), cx)
+    });
+    in_frame(cx, fixture.handle, |window, cx| {
+        {
+            let popup = window.within("popup-menu");
+            assert_eq!(popup.find(0_usize).label(), Some("关闭标签"));
+            assert_eq!(popup.find(2_usize).label(), Some("关闭右侧的标签"));
+        }
+        window.press("escape", cx);
+    });
+    assert!(!visible(cx, fixture.handle, "popup-menu"));
+    assert_eq!(tab_ids(cx, &fixture), [editor, sftp, terminal]);
+
+    // 点 SFTP 标签：焦点在它的文件列表里。
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.click(tab_element(sftp), cx)
+    });
+    let tab = active_sftp(cx, &fixture).expect("SFTP 标签在前");
+    let lists = cx.update(|cx| {
+        let tab = tab.read(cx);
+        [tab.local(), tab.remote()].map(|card| card.read(cx).focus_handle(cx))
+    });
+    in_frame(cx, fixture.handle, move |window, _| {
+        assert!(
+            lists.iter().any(|list| list.is_focused(window)),
+            "焦点不在文件列表里"
+        );
+    });
+
+    // 点终端标签：焦点在终端里。
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.click(tab_element(terminal), cx)
+    });
+    in_frame(cx, fixture.handle, |window, _| {
+        assert_eq!(window.find(("terminal", 1_usize)).focused(), Some(true));
+    });
+
+    // 点编辑器标签：焦点在文字里，打的字进得去。
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.click(tab_element(editor), cx)
+    });
+    in_frame(cx, fixture.handle, |window, cx| window.input("x", cx));
+    let text = cx.update(|cx| {
+        let editor = fixture.workspace.read(cx).active_editor_tab();
+        editor.map(|editor| editor.read(cx).text(cx))
+    });
+    assert_eq!(text.as_deref(), Some("x"));
+}
