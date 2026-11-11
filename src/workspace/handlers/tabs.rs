@@ -241,11 +241,11 @@ impl Workspace {
     /// 拖动排序（工单 29）：只改顺序，在前的标签和焦点都不动。
     fn on_move_tab(
         &mut self,
-        &MoveTab { tab, to }: &MoveTab,
+        &MoveTab { tab, drop }: &MoveTab,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.tabs.move_to(tab, to) {
+        if self.tabs.move_to(tab, drop) {
             cx.notify();
         }
     }

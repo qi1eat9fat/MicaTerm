@@ -14,7 +14,7 @@ use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::TabId;
+use super::{TabDrop, TabId};
 use crate::app::{
     ActivateTab, CatalogIcon, CloseOtherTabs, CloseTab, CloseTabsToRight, MoveTab, OpenTabMenu,
 };
@@ -108,21 +108,18 @@ impl TabRail {
         let count = tabs.len();
         let drag = self.drag.get();
         let line = drag.and_then(|drag| {
-            let gap = self.follow_drag(drag, count, window)?;
-            let from = tabs.iter().position(|tab| tab.id == drag.source)?;
-            drop_index(from, gap)?;
-            Some(gap)
+            let order = self.order.borrow();
+            let drop = self.follow_drag(drag, &order, window)?;
+            // 放回原处不画线。
+            drop.destination(&order, drag.source)?;
+            line_position(drop, &order)
         });
         let mut children = Vec::with_capacity(count * 2);
         for (index, tab) in tabs.into_iter().enumerate() {
             let look = TabLook {
                 pressed: menu_tab == Some(tab.id),
                 dragged: drag.is_some_and(|drag| drag.source == tab.id),
-                line: match line {
-                    Some(gap) if gap == index => Some(Edge::Left),
-                    Some(gap) if gap == count && index + 1 == count => Some(Edge::Right),
-                    _ => None,
-                },
+                line: line.and_then(|(at, edge)| (at == index).then_some(edge)),
             };
             children.push(render_tab(tab, look, target, tokens).into_any_element());
             if index + 1 < count {
@@ -178,16 +175,9 @@ impl TabRail {
         .on_drop(move |dragged: &DraggedTab, window, cx| {
             dropped.set(None);
             let tab = dragged.tab.id;
-            let (from, count) = {
-                let order = order.borrow();
-                let Some(from) = order.iter().position(|id| *id == tab) else {
-                    return;
-                };
-                (from, order.len())
-            };
-            let gap = insertion_gap(window.mouse_position().x, &scroll, count);
-            if let Some(to) = drop_index(from, gap) {
-                target.dispatch_action(&MoveTab { tab, to }, window, cx);
+            let drop = drop_at(window.mouse_position().x, &scroll, &order.borrow());
+            if let Some(drop) = drop {
+                target.dispatch_action(&MoveTab { tab, drop }, window, cx);
             }
         })
     }
@@ -238,9 +228,9 @@ impl TabRail {
         }
     }
 
-    /// 拖着标签的这一帧：鼠标在轨道两端就滚一步、要下一帧接着滚；返回插入线落在哪个缝。
-    /// 鼠标不在标题栏里时没有插入线。
-    fn follow_drag(&self, drag: TabDrag, count: usize, window: &Window) -> Option<usize> {
+    /// 拖着标签的这一帧：鼠标在轨道两端就滚一步、要下一帧接着滚；返回此刻松开会放到哪里。
+    /// 鼠标不在标题栏里时松开就取消，返回 `None`。
+    fn follow_drag(&self, drag: TabDrag, order: &[TabId], window: &Window) -> Option<TabDrop> {
         if !drag.over_title_bar {
             return None;
         }
@@ -259,34 +249,43 @@ impl TabRail {
             self.scroll.set_offset(point(scrolled, offset.y));
             window.request_animation_frame();
         }
-        Some(insertion_gap(x, &self.scroll, count))
+        drop_at(x, &self.scroll, order)
     }
 }
 
-/// 鼠标在 `x`（窗口坐标）时插入线落在哪个缝：0 是第一个标签前面，`count` 是最后一个后面。
-/// 看的是标签露出来的中线（布局位置加上滚动）；过了轨道右端（`+`、拖动区）算放到最后，
-/// 轨道左边按轨道左端算。
-fn insertion_gap(x: Pixels, scroll: &ScrollHandle, count: usize) -> usize {
+/// 鼠标在 `x`（窗口坐标）时松开，标签放到哪里。`order` 是轨道里标签的顺序。
+/// 停在某个标签上：左半边放在它前面，右半边放在它后面（看的是标签露出来的位置：布局位置加上滚动）；
+/// 过了轨道右端（`+`、拖动区）放到最后，过了左端（「展开主机栏」）放到第一个。
+fn drop_at(x: Pixels, scroll: &ScrollHandle, order: &[TabId]) -> Option<TabDrop> {
     let track = scroll.bounds();
     if x > track.right() {
-        return count;
+        return Some(TabDrop::Last);
     }
-    let x = x.max(track.left());
+    if x < track.left() {
+        return Some(TabDrop::First);
+    }
     let offset = scroll.offset().x;
-    (0..count)
-        .filter_map(|index| scroll.bounds_for_item(index * 2))
-        .filter(|bounds| bounds.center().x + offset < x)
-        .count()
+    for (index, id) in order.iter().enumerate() {
+        let bounds = scroll.bounds_for_item(index * 2)?;
+        if x < bounds.center().x + offset {
+            return Some(TabDrop::Before(*id));
+        }
+        if x <= bounds.right() + offset {
+            return Some(TabDrop::After(*id));
+        }
+    }
+    // 最后一个标签右边、轨道的内边距里。
+    order.last().map(|id| TabDrop::After(*id))
 }
 
-/// 从第 `from` 个拖到缝 `gap`，挪完在第几个；拖回自己两边的缝不算挪动。
-fn drop_index(from: usize, gap: usize) -> Option<usize> {
-    if gap == from || gap == from + 1 {
-        None
-    } else if gap > from {
-        Some(gap - 1)
-    } else {
-        Some(gap)
+/// 插入线画在第几个标签的哪一边。
+fn line_position(drop: TabDrop, order: &[TabId]) -> Option<(usize, Edge)> {
+    let index_of = |target: TabId| order.iter().position(|id| *id == target);
+    match drop {
+        TabDrop::Before(target) => Some((index_of(target)?, Edge::Left)),
+        TabDrop::After(target) => Some((index_of(target)?, Edge::Right)),
+        TabDrop::First => Some((0, Edge::Left)),
+        TabDrop::Last => Some((order.len().checked_sub(1)?, Edge::Right)),
     }
 }
 

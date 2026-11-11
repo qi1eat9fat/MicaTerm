@@ -7,7 +7,7 @@ mod model;
 mod tab;
 mod tab_rail;
 
-pub use model::{TabId, TabList};
+pub use model::{TabDrop, TabId, TabList};
 pub use tab::Tab;
 pub use tab_rail::{TabRail, TabSnapshot, build_tab_menu};
 
