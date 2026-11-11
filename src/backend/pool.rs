@@ -29,8 +29,8 @@ use super::remote::{
 use crate::i18n::t;
 
 /// 探测系统最多等多久：主机不回答也只是没有徽章。
-const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
-/// 探测没成时，等多久看连接是不是跟着断了（会话任务结束、`is_closed` 变真要一会儿）。
+pub(super) const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// 探测没成（没超时）时，等多久看连接是不是跟着断了（会话任务结束、`is_closed` 变真要一会儿）。
 const PROBE_LOST_GRACE: Duration = Duration::from_millis(500);
 /// 挂断时最多等多久。
 const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -49,6 +49,8 @@ pub(super) enum Link {
 pub(super) struct ConnectionPool {
     runtime: Handle,
     connector: SshConnector,
+    /// 探测系统最多等多久（[`PROBE_TIMEOUT`]，测试里缩短）。
+    probe_timeout: Duration,
     events: async_channel::Sender<RemoteEvent>,
     state: Mutex<PoolState>,
     me: Weak<ConnectionPool>,
@@ -153,10 +155,12 @@ impl ConnectionPool {
         runtime: Handle,
         connector: SshConnector,
         events: async_channel::Sender<RemoteEvent>,
+        probe_timeout: Duration,
     ) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             runtime,
             connector,
+            probe_timeout,
             events,
             state: Mutex::default(),
             me: me.clone(),
@@ -380,12 +384,13 @@ impl ConnectionPool {
         }
     }
 
-    /// 探测连接 `id` 上主机的系统，结果发给它上面的每个终端。探测通道打不开、或者探测时连接断了：
-    /// 发一次 `ProbeFailed`。返回连接还在不在。
+    /// 探测连接 `id` 上主机的系统，结果发给它上面的每个终端。探测通道打不开、或者开探测通道、
+    /// 探测进行中连接断了：发一次 `ProbeFailed`。超时以后才断的不算探测弄断。返回连接还在不在。
     async fn probe(&self, id: ConnectionId, handle: &SshHandle) -> bool {
-        let outcome = tokio::time::timeout(PROBE_TIMEOUT, probe(handle))
-            .await
-            .unwrap_or(Probe::Unknown);
+        let Ok(outcome) = tokio::time::timeout(self.probe_timeout, probe(handle)).await else {
+            // 主机没在限时内回答：只是没有徽章。之后连接断了也不是探测弄断的。
+            return !handle.is_closed();
+        };
         if let Probe::Found(host) = outcome {
             self.publish(
                 id,
@@ -485,7 +490,7 @@ async fn hang_up(handle: &SshHandle) {
 /// 一次探测的结果。
 enum Probe {
     Found(ProbedHost),
-    /// 主机回答了，认不出来（或者没在限时内回答）。
+    /// 主机回答了，认不出来。
     Unknown,
     /// 探测通道打不开（拒开通道、拒跑命令、连接断了）。
     Refused,

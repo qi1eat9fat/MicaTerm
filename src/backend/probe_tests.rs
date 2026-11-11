@@ -2,6 +2,7 @@
 //! 服务器模拟只给一个通道、或者再开通道就断开整条连接的堡垒机。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer};
 use qishell_ssh::{AgentLocation, HostLogin, LoginMethod, PROBE_COMMAND, SecretRef, SshConnector};
@@ -30,14 +31,25 @@ impl Fixture {
         }
     }
 
-    fn remote(&self) -> Arc<SshRemoteTerminals> {
-        let connector = SshConnector::new(
+    fn connector(&self) -> SshConnector {
+        SshConnector::new(
             self.directory.path().join("known_hosts"),
             Arc::new(super::tests::Secrets::default()),
         )
         .with_agent(AgentLocation::None)
-        .with_default_key_dir(None);
-        Arc::new(SshRemoteTerminals::with_connector(connector))
+        .with_default_key_dir(None)
+    }
+
+    fn remote(&self) -> Arc<SshRemoteTerminals> {
+        Arc::new(SshRemoteTerminals::with_connector(self.connector()))
+    }
+
+    /// 探测最多等 `timeout` 的连接表。
+    fn remote_with_probe_timeout(&self, timeout: Duration) -> Arc<SshRemoteTerminals> {
+        Arc::new(SshRemoteTerminals::with_probe_timeout(
+            self.connector(),
+            timeout,
+        ))
     }
 
     /// 主机 7，登录后探不探测系统。
@@ -109,6 +121,33 @@ fn a_host_that_does_not_probe_opens_no_exec_channel() {
     assert_eq!(fixture.probes(), 0, "没开 exec 通道探测");
     assert!(!probed(&answers), "{:?}", answers.events());
     terminal.close();
+}
+
+#[test]
+fn a_connection_that_ends_after_the_probe_timed_out_is_not_blamed_on_the_probe() {
+    let fixture = Fixture::start();
+    // 主机收下探测命令不回答，探测超时（300ms）之后又过一会儿整条连接才断。
+    fixture
+        .server
+        .stall_exec_then_end(Duration::from_millis(600));
+    let remote = fixture.remote_with_probe_timeout(Duration::from_millis(300));
+    let answers = Answerer::start(&remote, Some(TEST_PASSWORD));
+
+    let terminal = Terminal::open(&remote, 1, &fixture.target(true));
+    terminal.expect_started();
+    terminal.finish().expect_err("连接断了");
+    // 连接表发事件比终端看到断开晚一点：等一会儿再看。
+    std::thread::sleep(Duration::from_millis(700));
+
+    assert_eq!(fixture.probes(), 1);
+    assert!(
+        !answers
+            .events()
+            .iter()
+            .any(|event| matches!(event, RemoteEvent::ProbeFailed { .. })),
+        "超时之后才断的不算探测弄断：{:?}",
+        answers.events()
+    );
 }
 
 #[test]

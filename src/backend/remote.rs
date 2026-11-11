@@ -8,6 +8,7 @@
 //! 生产实现是 [`SshRemoteTerminals`]，UI 测试注入假的。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use qishell_ssh::{
     ConnectionPromptKind, ConnectionPromptReply, HostLogin, Latency, ProbedHost,
@@ -145,9 +146,14 @@ impl SshRemoteTerminals {
 
     /// 用给定的连接器（测试里指定 Agent、默认私钥目录）。
     pub fn with_connector(connector: SshConnector) -> Self {
+        Self::with_probe_timeout(connector, super::pool::PROBE_TIMEOUT)
+    }
+
+    /// 用给定的连接器，系统探测最多等 `probe_timeout`（测试里缩短）。
+    pub(super) fn with_probe_timeout(connector: SshConnector, probe_timeout: Duration) -> Self {
         let (sender, events) = async_channel::unbounded();
         Self {
-            pool: ConnectionPool::new(super::runtime::shared(), connector, sender),
+            pool: ConnectionPool::new(super::runtime::shared(), connector, sender, probe_timeout),
             events,
         }
     }
