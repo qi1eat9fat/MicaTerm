@@ -69,11 +69,11 @@ impl Fixture {
 }
 
 fn target(port: u16) -> RemoteTarget {
-    RemoteTarget {
-        host: 1,
-        login: HostLogin::new("127.0.0.1", port, TEST_USER, LoginMethod::Password)
+    RemoteTarget::new(
+        1,
+        HostLogin::new("127.0.0.1", port, TEST_USER, LoginMethod::Password)
             .with_password(SecretRef::password(1)),
-    }
+    )
 }
 
 /// 连接问的问题怎么答：信任主机密钥，问密码答 `password`（`None` 就取消）。记下问过的问题和别的事件。
@@ -134,6 +134,11 @@ impl Answerer {
             seen,
             _thread: thread,
         }
+    }
+
+    /// 收到过的全部事件，按顺序。
+    pub(super) fn events(&self) -> Vec<RemoteEvent> {
+        self.seen.lock().unwrap().clone()
     }
 
     /// 问过的问题，按顺序。

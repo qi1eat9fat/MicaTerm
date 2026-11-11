@@ -1216,6 +1216,19 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
     }
 
     #[test]
+    fn a_probe_turned_off_stays_off_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("qishell.db");
+        {
+            let db = HostDatabase::open(&path).unwrap();
+            db.insert_host(&host(1, "bastion")).unwrap();
+            db.set_host_probe(HostId(1), false).unwrap();
+        }
+        let db = HostDatabase::open(&path).unwrap();
+        assert!(!db.load().unwrap().hosts[0].probe_os);
+    }
+
+    #[test]
     fn a_schema_one_file_is_brought_to_two_and_its_hosts_still_probe() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("qishell.db");

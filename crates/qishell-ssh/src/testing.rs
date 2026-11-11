@@ -67,6 +67,8 @@ struct Faults {
     hangup: tokio::sync::Notify,
     refuse_sftp: AtomicBool,
     bastion: AtomicBool,
+    /// 再开一个会话通道就断掉整条连接（工单 34）。
+    end_on_another_channel: AtomicBool,
 }
 
 /// The public keys [`TEST_USER`] logs in with, as `authorized_keys`.
@@ -151,6 +153,14 @@ impl TestServer {
     /// 从现在起收到堡垒机拒绝的请求就结束 SFTP 会话，见 [`refused_by_bastion`]。
     pub fn act_as_bastion(&self) {
         self.faults.bastion.store(true, Ordering::SeqCst);
+    }
+
+    /// 从现在起每条连接再开第二个会话通道时整条连接断开：有的堡垒机就这样，
+    /// 登录后另开通道探测系统会把 shell 一起弄断（工单 34）。
+    pub fn end_on_another_channel(&self) {
+        self.faults
+            .end_on_another_channel
+            .store(true, Ordering::SeqCst);
     }
 
     /// 连进来过几条连接。
@@ -281,6 +291,10 @@ impl server::Handler for Handler {
         reply: server::ChannelOpenHandle,
         _: &mut server::Session,
     ) -> anyhow::Result<()> {
+        if self.sessions > 0 && self.faults.end_on_another_channel.load(Ordering::SeqCst) {
+            // 处理器出错，russh 就结束这条连接。
+            return Err(anyhow::anyhow!("the bastion host ends the connection"));
+        }
         if self.sessions > 0 && self.single_channel.load(Ordering::SeqCst) {
             reply
                 .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
