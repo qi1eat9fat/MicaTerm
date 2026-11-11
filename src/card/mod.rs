@@ -7,13 +7,15 @@
 //! - `status_dot`：名称、目录后面的状态点（有输出的绿点、要注意的橙点，工单 06）；
 //! - `directory`：显示用的目录（主目录写成 `~`）；
 //! - `remote`：远程卡片的那一部分（主机快照、连接状态、延迟、系统，工单 12；被动解析出的程序、
-//!   目录、标题，工单 17）。
+//!   目录、标题，工单 17）；
+//! - `holding`：等保险库时远程卡片里的占位传输（工单 33）。
 //!
 //! 卡片只认终端 crate 的公开类型，不依赖窗口壳；按钮一律经窗口壳的焦点派发 action
 //! （`CloseCard(CardId)`），由窗口壳处理。
 
 mod directory;
 mod header;
+mod holding;
 mod program_tile;
 mod remote;
 mod status_bar;
@@ -22,7 +24,7 @@ mod view;
 
 pub use directory::{display_directory, home_dir, reported_path};
 pub use program_tile::{MAX_STACKED_TILES, render_program_tile, render_tile_stack};
-pub use remote::{RemoteActivity, RemoteLaunch, RemoteState, RemoteUpdate, host_badge};
+pub use remote::{RemoteActivity, RemoteLaunch, RemoteState, RemoteUpdate, VaultHold, host_badge};
 pub use status_dot::{ACTIVE_FOR, StatusDot, render_status_dot};
 pub use view::{CardEvent, TerminalCard};
 

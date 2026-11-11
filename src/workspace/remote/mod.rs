@@ -10,7 +10,8 @@
 //!   （或派发 `ConnectHost`）；
 //! - `remote_target(host, ..)`：主机怎么连（含凭据和跳板、代理的路线，`HostData::login_of`），工单 15 不用改这里；
 //! - `on_remote_event`：连接表的事件分发，工单 17 的系统徽章在 `RemoteUpdate::Probed` 之后照常生效；
-//! - `secrets::with_login_secrets`：连接前取秘密的钩子，工单 13 在那里接保险库解锁框。
+//! - `secrets`：连接前取秘密的钩子（工单 13、33）：要用保险库里的秘密而保险库锁着时，卡片照常建出来、
+//!   放进标签，先「等待解锁保险库」，解锁后原地接着连（`wait_for_vault` → `vault_answered`）。
 
 mod prompts;
 mod secrets;
@@ -22,7 +23,7 @@ use gpui_kit::*;
 pub(in crate::workspace) use prompts::PromptQueue;
 
 use crate::backend::{RemoteEvent, RemoteTarget, RemoteTerminalId};
-use crate::card::{CardId, RemoteLaunch, RemoteUpdate, TerminalCard};
+use crate::card::{CardId, RemoteLaunch, RemoteUpdate, TerminalCard, VaultHold};
 use crate::host::{Host, HostId};
 use crate::split::Axis;
 use crate::tabs::{Tab, TabId, TerminalTab};
@@ -125,6 +126,8 @@ impl Workspace {
 
     /// 按给定的主机快照和登录新建一张远程卡片（还没放进任何标签）。分屏一张远程卡片时用它的快照和登录，
     /// 和它在同一条连接上开 shell 通道（主机后来被编辑、删除也一样）。
+    /// 要用保险库里的秘密而保险库锁着时（工单 33），卡片先「等待解锁保险库」、不连，解锁框等这次更新
+    /// 结束（调用方把卡片放进标签以后）再弹，解开后在这张卡片里接着连。
     pub(in crate::workspace) fn open_remote_card_as(
         &mut self,
         host: Host,
@@ -134,11 +137,19 @@ impl Workspace {
     ) -> Entity<TerminalCard> {
         let id = CardId(self.next_card_id);
         self.next_card_id += 1;
+        let focus = self.focus_handle.clone();
+        if self.waits_for_vault(&target, false, cx) {
+            let card = cx.new(|cx| {
+                TerminalCard::remote_waiting_for_vault(id, host, target, focus, window, cx)
+            });
+            self.watch_notices(&card, window, cx);
+            self.wait_for_vault(id, window, cx);
+            return card;
+        }
         let factory = self
             .services
             .remote_terminals
             .factory_for(terminal_of(id), &target);
-        let focus = self.focus_handle.clone();
         let launch = RemoteLaunch {
             host,
             target,
@@ -169,10 +180,8 @@ impl Workspace {
             };
             (host.clone(), target.clone())
         };
-        self.with_login_secrets(&target.clone(), window, cx, move |this, window, cx| {
-            let card = this.open_remote_card_as(host, target, window, cx);
-            this.place_beside_focused_card(tab, axis, card, window, cx);
-        });
+        let card = self.open_remote_card_as(host, target, window, cx);
+        self.place_beside_focused_card(tab, axis, card, window, cx);
     }
 
     /// 主机右键菜单「在右侧 / 下方分屏打开」（工单 16）：把主机 `host` 开在在前标签的焦点卡片旁边，
@@ -193,16 +202,10 @@ impl Workspace {
             self.connect_host(host, window, cx);
             return;
         };
-        let Some(saved) = self.hosts.read(cx).host(host).cloned() else {
+        let Some(card) = self.open_remote_card(host, window, cx) else {
             return;
         };
-        let target = self.remote_target(&saved, cx);
-        self.with_login_secrets(&target, window, cx, move |this, window, cx| {
-            let Some(card) = this.open_remote_card(host, window, cx) else {
-                return;
-            };
-            this.place_beside_focused_card(tab, axis, card, window, cx);
-        });
+        self.place_beside_focused_card(tab, axis, card, window, cx);
     }
 
     /// 每台主机开着几张远程卡片（不管连没连着、走哪条连接），主机栏右侧的绿色数字。
@@ -234,25 +237,20 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(saved) = self.hosts.read(cx).host(host).cloned() else {
+        let Some(card) = self.open_remote_card(host, window, cx) else {
             return;
         };
-        let target = self.remote_target(&saved, cx);
-        self.with_login_secrets(&target, window, cx, move |this, window, cx| {
-            let Some(card) = this.open_remote_card(host, window, cx) else {
-                return;
-            };
-            let subscriptions = this.card_subscriptions(&card, window, cx);
-            this.open_tab(
-                Tab::Terminal(TerminalTab::new(card, subscriptions, cx)),
-                window,
-                cx,
-            );
-        });
+        let subscriptions = self.card_subscriptions(&card, window, cx);
+        self.open_tab(
+            Tab::Terminal(TerminalTab::new(card, subscriptions, cx)),
+            window,
+            cx,
+        );
     }
 
     /// 远程卡片 `card` 原地重连：主机还在就按它现在的样子（编辑过的设置这次生效），
-    /// 删了就按卡片打开时的样子。
+    /// 删了就按卡片打开时的样子。要等保险库时（工单 33）卡片原地「等待解锁保险库」，取消过解锁的
+    /// 卡片这次运行取消过也再问；已经在等的不再排一次。
     pub(in crate::workspace) fn reconnect_card(
         &mut self,
         card: CardId,
@@ -262,25 +260,33 @@ impl Workspace {
         let Some(entity) = self.card(card, cx) else {
             return;
         };
-        let (host, target) = {
+        let (host, target, hold) = {
             let card = entity.read(cx);
             let (Some(snapshot), Some(target)) =
                 (card.remote_host_snapshot(), card.remote_target())
             else {
                 return;
             };
-            match self.hosts.read(cx).host(snapshot.id) {
+            let (host, target) = match self.hosts.read(cx).host(snapshot.id) {
                 Some(host) => (host.clone(), self.remote_target(host, cx)),
                 None => (snapshot.clone(), target.clone()),
-            }
+            };
+            (host, target, card.vault_hold())
         };
-        self.with_login_secrets(&target.clone(), window, cx, move |this, _, cx| {
-            let factory = this
-                .services
-                .remote_terminals
-                .factory_for(terminal_of(card), &target);
-            entity.update(cx, |card, cx| card.reconnect(host, target, factory, cx));
-        });
+        match hold {
+            Some(VaultHold::Waiting) => {}
+            _ if self.waits_for_vault(&target, hold == Some(VaultHold::Declined), cx) => {
+                entity.update(cx, |card, cx| card.wait_for_vault(host, target, cx));
+                self.wait_for_vault(card, window, cx);
+            }
+            _ => {
+                let factory = self
+                    .services
+                    .remote_terminals
+                    .factory_for(terminal_of(card), &target);
+                entity.update(cx, |card, cx| card.reconnect(host, target, factory, cx));
+            }
+        }
     }
 }
 

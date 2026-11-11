@@ -47,3 +47,11 @@ card.menu.reconnect:
   zh-CN: 重新连接
 card.menu.disconnect:
   zh-CN: 断开连接
+card.remote.waiting_for_vault:
+  zh-CN: 等待解锁保险库
+card.remote.vault_not_unlocked:
+  zh-CN: 保险库没有解锁
+card.remote.connecting_to:
+  zh-CN: 正在连接 %{endpoint}…
+card.remote.connecting_via:
+  zh-CN: 正在连接 %{endpoint}（经 %{route}）…

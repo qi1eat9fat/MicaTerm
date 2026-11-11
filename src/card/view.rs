@@ -13,13 +13,15 @@ use gpui_kit::*;
 use qishell_hosts::{Host, HostId, HostOs};
 use qishell_terminal::{
     LocalLaunch, LocalShell, LocalShellInfo, SharedLocalTerminalTransportProvider,
-    SharedTerminalTransportFactory, TerminalEvent, TerminalMenuItems, TerminalNotice, TerminalView,
+    SharedTerminalTransportFactory, TerminalEvent, TerminalFont, TerminalMenuItems, TerminalNotice,
+    TerminalView,
 };
 
 use super::CardId;
 use super::directory::{display_directory, home_dir, reported_path};
 use super::header::{HeaderState, render_header};
-use super::remote::{RemoteCard, RemoteLaunch, RemoteState, RemoteUpdate};
+use super::holding::holding_factory;
+use super::remote::{RemoteCard, RemoteLaunch, RemoteState, RemoteUpdate, VaultHold};
 use super::status_bar::{StatusBar, StatusTone, render_status_bar};
 use super::status_dot::{ACTIVE_FOR, StatusDot};
 use crate::app::{CloseCard, CopyCardAddress, DisconnectCard, OpenCardSftp, ReconnectCard};
@@ -162,6 +164,29 @@ impl TerminalCard {
         });
         let kind = CardKind::Remote(Box::new(RemoteCard::new(host, remote)));
         let mut card = Self::with_terminal(id, kind, terminal, target, window, cx);
+        card.shown_state = card.remote_state(cx);
+        card
+    }
+
+    /// 一张等保险库解锁的远程卡片（工单 33）：先不连，终端是占位的，状态栏写「等待解锁保险库」；
+    /// 之后同 [`Self::wait_for_vault`]。
+    pub fn remote_waiting_for_vault(
+        id: CardId,
+        host: Host,
+        remote: RemoteTarget,
+        target: FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let launch = RemoteLaunch {
+            host,
+            target: remote,
+            factory: holding_factory(),
+        };
+        let mut card = Self::remote(id, launch, target, window, cx);
+        if let CardKind::Remote(remote) = &mut card.kind {
+            remote.hold_for_vault(VaultHold::Waiting);
+        }
         card.shown_state = card.remote_state(cx);
         card
     }
@@ -554,6 +579,39 @@ impl TerminalCard {
         cx.notify();
     }
 
+    /// 等保险库解锁再连（工单 33）：先不连，终端换成占位的，状态栏写「等待解锁保险库」。
+    /// `host` 和 `target` 是解锁后要连的（同 [`Self::reconnect`]）。新卡片和原地重连都经这里；
+    /// 窗口壳等用户答了解锁框，解开就 [`Self::reconnect`]，取消就 [`Self::vault_declined`]。
+    pub fn wait_for_vault(&mut self, host: Host, target: RemoteTarget, cx: &mut Context<Self>) {
+        if self.remote_part().is_none() {
+            return;
+        }
+        self.reconnect(host, target, holding_factory(), cx);
+        if let CardKind::Remote(remote) = &mut self.kind {
+            remote.hold_for_vault(VaultHold::Waiting);
+        }
+        self.refresh_remote_state(cx);
+        cx.notify();
+    }
+
+    /// 用户取消了解锁（工单 33）：卡片显示未连接，原因是「保险库没有解锁」；Enter 原地重连。
+    pub fn vault_declined(&mut self, cx: &mut Context<Self>) {
+        let CardKind::Remote(remote) = &mut self.kind else {
+            return;
+        };
+        remote.hold_for_vault(VaultHold::Declined);
+        let message = t!("card.remote.vault_not_unlocked");
+        self.terminal
+            .update(cx, |terminal, cx| terminal.stop(&message, cx));
+        self.refresh_remote_state(cx);
+        cx.notify();
+    }
+
+    /// 远程卡片是不是因为保险库停着没连（工单 33）；照常连的、本地卡片是 `None`。
+    pub fn vault_hold(&self) -> Option<VaultHold> {
+        self.remote_part().and_then(RemoteCard::vault_hold)
+    }
+
     /// 断开连接：关掉这张卡片的 shell 通道，卡片留着，可以按 Enter 重连。
     pub fn disconnect(&mut self, cx: &mut Context<Self>) {
         let CardKind::Remote(remote) = &mut self.kind else {
@@ -644,6 +702,14 @@ impl TerminalCard {
                     columns,
                     rows,
                 },
+                RemoteState::WaitingForVault => StatusBar {
+                    state: t!("card.remote.waiting_for_vault"),
+                    tone: StatusTone::Pending,
+                    details: vec![remote.endpoint()],
+                    reason: None,
+                    columns,
+                    rows,
+                },
                 RemoteState::Connected => StatusBar {
                     state: t!("card.remote.connected"),
                     tone: StatusTone::Ok,
@@ -688,6 +754,30 @@ fn remote_menu_items(id: CardId, host: &Host) -> TerminalMenuItems {
                 )
         }),
     }
+}
+
+/// 还没连上时卡片正文左上角的一行（原型「用到秘密时：解锁保险库」）：「正在连接 …（经 …）…」，
+/// 淡色、终端字体。终端连上开始输出就不画了。
+fn render_connecting(
+    id: CardId,
+    line: SharedString,
+    tokens: &Tokens,
+    cx: &App,
+) -> impl IntoElement {
+    let font = TerminalFont::current(cx);
+    div()
+        .id(id.element("card-connecting"))
+        .test_support()
+        .aria_label(line.clone())
+        .absolute()
+        .top(px(6.))
+        .left(px(14.))
+        .right(px(14.))
+        .truncate()
+        .when_some(font.family, |line, family| line.font_family(family))
+        .text_size(font.size)
+        .text_color(tokens.faint)
+        .child(line)
 }
 
 /// 远程卡片断开时卡片里的提示（原型 `.discon`）：「● 连接已断开 原因 · Enter 重新连接 · Space 关闭」。
@@ -840,7 +930,12 @@ impl Render for TerminalCard {
                         RemoteState::Disconnected(reason) => {
                             body.child(render_disconnected(id, reason, &tokens))
                         }
-                        _ => body,
+                        RemoteState::Connecting | RemoteState::WaitingForVault => {
+                            body.children(self.remote_part().map(|remote| {
+                                render_connecting(id, remote.connecting_line(), &tokens, cx)
+                            }))
+                        }
+                        RemoteState::Connected => body,
                     }),
             )
             .child(render_status_bar(id, &status, &tokens))

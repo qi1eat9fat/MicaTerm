@@ -432,7 +432,9 @@ fn reusing_a_live_connection_does_not_ask_to_unlock(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn cancelling_the_unlock_connects_anyway_and_does_not_ask_again(cx: &mut TestAppContext) {
+fn cancelling_the_unlock_leaves_that_card_unconnected_and_does_not_ask_again(
+    cx: &mut TestAppContext,
+) {
     let vault = TestVault::unlocked()
         .with_secret(&web01_password(), "hunter2")
         .locked();
@@ -440,15 +442,15 @@ fn cancelling_the_unlock_connects_anyway_and_does_not_ask_again(cx: &mut TestApp
 
     dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
     click(cx, handle, "vault-unlock-cancel");
-    // 取消了照样连，密码现场问。
+    // 取消了这张卡片就不连，显示未连接（工单 33，原地重连再问，见 `vault_waiting`）。
     assert!(!visible(cx, handle, "vault-unlock"));
-    assert_eq!(connected_hosts(&remote), vec![1]);
+    assert!(connected_hosts(&remote).is_empty());
     assert_eq!(vault.status(), VaultStatus::Locked);
 
-    // 每次运行最多问一次。
+    // 新的连接不再自动弹（每次运行最多自动问一次），照样连，密码现场问。
     dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
     assert!(!visible(cx, handle, "vault-unlock"));
-    assert_eq!(connected_hosts(&remote), vec![1, 1]);
+    assert_eq!(connected_hosts(&remote), vec![1]);
 
     // 手动「解锁…」一直可用。
     click(cx, handle, "unlock-vault");
@@ -469,7 +471,7 @@ fn escape_on_the_unlock_card_is_a_cancel(cx: &mut TestAppContext) {
     dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
     assert!(!visible(cx, handle, "vault-unlock"));
-    assert_eq!(connected_hosts(&remote), vec![1]);
+    assert!(connected_hosts(&remote).is_empty());
 }
 
 #[gpui_kit::test]

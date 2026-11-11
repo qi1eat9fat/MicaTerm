@@ -68,6 +68,9 @@ pub(super) fn open_small_dialog<V: Render>(
                 .rounded(px(14.))
                 .close_button(false)
                 .overlay_closable(false)
+                // 回车由框里的输入框自己处理（解锁、设主密码在后台算完才关）：gpui-component 的
+                // `Confirm` 不关框，否则还没算完就当成取消关掉了（工单 33 发现）。
+                .on_ok(|_, _, _| false)
                 .child(view.clone())
         },
         move |window, cx| reply.send(false, window, cx),
