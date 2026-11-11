@@ -10,13 +10,17 @@
 //! 再交给调用方的 `dismissed`。
 //!
 //! 约定：窗口里的对话框都经这里打开和关闭，不直接调 `open_dialog` / `close_dialog`，否则记录对不上。
+//!
+//! 对话框开着时别处要焦点（新标签、分屏的新卡片，工单 32），经 [`focus_after_dialogs`]：不抢框里的焦点，
+//! 等这个窗口的对话框都关了再给。
 
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::dialog::Dialog;
+use gpui_kit::component::dialog::{ANIMATION_DURATION, Dialog};
 use gpui_kit::*;
 
 /// 每次渲染时把 `Dialog` 搭成这层的样子。
@@ -151,16 +155,76 @@ impl DialogLayer {
         if let Some(focused) = focused {
             window.focus(&focused, cx);
         }
+        if above == 0 && !any_open(window, cx) {
+            focus_pending(window, cx);
+        }
     }
 }
 
 /// gpui-component 自己关掉了第 `id` 层（Esc、遮罩）：从记录里去掉。
-fn forget(id: u64, window: &Window, cx: &mut App) {
+fn forget(id: u64, window: &mut Window, cx: &mut App) {
     let wid = window_id(window);
     if !cx.has_global::<DialogLayers>() {
         return;
     }
     if let Some(stack) = cx.global_mut::<DialogLayers>().0.get_mut(&wid) {
         stack.retain(|layer| layer.id != id);
+    }
+    if !any_open(window, cx) && has_pending(window, cx) {
+        // gpui-component 关完动画（`ANIMATION_DURATION`）后才把焦点还给打开前的地方：等它还完再交出去。
+        let wait = *ANIMATION_DURATION + Duration::from_millis(1);
+        window
+            .spawn(cx, async move |cx| {
+                cx.background_executor().timer(wait).await;
+                cx.update(|window, cx| {
+                    if !any_open(window, cx) {
+                        focus_pending(window, cx);
+                    }
+                })
+                .ok();
+            })
+            .detach();
+    }
+}
+
+/// 这个窗口有没有开着的对话框（经 [`DialogLayer`] 打开的）。
+pub fn any_open(window: &Window, cx: &App) -> bool {
+    cx.try_global::<DialogLayers>()
+        .and_then(|layers| layers.0.get(&window_id(window)))
+        .is_some_and(|stack| !stack.is_empty())
+}
+
+/// 等对话框都关了再拿焦点的地方，每个窗口一个（后来的顶替先来的）。
+#[derive(Default)]
+struct PendingFocus(HashMap<WindowId, WeakFocusHandle>);
+
+impl Global for PendingFocus {}
+
+/// 把焦点交给 `focus`（工单 32）：没有对话框开着就立刻给；开着（比如连接的问答框、解锁框）就不抢，
+/// 等这个窗口的对话框都关了再给它。等的时候又有别的地方要焦点，给后来的那个。
+/// 新标签、分屏这类「新卡片拿焦点」都经这里，用户正在框里打字时不会被打断。
+pub fn focus_after_dialogs(focus: &FocusHandle, window: &mut Window, cx: &mut App) {
+    if !any_open(window, cx) {
+        window.focus(focus, cx);
+        return;
+    }
+    cx.default_global::<PendingFocus>()
+        .0
+        .insert(window_id(window), focus.downgrade());
+}
+
+fn has_pending(window: &Window, cx: &App) -> bool {
+    cx.try_global::<PendingFocus>()
+        .is_some_and(|pending| pending.0.contains_key(&window_id(window)))
+}
+
+/// 对话框都关了：把等着的焦点交出去（那张卡片已经关了就算了）。
+fn focus_pending(window: &mut Window, cx: &mut App) {
+    if !cx.has_global::<PendingFocus>() {
+        return;
+    }
+    let pending = cx.global_mut::<PendingFocus>().0.remove(&window_id(window));
+    if let Some(focus) = pending.and_then(|focus| focus.upgrade()) {
+        window.focus(&focus, cx);
     }
 }

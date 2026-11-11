@@ -10,3 +10,4 @@ pub mod drag;
 pub mod form;
 
 pub use dialog::DialogLayer;
+pub use dialog::focus_after_dialogs;
