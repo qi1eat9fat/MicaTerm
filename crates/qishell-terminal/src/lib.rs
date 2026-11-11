@@ -34,6 +34,7 @@ pub mod rendering;
 mod scrollbar;
 mod search;
 mod shell_info;
+mod shell_integration;
 mod terminal_view;
 #[cfg(test)]
 mod testing;
