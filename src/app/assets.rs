@@ -33,6 +33,8 @@ icon_assets!(
         Lock,
         LockOpen,
         Shield,
+        // 设置 › 应用（工单 26）。
+        AppWindow,
         // SFTP 标签、编辑器标签、预览（M3，工单 20 一次加全）。
         ArrowUpRight,
         CircleMinus,

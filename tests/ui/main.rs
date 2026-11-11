@@ -12,6 +12,7 @@
 //! - `programs`：程序图块与状态点（06）
 //! - `settings`：设置对话框（07）
 //! - `settings_sftp`：设置 › SFTP（25）
+//! - `settings_app`：设置 › 应用与 Mica（26）
 //! - `hosts`：主机栏（11）
 //! - `host_dialog`：主机对话框（11）
 //! - `snippets`：命令片段（19）
@@ -43,6 +44,7 @@ mod remote_activity;
 mod remote_card;
 mod route;
 mod settings;
+mod settings_app;
 mod settings_sftp;
 mod sftp_files;
 mod sftp_tab;

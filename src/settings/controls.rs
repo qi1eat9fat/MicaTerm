@@ -61,7 +61,7 @@ pub fn group(rows: impl IntoIterator<Item = AnyElement>, tokens: &Tokens) -> Div
 
 /// 一行设置（原型的 `.srow`）：左边名称和说明，右边控件。
 pub fn row(
-    label: SharedString,
+    label: impl IntoElement,
     description: Option<SharedString>,
     control: impl IntoElement,
     tokens: &Tokens,
@@ -80,7 +80,7 @@ pub fn row(
 
 /// 一行设置，名称下面放任意内容（比如图标风格的示例图标），不只是一句说明。
 pub fn row_with_note(
-    label: SharedString,
+    label: impl IntoElement,
     note: Option<AnyElement>,
     control: impl IntoElement,
 ) -> AnyElement {

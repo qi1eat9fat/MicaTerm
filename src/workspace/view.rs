@@ -31,7 +31,7 @@ use crate::card::{CardId, StatusDot, TerminalCard};
 use crate::credential::CredentialPanel;
 use crate::host::{HostData, HostList, HostStore, HostStoreEvent};
 use crate::i18n::t;
-use crate::settings::{SettingsStore, SettingsStoreEvent, apply};
+use crate::settings::{SettingsStore, SettingsStoreEvent, WindowBackdrop, WindowSettings, apply};
 use crate::snippets::SnippetPanel;
 use crate::split::NodeId;
 use crate::tabs::{Tab, TabId, TabList, TabRail, TabSnapshot, TerminalTab};
@@ -72,6 +72,10 @@ pub struct WorkspaceServices {
     pub local_files: SharedLocalDirectoryProvider,
     /// 续传记录没有地方放时给用户看的原因（这次运行的传输不能续传）。窗口壳打开后弹出错误通知。
     pub sftp_problem: Option<SharedString>,
+    /// 数据目录（工单 26）：设置 › 应用显示它，窗口的大小和位置记在它下面的 `window.json`。
+    /// 生产是 `crate::app::data_dir()`，取不到时 `None`（不记窗口、设置里说没有数据目录）；
+    /// 测试默认 `None`，要测记住窗口时给一个临时目录。
+    pub data_dir: Option<std::path::PathBuf>,
 }
 
 impl WorkspaceServices {
@@ -111,6 +115,7 @@ impl WorkspaceServices {
             sftp: std::sync::Arc::new(sftp),
             local_files: std::sync::Arc::new(SystemLocalDirectoryProvider),
             sftp_problem,
+            data_dir: crate::app::data_dir().ok(),
         }
     }
 }
@@ -199,7 +204,9 @@ pub struct Workspace {
     pub(super) quick_connect_anchor: std::rc::Rc<QuickConnectAnchor>,
     /// 开始卡片的最近连接列表高亮第几行（工单 18）。
     pub(super) start_highlight: usize,
-    _subscriptions: Vec<Subscription>,
+    /// 等窗口停稳再写 `window.json` 的那一次（工单 26）；窗口又动了就换一个新的。
+    pub(super) window_state_save: Option<Task<()>>,
+    pub(super) _subscriptions: Vec<Subscription>,
 }
 
 impl Workspace {
@@ -289,7 +296,11 @@ impl Workspace {
             let (hosts, vault, target) = (hosts.clone(), vault.clone(), focus_handle.clone());
             cx.new(|cx| CredentialPanel::new(hosts, vault, target, cx))
         };
-        Self {
+        let window_state_path = services
+            .data_dir
+            .as_ref()
+            .map(|dir| dir.join(crate::app::WINDOW_STATE_FILE));
+        let mut this = Self {
             focus_handle,
             start_card_focus,
             settings,
@@ -315,8 +326,14 @@ impl Workspace {
             quick_connect: None,
             quick_connect_anchor: Default::default(),
             start_highlight: 0,
+            window_state_save: None,
             _subscriptions: subscriptions,
+        };
+        // 记住窗口大小和位置（工单 26）：没有数据目录就不记。
+        if let Some(path) = window_state_path {
+            this.remember_window(path, window, cx);
         }
+        this
     }
 
     /// 把注入的主机数据建成 `HostStore` 和主机栏的列表；写不进数据库、保险库时弹出错误通知。
@@ -612,11 +629,8 @@ impl Render for Workspace {
             .size_full()
             .overflow_hidden()
             .text_color(tokens.text)
-            .bg(linear_gradient(
-                180.,
-                linear_color_stop(tokens.bg_top, 0.),
-                linear_color_stop(tokens.bg_bottom, 1.),
-            ))
+            // 不透明的两色标渐变；开了 Mica 时是半透明的，让系统的 Mica 透出来（工单 26）。
+            .bg(tokens.window_gradient(WindowBackdrop::current(cx) == WindowBackdrop::Mica))
             .when(self.host_sidebar_open, |root| {
                 root.child(render_host_sidebar(
                     self.hosts.read(cx).hosts().len(),
@@ -634,8 +648,14 @@ impl Render for Workspace {
     }
 }
 
-/// 主窗口的选项：无边框（标题栏自己画），背景不透明（渐变由根节点画）。
-pub fn window_options(cx: &App) -> WindowOptions {
+/// 主窗口的选项：无边框（标题栏自己画），开在上次的地方（`saved`，设置记住窗口时，工单 26）。
+/// 背景先不透明（渐变由根节点画），窗口壳应用设置时再按 Mica 开关换（`settings::apply`）。
+pub fn window_options(
+    saved: Option<&super::WindowState>,
+    settings: WindowSettings,
+    cx: &App,
+) -> WindowOptions {
+    let (window_bounds, display_id) = super::window_placement(saved, settings, cx);
     WindowOptions {
         titlebar: Some(TitlebarOptions {
             title: Some(PRODUCT_NAME.into()),
@@ -643,11 +663,8 @@ pub fn window_options(cx: &App) -> WindowOptions {
             appears_transparent: true,
             traffic_light_position: Some(point(px(14.), px(14.))),
         }),
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(1280.), px(800.)),
-            cx,
-        ))),
+        window_bounds: Some(window_bounds),
+        display_id,
         window_min_size: Some(size(px(720.), px(480.))),
         window_background: WindowBackgroundAppearance::Opaque,
         app_id: Some(crate::app::APP_IDENTITY.into()),
