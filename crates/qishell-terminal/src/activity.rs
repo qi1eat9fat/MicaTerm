@@ -160,14 +160,19 @@ fn is_operator(word: &str) -> bool {
 }
 
 /// 按 shell 的规则把一行切成词：空白分词，认反斜杠、单引号、双引号和 `$'…'`（bash `%q` 的写法）。
-/// 没引起来的 `;`、`&`、`|` 自成一词（连着的算一个，`&&`、`||`），不会粘在前一个词上：oh-my-zsh
-/// 把整行命令设成标题，`sudo -n true; ls` 的第一个命令是 `true`，不是 `true;`。不展开变量。
+/// 没引起来的控制符 `;`、`&`、`|` 自成一词（连着的算一个，`&&`、`||`、`|&`），不会粘在前一个词上：
+/// oh-my-zsh 把整行命令设成标题，`sudo -n true; ls` 的第一个命令是 `true`，不是 `true;`。
+/// 重定向里的 `&`、`|` 不是控制符，和重定向留在一个词里：`2>&1`、`>&2`、`<&3`、`&>文件`、`&>>文件`、
+/// `>|文件`。不展开变量。
 pub fn shell_words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut word = String::new();
     let mut in_word = false;
+    // 词里最后一个字符是没引起来的 `>` 或 `<`：紧跟着的 `&`、`|` 属于这个重定向。
+    let mut after_redirect = false;
     let mut chars = line.chars().peekable();
     while let Some(character) = chars.next() {
+        let redirect = std::mem::take(&mut after_redirect);
         match character {
             '\\' => {
                 in_word = true;
@@ -209,6 +214,16 @@ pub fn shell_words(line: &str) -> Vec<String> {
                     in_word = false;
                 }
             }
+            // `2>&1`、`>&-`、`<&3`、`>|文件`：重定向的一部分。
+            '&' | '|' if redirect => word.push(character),
+            // `&>文件`、`&>>文件`：标准输出和标准错误一起重定向，开始一个新词。
+            '&' if chars.peek() == Some(&'>') => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                }
+                in_word = true;
+                word.push(character);
+            }
             ';' | '&' | '|' => {
                 if in_word {
                     words.push(std::mem::take(&mut word));
@@ -216,12 +231,19 @@ pub fn shell_words(line: &str) -> Vec<String> {
                 }
                 let mut operator = String::from(character);
                 while let Some(next) = chars.next_if(|next| matches!(next, ';' | '&' | '|')) {
+                    // `;&>文件`：这个 `&` 开始的是重定向，不并进控制符。
+                    if next == '&' && chars.peek() == Some(&'>') {
+                        in_word = true;
+                        word.push(next);
+                        break;
+                    }
                     operator.push(next);
                 }
                 words.push(operator);
             }
             character => {
                 in_word = true;
+                after_redirect = matches!(character, '>' | '<');
                 word.push(character);
             }
         }
@@ -794,6 +816,34 @@ mod tests {
             ["a", ";", "b", "&&", "c", "|", "d"]
         );
         assert_eq!(shell_words(r"a\;b 'c|d' &"), ["a;b", "c|d", "&"]);
+    }
+
+    #[test]
+    fn redirections_with_an_ampersand_are_not_split() {
+        // 重定向里的 `&`、`|` 不是控制符：`2>&1`、`>&2`、`<&3`、`>&-`、`&>`、`&>>`、`>|`。
+        assert_eq!(
+            shell_words("make 2>&1 | tee log"),
+            ["make", "2>&1", "|", "tee", "log"]
+        );
+        assert_eq!(
+            shell_words("echo hi >&2; ls"),
+            ["echo", "hi", ">&2", ";", "ls"]
+        );
+        assert_eq!(shell_words("cat <&3 >&-"), ["cat", "<&3", ">&-"]);
+        assert_eq!(
+            shell_words("make &>log && make install &>>log"),
+            ["make", "&>log", "&&", "make", "install", "&>>log"]
+        );
+        assert_eq!(shell_words("ls&>/dev/null&"), ["ls", "&>/dev/null", "&"]);
+        assert_eq!(
+            shell_words("date >|now |& less"),
+            ["date", ">|now", "|&", "less"]
+        );
+        // 引起来、转义了的 `>` 不开始重定向，后面的 `&` 照样是控制符。
+        assert_eq!(shell_words(r#"echo ">"&ls"#), ["echo", ">", "&", "ls"]);
+        assert_eq!(shell_words(r"echo a\>&ls"), ["echo", "a>", "&", "ls"]);
+        // 引起来的 `2>&1` 本来就是一个词。
+        assert_eq!(shell_words("echo '2>&1' & ls"), ["echo", "2>&1", "&", "ls"]);
     }
 
     #[test]
