@@ -1,4 +1,4 @@
-//! 应用设置：应用外观、界面字号，以及终端读的全局量（`TerminalColors`、`TerminalFont`、
+//! 应用设置：应用外观、界面字号、窗口背景（Mica），以及终端读的全局量（`TerminalColors`、`TerminalFont`、
 //! `TerminalInteraction`）。终端 crate 不依赖设置，开着的终端靠观察这些全局量跟着变。
 //!
 //! 窗口壳在打开时、每次设置变化时和系统外观变化时调用 `apply`：每一步都先比较，没变的不动，
@@ -9,6 +9,7 @@ use gpui_kit::component::{ActiveTheme as _, Theme, ThemeMode};
 use gpui_kit::{App, Window, px};
 use qishell_terminal::{TerminalColors, TerminalFont, TerminalInteraction, is_font_installed};
 
+use super::backdrop::apply_backdrop;
 use super::{AppSettings, DEFAULT_TERMINAL_FONT_FAMILY};
 use crate::sftp_tab::{FileIconStyle, ShowHiddenFiles};
 use crate::theme::{component_theme, component_theme_name};
@@ -33,6 +34,9 @@ pub fn apply(settings: &AppSettings, window: &mut Window, cx: &mut App) {
         cx.set_global(colors);
         window.refresh();
     }
+
+    // Mica 背景（工单 26）：系统不支持时保持不透明。
+    apply_backdrop(settings.interface.mica, window, cx);
 
     apply_terminal(settings, cx);
     apply_sftp(settings, cx);

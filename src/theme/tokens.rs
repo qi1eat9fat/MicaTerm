@@ -2,9 +2,12 @@
 //! CSS 里 `.win.light` / `.win.dark` 两组变量，名字对应原型的 `--xxx`。
 //! 界面颜色不跟终端主题走。
 
-use gpui_kit::{App, Hsla, Rgba, rgb, rgba};
+use gpui_kit::{App, Background, Hsla, Rgba, linear_color_stop, linear_gradient, rgb, rgba};
 
 use gpui_kit::component::ActiveTheme as _;
+
+/// 开了 Mica 时窗口背景渐变的不透明度：0 是纯 Mica，1 是看不见 Mica。
+pub const MICA_TINT_OPACITY: f32 = 0.5;
 
 /// 一组颜色 token。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -172,6 +175,24 @@ impl Tokens {
             close_hover: c(rgb(0xc42b1c)),
             close_hover_text: c(rgb(0xffffff)),
         }
+    }
+
+    /// 窗口背景：从 `bg_top` 到 `bg_bottom` 的竖直渐变。`translucent`（开了 Mica，工单 26）时
+    /// 两端都降到 `MICA_TINT_OPACITY`，让系统的 Mica 透出来，又压住 Mica 和应用外观不一致的色调
+    /// （Mica 跟系统的深浅色走，应用外观可以单独设）。
+    pub fn window_gradient(&self, translucent: bool) -> Background {
+        let tint = |color: Hsla| {
+            if translucent {
+                color.opacity(MICA_TINT_OPACITY)
+            } else {
+                color
+            }
+        };
+        linear_gradient(
+            180.,
+            linear_color_stop(tint(self.bg_top), 0.),
+            linear_color_stop(tint(self.bg_bottom), 1.),
+        )
     }
 
     /// 当前主题模式（浅色或深色）的那组 token。

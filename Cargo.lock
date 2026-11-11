@@ -6123,6 +6123,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "trash",
+ "windows 0.62.2",
  "winresource",
  "zeroize",
 ]

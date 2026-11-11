@@ -39,6 +39,23 @@ pub struct AppSettings {
     pub local_terminal: LocalTerminalSettings,
     /// SFTP（工单 20 定好模型，25 只加页面）。
     pub sftp: SftpSettings,
+    /// 应用 → 窗口（工单 26）。
+    pub window: WindowSettings,
+}
+
+/// 应用 → 窗口。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WindowSettings {
+    /// 记住窗口大小和位置：下次启动放回上次的大小、位置和最大化状态（默认开）。
+    /// 窗口的样子总是记在数据目录的 `window.json` 里，这个开关只决定下次启动用不用它。
+    pub remember: bool,
+}
+
+impl Default for WindowSettings {
+    fn default() -> Self {
+        Self { remember: true }
+    }
 }
 
 impl AppSettings {
@@ -128,12 +145,15 @@ pub const DEFAULT_INTERFACE_FONT_SIZE: f32 = if cfg!(windows) { 14.0 } else { 16
 pub struct InterfaceSettings {
     /// 界面的基准字号（像素）。终端有自己的字号。
     pub font_size: f32,
+    /// Mica 背景（默认关，工单 26）。只在 Windows 11 22H2 及以上生效，别处开着也不起作用。
+    pub mica: bool,
 }
 
 impl Default for InterfaceSettings {
     fn default() -> Self {
         Self {
             font_size: DEFAULT_INTERFACE_FONT_SIZE,
+            mica: false,
         }
     }
 }
@@ -301,6 +321,24 @@ mod tests {
         assert_eq!(settings.sftp.parallel, 3);
         assert_eq!(settings.sftp.local_directory, None);
         assert!(!settings.sftp.show_hidden.local && !settings.sftp.show_hidden.remote);
+        assert!(!settings.interface.mica);
+        assert!(settings.window.remember);
+    }
+
+    #[test]
+    fn mica_and_remembering_the_window_keep_their_keys() {
+        let json = r#"{ "interface": { "mica": true }, "window": { "remember": false } }"#;
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(settings.interface.mica);
+        // 只写了 Mica：界面字号还是默认值。
+        assert_eq!(
+            settings.interface.font_size,
+            super::DEFAULT_INTERFACE_FONT_SIZE
+        );
+        assert!(!settings.window.remember);
+        let again: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(again, settings);
     }
 
     #[test]

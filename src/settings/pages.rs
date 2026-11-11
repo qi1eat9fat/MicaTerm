@@ -35,7 +35,7 @@ pub(super) fn write(
 /// 应用外观的三个选项，按分段按钮从左到右。
 const APPEARANCES: [Appearance; 3] = [Appearance::System, Appearance::Light, Appearance::Dark];
 
-/// 外观：常规（应用外观、界面字号）、终端主题。
+/// 外观：常规（应用外观、界面字号、Mica 背景）、终端主题。
 pub(super) fn appearance(
     dialog: &SettingsDialog,
     tokens: &Tokens,
@@ -87,6 +87,18 @@ pub(super) fn appearance(
         )
     };
 
+    // Mica 背景（工单 26）：系统不支持时开关照样能开，只是不起作用。
+    let mica = {
+        let store = store.clone();
+        Switch::new("mica")
+            .checked(settings.interface.mica)
+            .accessibility_label(t!("settings.appearance.mica"))
+            .on_click(move |checked: &bool, _, cx| {
+                let checked = *checked;
+                write(&store, cx, |settings| settings.interface.mica = checked)
+            })
+    };
+
     vec![
         section_title(t!("settings.appearance.general"), None, tokens).into_any_element(),
         group(
@@ -104,6 +116,12 @@ pub(super) fn appearance(
                         size = number_text(DEFAULT_INTERFACE_FONT_SIZE)
                     )),
                     font_size,
+                    tokens,
+                ),
+                row(
+                    t!("settings.appearance.mica"),
+                    Some(t!("settings.appearance.mica_description")),
+                    mica,
                     tokens,
                 ),
             ],

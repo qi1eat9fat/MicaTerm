@@ -96,6 +96,10 @@ pub fn known_hosts_path() -> io::Result<PathBuf> {
     Ok(dir.join(KNOWN_HOSTS_FILE))
 }
 
+/// 主窗口上次的大小、位置和最大化状态（设置 › 应用 › 窗口，工单 26）。
+/// 和设置分开放：窗口一动它就变。
+pub const WINDOW_STATE_FILE: &str = "window.json";
+
 /// 上传的续传记录放在哪（工单 22）。
 pub fn upload_resume_dir() -> io::Result<PathBuf> {
     Ok(data_dir()?.join("upload-resume"))
