@@ -68,9 +68,9 @@ impl Workspace {
             RemoteEvent::ProbeFailed {
                 host,
                 terminals,
-                lost,
+                failure,
             } => {
-                self.on_probe_failed(host, terminals, lost, window, cx);
+                self.on_probe_failed(host, terminals, failure, window, cx);
                 return;
             }
             RemoteEvent::Attached {

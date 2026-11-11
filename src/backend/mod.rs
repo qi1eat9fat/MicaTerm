@@ -37,8 +37,8 @@ pub use describe::{
     describe_error, describe_login_error, host_key_changed_lead, latency_label, unknown_host_lead,
 };
 pub use remote::{
-    ConnectionId, PromptId, RemoteEvent, RemotePrompt, RemoteTarget, RemoteTerminalId,
-    RemoteTerminals, SharedRemoteTerminals, SshRemoteTerminals,
+    ConnectionId, ProbeFailure, PromptId, RemoteEvent, RemotePrompt, RemoteTarget,
+    RemoteTerminalId, RemoteTerminals, SharedRemoteTerminals, SshRemoteTerminals,
 };
 pub use tester::{
     ConnectionTester, LoginTest, SharedConnectionTester, SshConnectionTester, TrustAsker,

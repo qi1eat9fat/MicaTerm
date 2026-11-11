@@ -8,7 +8,8 @@ use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer};
 use qishell_ssh::{AgentLocation, HostLogin, LoginMethod, PROBE_COMMAND, SecretRef, SshConnector};
 
 use super::tests::{Answerer, Terminal};
-use super::{RemoteEvent, RemoteTarget, RemoteTerminalId, SshRemoteTerminals};
+use super::{ProbeFailure, RemoteEvent, RemoteTarget, RemoteTerminalId, SshRemoteTerminals};
+use qishell_hosts::HostId;
 
 /// 测试服务器、它的运行时和临时的 `known_hosts`。
 struct Fixture {
@@ -86,13 +87,13 @@ fn wait_for_latency(answers: &Answerer, terminal: u64) {
     });
 }
 
-fn probe_failed(answers: &Answerer) -> (u64, Vec<RemoteTerminalId>, bool) {
+fn probe_failed(answers: &Answerer) -> (HostId, Vec<RemoteTerminalId>, ProbeFailure) {
     answers.wait_for(|event| match event {
         RemoteEvent::ProbeFailed {
             host,
             terminals,
-            lost,
-        } => Some((*host, terminals.clone(), *lost)),
+            failure,
+        } => Some((*host, terminals.clone(), *failure)),
         _ => None,
     })
 }
@@ -160,10 +161,10 @@ fn a_host_that_refuses_the_probe_channel_is_marked_and_keeps_its_shell() {
     let terminal = Terminal::open(&remote, 1, &fixture.target(true));
     terminal.expect_started();
 
-    let (host, terminals, lost) = probe_failed(&answers);
-    assert_eq!(host, 7);
+    let (host, terminals, failure) = probe_failed(&answers);
+    assert_eq!(host, HostId(7));
     assert_eq!(terminals, [RemoteTerminalId(1)]);
-    assert!(!lost, "通道被拒，连接还在");
+    assert_eq!(failure, ProbeFailure::Refused, "通道被拒，连接还在");
     terminal.echo("still here");
     wait_for_latency(&answers, 1);
     terminal.close();
@@ -179,10 +180,13 @@ fn a_bastion_that_drops_the_connection_on_the_probe_reports_it_lost_and_reconnec
 
     let terminal = Terminal::open(&remote, 1, &fixture.target(true));
     terminal.expect_started();
-    let (host, terminals, lost) = probe_failed(&answers);
     assert_eq!(
-        (host, terminals, lost),
-        (7, vec![RemoteTerminalId(1)], true)
+        probe_failed(&answers),
+        (
+            HostId(7),
+            vec![RemoteTerminalId(1)],
+            ProbeFailure::ConnectionLost
+        )
     );
     let error = terminal.finish().expect_err("探测把 shell 一起弄断了");
     assert!(error.to_string().contains("断开"), "{error}");

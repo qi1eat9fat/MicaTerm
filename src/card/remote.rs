@@ -168,9 +168,9 @@ impl RemoteCard {
         self.vault_hold = None;
     }
 
-    /// 这台主机不再探测系统（工单 34）：探测把连接弄断了。主机删了时重连按这里记着的来。
+    /// 这台主机不再探测系统（工单 34）：探测把连接弄断了。主机删了时重连按这里记着的登录来。
+    /// 探不探测只看登录（`RemoteTarget::probe_os`）：主机快照里的那份是打开时的样子，不用它。
     pub(super) fn stop_probing(&mut self) {
-        self.host.probe_os = false;
         self.target.probe_os = false;
     }
 

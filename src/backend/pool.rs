@@ -14,6 +14,7 @@
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
+use qishell_hosts::HostId;
 use qishell_ssh::{
     ConnectionPrompt, ConnectionPromptReply, HostOsProbe, LATENCY_INTERVAL, Latency, ProbeOutcome,
     ProbedHost, SshConnectionConfig, SshConnector, SshHandle, SshPrompts, open_probe, round_trip,
@@ -24,7 +25,7 @@ use tokio::sync::watch;
 
 use super::describe::describe_login_error;
 use super::remote::{
-    ConnectionId, PromptId, RemoteEvent, RemotePrompt, RemoteTarget, RemoteTerminalId,
+    ConnectionId, ProbeFailure, PromptId, RemoteEvent, RemotePrompt, RemoteTarget, RemoteTerminalId,
 };
 use crate::i18n::t;
 
@@ -403,21 +404,26 @@ impl ConnectionPool {
             return true;
         }
         let lost = closes_soon(handle).await;
-        if lost || matches!(outcome, Probe::Refused) {
+        let failure = if lost {
+            Some(ProbeFailure::ConnectionLost)
+        } else {
+            matches!(outcome, Probe::Refused).then_some(ProbeFailure::Refused)
+        };
+        if let Some(failure) = failure {
             let failed = {
                 let state = self.lock();
                 state
                     .entries
                     .iter()
                     .find(|entry| entry.id == id)
-                    .map(|entry| (entry.target.host, entry.terminals.clone()))
+                    .map(|entry| (HostId(entry.target.host), entry.terminals.clone()))
             };
             // 连接已经不在表里（终端都关了）：不是探测弄断的，什么都不说。
             if let Some((host, terminals)) = failed {
                 let _ = self.events.try_send(RemoteEvent::ProbeFailed {
                     host,
                     terminals,
-                    lost,
+                    failure,
                 });
             }
         }

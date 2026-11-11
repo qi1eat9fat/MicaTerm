@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use qishell::app::{ConnectHost, ReconnectCard};
-use qishell::backend::RemoteTerminalId;
+use qishell::backend::{ProbeFailure, RemoteTerminalId};
 use qishell_hosts::HostId;
 use qishell_terminal::TerminalLifecycle;
 
@@ -299,9 +299,9 @@ fn reconnecting_after_a_failed_probe_waits_for_a_locked_vault(cx: &mut TestAppCo
     assert_eq!(vault.status(), VaultStatus::Locked);
 
     remote.emit(qishell::backend::RemoteEvent::ProbeFailed {
-        host: 1,
+        host: HostId(1),
         terminals: vec![RemoteTerminalId(1)],
-        lost: true,
+        failure: ProbeFailure::ConnectionLost,
     });
     assert!(wait_until(cx, handle, |cx| status(cx, handle, 1)
         .starts_with("等待解锁保险库")));
