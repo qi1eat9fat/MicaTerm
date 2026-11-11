@@ -87,11 +87,12 @@ struct Entry {
 }
 
 impl Entry {
-    /// 还能不能给新来的终端用：没连失败、没断。
+    /// 能不能给连 `target` 的新终端用：登录一样（探不探测不算），没连失败、没断。
     fn reusable_for(&self, target: &RemoteTarget) -> bool {
         self.target.shares_connection_with(target) && self.reusable()
     }
 
+    /// 还能不能给新来的终端用：没连失败、没断。
     fn reusable(&self) -> bool {
         if self.exclusive {
             return false;
