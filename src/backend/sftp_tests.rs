@@ -25,7 +25,9 @@ use super::sftp::{
 };
 use super::tests::Secrets;
 
-const WAIT: Duration = Duration::from_secs(15);
+/// 只防挂死，不是引擎该多快。卡住的连接（没有 FIN 也没有 RST）要等一个 SFTP 请求超时（10 秒）
+/// 引擎才说断了；满载时再慢一些也不算错。
+const WAIT: Duration = Duration::from_secs(30);
 
 /// 一个登录好的 SFTP 工作线程。
 struct Session {
@@ -243,6 +245,31 @@ impl Session {
     /// 连接断了：引擎说 `Disconnected`。
     fn wait_disconnected(&self) {
         while !matches!(self.next(), SftpEvent::Disconnected(_)) {}
+    }
+
+    /// 传着的这一批断了线：引擎说 `Disconnected`（这时调用 `dropped`），自己重连，传完。
+    fn reconnect_and_finish(&self, mut dropped: impl FnMut()) {
+        let (mut was_dropped, mut reconnecting) = (false, false);
+        loop {
+            match self.next() {
+                SftpEvent::Disconnected(_) => {
+                    if !was_dropped {
+                        dropped();
+                    }
+                    was_dropped = true;
+                }
+                SftpEvent::Prompt(prompt) => self.answer_prompt(&prompt),
+                SftpEvent::Question(question) => panic!("unexpected question: {question:?}"),
+                SftpEvent::Progress(progress) => match progress.phase() {
+                    TransferPhase::Reconnecting => reconnecting = true,
+                    TransferPhase::Stopped => panic!("gave up: {:?}", progress.details()),
+                    TransferPhase::Completed => break,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        assert!(was_dropped && reconnecting, "the connection never dropped");
     }
 }
 
@@ -570,22 +597,31 @@ fn a_dropped_connection_reconnects_on_its_own_and_the_upload_finishes() {
     session.upload(&source);
     session.wait_some_bytes();
     relay.kick();
-    let (mut dropped, mut reconnecting) = (false, false);
-    loop {
-        match session.next() {
-            SftpEvent::Disconnected(_) => dropped = true,
-            SftpEvent::Prompt(prompt) => session.answer_prompt(&prompt),
-            SftpEvent::Question(question) => panic!("unexpected question: {question:?}"),
-            SftpEvent::Progress(progress) => match progress.phase() {
-                TransferPhase::Reconnecting => reconnecting = true,
-                TransferPhase::Stopped => panic!("gave up: {:?}", progress.details()),
-                TransferPhase::Completed => break,
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-    assert!(dropped && reconnecting, "the connection never dropped");
+    session.reconnect_and_finish(|| {});
+    assert_same(&directory.path().join("up.bin"), &bytes);
+}
+
+/// 传的时候网卡住了（没有 FIN 也没有 RST）：一个 SFTP 请求超时后引擎说断了，自己重连，接着传完。
+/// 有的机器上往卡住的连接写，非阻塞的 `send` 也会挡住线程；引擎不能跟着停在那里一声不吭。
+#[test]
+fn a_connection_stuck_during_an_upload_is_given_up_and_the_upload_finishes() {
+    let Some((directory, state)) = directories() else {
+        return;
+    };
+    let source = state.path().join("up.bin");
+    let bytes = large_file(&source);
+    let served = serve(directory.path());
+    let relay = Relay::start(served.server.port);
+    let session = Session::attach(served.clone(), relay.port, state.path());
+
+    session.upload(&source);
+    session.wait_some_bytes();
+    relay.pause(true);
+    // 引擎说断了以后网才好：卡住的那条掐掉，新连接照常转发。
+    session.reconnect_and_finish(|| {
+        relay.kick();
+        relay.pause(false);
+    });
     assert_same(&directory.path().join("up.bin"), &bytes);
 }
 
