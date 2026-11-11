@@ -20,6 +20,7 @@ mod secrets;
 use std::collections::HashMap;
 
 use gpui_kit::*;
+use qishell_terminal::SharedTerminalTransportFactory;
 
 pub(in crate::workspace) use prompts::PromptQueue;
 
@@ -163,10 +164,7 @@ impl Workspace {
             self.wait_for_vault(id, window, cx);
             return card;
         }
-        let factory = self
-            .services
-            .remote_terminals
-            .factory_for(terminal_of(id), &target);
+        let factory = self.remote_factory(id, &target);
         let launch = RemoteLaunch {
             host,
             target,
@@ -296,14 +294,31 @@ impl Workspace {
                 entity.update(cx, |card, cx| card.wait_for_vault(host, target, cx));
                 self.wait_for_vault(card, window, cx);
             }
-            _ => {
-                let factory = self
-                    .services
-                    .remote_terminals
-                    .factory_for(terminal_of(card), &target);
-                entity.update(cx, |card, cx| card.reconnect(host, target, factory, cx));
-            }
+            _ => self.reconnect_in_place(&entity, host, target, cx),
         }
+    }
+
+    /// 卡片 `card` 连 `target` 的传输：在连接表里按卡片 id 开 shell 通道。
+    fn remote_factory(
+        &self,
+        card: CardId,
+        target: &RemoteTarget,
+    ) -> SharedTerminalTransportFactory {
+        self.services
+            .remote_terminals
+            .factory_for(terminal_of(card), target)
+    }
+
+    /// 远程卡片 `card` 现在就原地重连：按 `host` 和 `target` 建新的传输换上。
+    pub(in crate::workspace) fn reconnect_in_place(
+        &self,
+        card: &Entity<TerminalCard>,
+        host: Host,
+        target: RemoteTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let factory = self.remote_factory(card.read(cx).id(), &target);
+        card.update(cx, |card, cx| card.reconnect(host, target, factory, cx));
     }
 }
 

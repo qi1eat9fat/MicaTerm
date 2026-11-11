@@ -126,11 +126,7 @@ impl Workspace {
                 (host.clone(), target.clone())
             };
             if unlocked {
-                let factory = self
-                    .services
-                    .remote_terminals
-                    .factory_for(super::terminal_of(card), &target);
-                entity.update(cx, |card, cx| card.reconnect(host, target, factory, cx));
+                self.reconnect_in_place(&entity, host, target, cx);
             } else {
                 entity.update(cx, |card, cx| card.vault_declined(cx));
             }
