@@ -449,6 +449,48 @@ fn a_narrow_card_truncates_its_status_bar(cx: &mut TestAppContext) {
     });
 }
 
+/// 工单 31：shell 用 OSC 9;9 报告的目录比本机读到的（PEB）优先，哪怕本机后来又读到了别的：
+/// Windows PowerShell 5.1 `cd` 以后进程的当前目录不变，只有报告是对的。路径带空格和中文。
+#[gpui_kit::test]
+fn splitting_uses_the_folder_the_shell_reports_before_the_one_read_from_it(
+    cx: &mut TestAppContext,
+) {
+    let read: &'static str = Box::leak(
+        std::env::temp_dir()
+            .join("qishell-split-read")
+            .display()
+            .to_string()
+            .into_boxed_str(),
+    );
+    let reported: &'static str = Box::leak(
+        std::env::temp_dir()
+            .join("qishell split 中文")
+            .display()
+            .to_string()
+            .into_boxed_str(),
+    );
+    let (handle, workspace, factory, provider) = open_tab(cx, FakeTerminalFactory::in_folder(read));
+    wait_until_folder(cx, &workspace, CardId(1), read);
+
+    factory.print(1, &format!("\x1b]9;9;\"{reported}\"\x1b\\"));
+    wait_until_folder(cx, &workspace, CardId(1), reported);
+    // 本机读到的还是启动时的目录（PowerShell 5.1 就是这样），报告的照样算数。
+    factory.send(
+        1,
+        qishell_terminal::TerminalTransportEvent::WorkingDirectory(read.into()),
+    );
+    cx.run_until_parked();
+
+    dispatch(cx, handle, SplitRight);
+
+    let launches = provider.launches();
+    assert_eq!(launches.len(), 2);
+    assert_eq!(
+        launches[1].directory.as_deref(),
+        Some(std::path::Path::new(reported))
+    );
+}
+
 /// 等卡片知道 shell 在 `folder` 里，最多两秒（传输跑在自己的线程上）。
 fn wait_until_folder(
     cx: &mut TestAppContext,
