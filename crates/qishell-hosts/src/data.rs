@@ -99,6 +99,8 @@ pub enum Change {
     SaveSnippet,
     DeleteSnippet,
     Batch,
+    /// 登录后探不探测系统（工单 34）。
+    HostProbe,
 }
 
 /// What could not be kept. The change stands in memory all the same.
@@ -706,6 +708,21 @@ impl HostData {
         true
     }
 
+    /// 记下登录后探不探测系统（工单 34）：探测把连接弄断时连接这边关掉，不经主机表单。
+    /// 返回变没变（没有这台主机、本来就是这样时什么都不做）。
+    pub fn set_host_probe(&mut self, id: HostId, probe_os: bool) -> bool {
+        let Some(host) = self.host_mut(id) else {
+            return false;
+        };
+        if host.probe_os == probe_os {
+            return false;
+        }
+        host.probe_os = probe_os;
+        self.persist(Change::HostProbe, |db| db.set_host_probe(id, probe_os));
+        self.changed();
+        true
+    }
+
     /// Where secrets are read from. The host form uses this to pre-fill
     /// its field; the connection reads its secrets through it.
     pub fn secrets(&self) -> SharedSecretStore {
@@ -1189,6 +1206,38 @@ mod tests {
 
         let copy = store.duplicate_unnotified(id, "copy".into()).unwrap();
         assert_eq!(store.host(copy).unwrap().os, Some(HostOs::Alpine));
+    }
+
+    #[test]
+    fn turning_the_probe_off_is_saved_and_an_edit_can_turn_it_back_on() {
+        let mut store = HostData::load(HostDatabase::in_memory().unwrap()).unwrap();
+        let id = store.insert(draft("bastion"));
+        assert!(store.host(id).unwrap().probe_os);
+        store.take_events();
+
+        assert!(store.set_host_probe(id, false));
+        assert!(!store.host(id).unwrap().probe_os);
+        assert!(
+            store
+                .take_events()
+                .iter()
+                .any(|event| matches!(event, HostEvent::Changed))
+        );
+        let reloaded = store.database.as_ref().unwrap().load().unwrap();
+        assert!(!reloaded.hosts[0].probe_os, "写进了数据库");
+        // 已经关了：什么都不变。
+        assert!(!store.set_host_probe(id, false));
+        assert!(store.take_events().is_empty());
+
+        // 主机对话框里改别的不动它；对话框里重新打开就开了。
+        let mut edit = store.host(id).unwrap().draft();
+        edit.name = "bastion-01".into();
+        store.update(id, edit.clone());
+        assert!(!store.host(id).unwrap().probe_os);
+        store.update(id, edit.with_probe_os(true));
+        assert!(store.host(id).unwrap().probe_os);
+
+        assert!(!store.set_host_probe(HostId(99), false), "没有这台主机");
     }
 
     #[test]

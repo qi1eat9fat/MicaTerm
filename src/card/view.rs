@@ -612,6 +612,13 @@ impl TerminalCard {
         self.remote_part().and_then(RemoteCard::vault_hold)
     }
 
+    /// 这台主机不再探测系统（工单 34）：卡片记着的主机快照和登录也不探测，重连时用得上。
+    pub fn stop_probing(&mut self) {
+        if let CardKind::Remote(remote) = &mut self.kind {
+            remote.stop_probing();
+        }
+    }
+
     /// 断开连接：关掉这张卡片的 shell 通道，卡片留着，可以按 Enter 重连。
     pub fn disconnect(&mut self, cx: &mut Context<Self>) {
         let CardKind::Remote(remote) = &mut self.kind else {

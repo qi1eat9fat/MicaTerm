@@ -13,6 +13,7 @@
 //! - `secrets`：连接前取秘密的钩子（工单 13、33）：要用保险库里的秘密而保险库锁着时，卡片照常建出来、
 //!   放进标签，先「等待解锁保险库」，解锁后原地接着连（`wait_for_vault` → `vault_answered`）。
 
+mod probe;
 mod prompts;
 mod secrets;
 
@@ -63,6 +64,14 @@ impl Workspace {
                 self.withdraw_prompts(connection, window, cx);
                 return;
             }
+            RemoteEvent::ProbeFailed {
+                host,
+                terminals,
+                lost,
+            } => {
+                self.on_probe_failed(host, terminals, lost, window, cx);
+                return;
+            }
             RemoteEvent::Attached {
                 terminal,
                 connection,
@@ -105,10 +114,8 @@ impl Workspace {
 
     /// 主机 `host` 怎么连：主机数据在 UI 线程上解析好的登录（凭据、跳板、代理）。
     pub(in crate::workspace) fn remote_target(&self, host: &Host, cx: &App) -> RemoteTarget {
-        RemoteTarget {
-            host: host.id.0,
-            login: self.hosts.read(cx).login_of(host),
-        }
+        RemoteTarget::new(host.id.0, self.hosts.read(cx).login_of(host))
+            .with_probe_os(host.probe_os)
     }
 
     /// 按主机新建一张远程卡片（还没放进任何标签）：分配 id，在这台主机的连接上开一个 shell 通道

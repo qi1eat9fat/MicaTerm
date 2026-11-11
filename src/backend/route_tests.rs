@@ -172,7 +172,7 @@ fn hop(id: u64, name: &str, port: u16) -> JumpLogin {
 }
 
 fn target(login: HostLogin) -> RemoteTarget {
-    RemoteTarget { host: 1, login }
+    RemoteTarget::new(1, login)
 }
 
 fn saved(entries: &[(SecretRef, &str)]) -> Arc<Secrets> {

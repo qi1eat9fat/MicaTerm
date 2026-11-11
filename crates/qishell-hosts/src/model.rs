@@ -326,6 +326,9 @@ pub struct Host {
     /// show the right mark before anyone connects. `None` until a probe
     /// succeeds, and the host list falls back to the name's first letter.
     pub os: Option<HostOs>,
+    /// 登录后另开 exec 通道探测系统（工单 34）。有的堡垒机再开一个通道就断掉整条连接：
+    /// 用户在主机对话框里关掉，或者探测失败后连接这边自动关掉（`HostData::set_host_probe`）。
+    pub probe_os: bool,
 }
 
 impl Host {
@@ -342,6 +345,7 @@ impl Host {
             notes: draft.notes,
             sort_order: 0,
             os: None,
+            probe_os: draft.probe_os,
         }
     }
 
@@ -374,6 +378,7 @@ impl Host {
             credential: self.credential,
             route: self.route.clone(),
             notes: self.notes.clone(),
+            probe_os: self.probe_os,
         }
     }
 }
@@ -408,6 +413,8 @@ pub struct HostDraft {
     pub credential: Option<CredentialId>,
     pub route: Route,
     pub notes: SharedString,
+    /// 见 [`Host::probe_os`]，默认开。
+    pub probe_os: bool,
 }
 
 impl HostDraft {
@@ -427,6 +434,7 @@ impl HostDraft {
             credential: None,
             route: Route::Direct,
             notes: SharedString::default(),
+            probe_os: true,
         }
     }
 
@@ -445,6 +453,12 @@ impl HostDraft {
 
     pub fn with_notes(mut self, notes: impl Into<SharedString>) -> Self {
         self.notes = notes.into();
+        self
+    }
+
+    /// 登录后探不探测系统（见 [`Host::probe_os`]）。
+    pub fn with_probe_os(mut self, probe_os: bool) -> Self {
+        self.probe_os = probe_os;
         self
     }
 

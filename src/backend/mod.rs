@@ -16,6 +16,8 @@
 mod credential_tests;
 mod describe;
 mod pool;
+#[cfg(test)]
+mod probe_tests;
 mod remote;
 #[cfg(test)]
 mod route_tests;

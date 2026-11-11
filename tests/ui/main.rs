@@ -30,6 +30,7 @@
 //! - `editor`：编辑器标签（23）
 //! - `preview`：预览（24）
 //! - `vault_waiting`：等待解锁保险库（33）
+//! - `probe`：系统探测可关、失败后自动停用（34）
 
 mod support;
 
@@ -39,6 +40,7 @@ mod editor;
 mod host_dialog;
 mod hosts;
 mod preview;
+mod probe;
 mod programs;
 mod quick_connect;
 mod remote_activity;

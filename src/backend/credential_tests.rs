@@ -59,10 +59,7 @@ fn host_at(port: u16, auth: AuthKind) -> HostDraft {
 }
 
 fn target(data: &HostData) -> RemoteTarget {
-    RemoteTarget {
-        host: 1,
-        login: data.login(HostId(1)).unwrap(),
-    }
+    RemoteTarget::new(1, data.login(HostId(1)).unwrap())
 }
 
 /// 连上以后只问过主机密钥，没问过密码或口令。

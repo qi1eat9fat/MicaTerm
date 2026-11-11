@@ -288,6 +288,33 @@ fn a_waiting_card_closed_before_the_unlock_does_not_connect(cx: &mut TestAppCont
     assert_eq!(vault.status(), VaultStatus::Unlocked { remembered: true });
 }
 
+/// 探测弄断了连接、自动停用探测原地重连（工单 34）时保险库锁着：卡片照样先等解锁，不绕开。
+#[gpui_kit::test]
+fn reconnecting_after_a_failed_probe_waits_for_a_locked_vault(cx: &mut TestAppContext) {
+    let vault = TestVault::unlocked().with_secret(&web01_password(), "hunter2");
+    let (handle, workspace, remote) = open_with_vault(cx, &vault);
+    dispatch(cx, handle, ConnectHost(HostId(1)));
+    wait_running(cx, handle, &workspace, 1);
+    click(cx, handle, "lock-vault");
+    assert_eq!(vault.status(), VaultStatus::Locked);
+
+    remote.emit(qishell::backend::RemoteEvent::ProbeFailed {
+        host: 1,
+        terminals: vec![RemoteTerminalId(1)],
+        lost: true,
+    });
+    assert!(wait_until(cx, handle, |cx| status(cx, handle, 1)
+        .starts_with("等待解锁保险库")));
+    assert!(visible(cx, handle, "vault-unlock"));
+    assert_eq!(connections(&remote), [(1, 1)]);
+
+    unlock(cx, handle);
+    // 同一张卡片接着连，这次不探测。
+    assert_eq!(connections(&remote), [(1, 1), (1, 1)]);
+    assert!(!remote.targets()[1].1.probe_os);
+    wait_running(cx, handle, &workspace, 1);
+}
+
 /// 复用已经连着的连接用不到秘密：保险库锁了，分屏、再双击那台主机都不等、不弹（M2 review S2）。
 #[gpui_kit::test]
 fn reusing_a_live_connection_never_waits_for_the_vault(cx: &mut TestAppContext) {
