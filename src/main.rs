@@ -16,7 +16,7 @@ fn main() {
 
         // 窗口开在上次的地方（设置 › 应用 › 记住窗口大小和位置）。
         let saved = qishell::app::data_dir().ok().and_then(|dir| {
-            qishell::workspace::WindowState::load(&dir.join(qishell::app::WINDOW_STATE_FILE))
+            qishell::workspace::WindowState::load(&qishell::app::window_state_path(&dir))
         });
         let options =
             qishell::workspace::window_options(saved.as_ref(), settings.settings().window, cx);

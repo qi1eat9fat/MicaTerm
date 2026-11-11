@@ -299,7 +299,7 @@ impl Workspace {
         let window_state_path = services
             .data_dir
             .as_ref()
-            .map(|dir| dir.join(crate::app::WINDOW_STATE_FILE));
+            .map(|dir| crate::app::window_state_path(dir));
         let mut this = Self {
             focus_handle,
             start_card_focus,

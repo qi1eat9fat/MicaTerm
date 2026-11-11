@@ -11,11 +11,11 @@ pub mod win32;
 
 pub use actions::*;
 pub use assets::{AppAssets, CatalogIcon};
-pub use paths::WINDOW_STATE_FILE;
 pub use paths::{DATA_DIR_ENV, DATA_DIR_NAME, SETTINGS_FILE, data_dir, data_dir_of, settings_path};
 pub use paths::{DATABASE_FILE, database_path};
 pub use paths::{KNOWN_HOSTS_FILE, known_hosts_path};
 pub use paths::{VAULT_FILE, vault_path};
+pub use paths::{WINDOW_STATE_FILE, window_state_path};
 pub use paths::{download_resume_dir, upload_resume_dir};
 pub use quit::{quit_held_back, set_quit_guard};
 pub use shortcuts::EDITOR_CONTEXT;
