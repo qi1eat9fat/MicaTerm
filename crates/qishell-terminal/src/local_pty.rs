@@ -261,6 +261,10 @@ fn shell_command(shell: &LocalShell) -> Result<CommandBuilder> {
     command.env("TERM", TERM_NAME);
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "QiShell");
+    // Windows 上的 PowerShell、cmd 在提示符前报告当前目录（工单 31）：
+    // PowerShell 的 `cd` 不改进程的当前目录，下面读 PEB 的办法拿不到。
+    #[cfg(windows)]
+    crate::shell_integration::report_directory(&mut command);
     Ok(command)
 }
 
@@ -944,6 +948,276 @@ mod windows_tests {
         assert!(exited);
         assert!(programs.contains(&Some("ping".into())), "{programs:?}");
         assert_eq!(programs.last(), Some(&None), "{programs:?}");
+    }
+
+    /// 经 ConPTY 跑着的一个交互式 shell（工单 31）：收集输出，像终端那样回答光标位置，
+    /// 用 `NoticeScanner` 读出 shell 报告过的目录。
+    struct Session {
+        commands: mpsc::Sender<TerminalTransportCommand>,
+        events: async_channel::Receiver<TerminalTransportEvent>,
+        worker: Option<thread::JoinHandle<Result<()>>>,
+        output: Vec<u8>,
+        scanner: crate::notices::NoticeScanner,
+        /// shell 报告过的目录，按先后。
+        reported: Vec<String>,
+    }
+
+    impl Session {
+        fn start(launch: LocalLaunch) -> Self {
+            let transport = LocalPtyTransportProvider.factory_for(&launch).create();
+            let (commands, command_receiver) = mpsc::channel();
+            let (events, event_receiver) = async_channel::unbounded();
+            // 宽一些：提示符里的临时目录很长，不想让 ConPTY 折行。
+            let size = TerminalSize::new(200, 40, 8, 16);
+            let worker = thread::spawn(move || transport.run(size, command_receiver, events));
+            Self {
+                commands,
+                events: event_receiver,
+                worker: Some(worker),
+                output: Vec::new(),
+                scanner: crate::notices::NoticeScanner::default(),
+                reported: Vec::new(),
+            }
+        }
+
+        /// 收输出，直到 `done` 成立；最多 `seconds` 秒。成立了才是 `true`。
+        fn wait_for(&mut self, seconds: u64, done: impl Fn(&Self) -> bool) -> bool {
+            let deadline = Instant::now() + Duration::from_secs(seconds);
+            while Instant::now() < deadline {
+                if done(self) {
+                    return true;
+                }
+                match self.events.try_recv() {
+                    Ok(TerminalTransportEvent::Output(bytes)) => {
+                        if bytes.windows(4).any(|window| window == b"\x1b[6n") {
+                            self.write("\x1b[1;1R");
+                        }
+                        self.scanner.scan(&bytes);
+                        if let Some(directory) = self.scanner.take_directory() {
+                            self.reported.push(directory.path);
+                        }
+                        self.output.extend(bytes);
+                    }
+                    Ok(TerminalTransportEvent::Exited { .. })
+                    | Err(async_channel::TryRecvError::Closed) => return done(self),
+                    Ok(_) => {}
+                    Err(async_channel::TryRecvError::Empty) => {
+                        thread::sleep(Duration::from_millis(10))
+                    }
+                }
+            }
+            done(self)
+        }
+
+        fn write(&self, text: &str) {
+            let _ = self
+                .commands
+                .send(TerminalTransportCommand::Write(text.as_bytes().to_vec()));
+        }
+
+        /// 最后报告的目录是不是 `folder`。
+        fn reported_last(&self, folder: &std::path::Path) -> bool {
+            self.reported
+                .last()
+                .is_some_and(|last| comparable(std::path::Path::new(last)) == comparable(folder))
+        }
+
+        /// 输出，去掉控制序列（OSC、CSI 和别的 ESC 开头的）以后的文字。
+        fn text(&self) -> String {
+            let text = String::from_utf8_lossy(&self.output);
+            let sequences = regex::Regex::new(
+                r"\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]",
+            )
+            .unwrap();
+            sequences.replace_all(&text, "").into_owned()
+        }
+    }
+
+    impl Drop for Session {
+        fn drop(&mut self) {
+            let _ = self.commands.send(TerminalTransportCommand::Shutdown);
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+
+    /// 起在 `start` 里的本地终端，跑设置里写的 `command`。
+    fn launch_in(command: &str, start: &std::path::Path) -> LocalLaunch {
+        LocalLaunch {
+            directory: Some(start.to_path_buf()),
+            ..LocalLaunch::new(LocalShell::new(command))
+        }
+    }
+
+    /// 一个名字里有空格和中文的目录（工单 31 的验收：这样的路径也要报对）。
+    fn awkward_folder(parent: &std::path::Path) -> std::path::PathBuf {
+        let folder = parent.join("a b 中文");
+        std::fs::create_dir(&folder).unwrap();
+        folder
+    }
+
+    /// Windows PowerShell 5.1 的 `cd`（`Set-Location`）不改进程的当前目录，PEB 里读不到；
+    /// QiShell 给它的 `prompt` 套一层，每次提示符前报一次 OSC 9;9（工单 31）。
+    #[test]
+    fn windows_powershell_reports_its_folder_after_cd() {
+        let start = tempfile::tempdir().unwrap();
+        let next = awkward_folder(start.path());
+        let mut shell = Session::start(launch_in("powershell.exe -NoProfile", start.path()));
+        assert!(
+            shell.wait_for(30, |shell| shell.reported_last(start.path())),
+            "{:?}\n{}",
+            shell.reported,
+            shell.text()
+        );
+        shell.write(&format!("cd -LiteralPath '{}'\r", next.display()));
+        assert!(
+            shell.wait_for(30, |shell| shell.reported_last(&next)),
+            "{:?}\n{}",
+            shell.reported,
+            shell.text()
+        );
+    }
+
+    /// cmd 用 `PROMPT` 在提示符前报目录；提示符本身照旧是 `路径>`（工单 31）。
+    #[test]
+    fn cmd_reports_its_folder_after_cd_and_keeps_its_prompt() {
+        let start = tempfile::tempdir().unwrap();
+        let next = awkward_folder(start.path());
+        let mut shell = Session::start(launch_in("cmd.exe", start.path()));
+        assert!(
+            shell.wait_for(30, |shell| shell.reported_last(start.path())),
+            "{:?}\n{}",
+            shell.reported,
+            shell.text()
+        );
+        shell.write(&format!("cd /d \"{}\"\r", next.display()));
+        let prompt = format!("{}>", next.display());
+        assert!(
+            shell.wait_for(30, |shell| shell.reported_last(&next)
+                && shell.text().contains(&prompt)),
+            "{:?}\n{}",
+            shell.reported,
+            shell.text()
+        );
+    }
+
+    /// 用户 `$PROFILE` 里的 `prompt`：先写一段带颜色的，再返回带 `$?`、`$LASTEXITCODE` 和目录的。
+    const PROFILE_PROMPT: &str = "function prompt {\r\n\
+        \x20   $ok = $?\r\n\
+        \x20   Write-Host -NoNewline -ForegroundColor Green 'QI'\r\n\
+        \x20   \"[$ok|$LASTEXITCODE] $($executionContext.SessionState.Path.CurrentLocation)> \"\r\n\
+        }\r\n";
+
+    /// 套了一层的 `prompt` 和用户原来的一模一样：同样的命令之后，提示符一字不差，
+    /// `$?`、`$LASTEXITCODE` 都是原样；同时报了目录（工单 31）。
+    ///
+    /// 不碰用户真的 `$PROFILE`：测试在子进程里重跑自己，子进程的 `USERPROFILE` 指向临时目录，
+    /// Windows PowerShell 照常从那里的 `Documents\WindowsPowerShell` 加载 profile。
+    #[test]
+    fn the_users_prompt_looks_the_same_with_the_folder_reported() {
+        const CHILD: &str = "QISHELL_TEST_WITH_A_PROFILE";
+        if std::env::var_os(CHILD).is_some() {
+            let start = std::path::PathBuf::from(std::env::var_os(CHILD).unwrap());
+            let next = start.join("a b 中文");
+            // 套了一层的：设置里写的 PowerShell，只加了执行策略（profile 是脚本）。
+            let (wrapped, reported) = prompts_after_commands(
+                "powershell.exe -NoLogo -ExecutionPolicy Bypass",
+                &start,
+                &next,
+            );
+            // 没套的：自己给了 `-Command`，QiShell 不动它。
+            let (plain, _) = prompts_after_commands(
+                "powershell.exe -NoLogo -ExecutionPolicy Bypass -NoExit -Command Out-Null",
+                &start,
+                &next,
+            );
+            let (start, next) = (start.display(), next.display());
+            assert_eq!(
+                wrapped,
+                [
+                    format!("QI[True|] {start}>"),
+                    format!("QI[True|] {next}>"),
+                    format!("QI[False|] {next}>"),
+                    format!("QI[False|3] {next}>"),
+                    format!("QI[True|3] {next}>"),
+                ]
+            );
+            assert_eq!(wrapped, plain);
+            assert!(
+                reported.iter().any(|folder| folder == &next.to_string()),
+                "{reported:?}"
+            );
+            // 父进程找这一行，确认测试真在子进程里跑了。
+            println!("the prompt looked the same");
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let profile = home.path().join(r"Documents\WindowsPowerShell");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(
+            profile.join("Microsoft.PowerShell_profile.ps1"),
+            PROFILE_PROMPT,
+        )
+        .unwrap();
+        let start = tempfile::tempdir().unwrap();
+        awkward_folder(start.path());
+        let output = {
+            let _forks = crate::testing::no_forks();
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "local_pty::windows_tests::the_users_prompt_looks_the_same_with_the_folder_reported",
+                    "--nocapture",
+                ])
+                .env(CHILD, start.path())
+                .env("USERPROFILE", home.path())
+                .output()
+                .expect("the test runs again")
+        };
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{text}");
+        assert!(text.contains("the prompt looked the same"), "{text}");
+    }
+
+    /// 在 `start` 里起 `command`，依次跑几条命令：每个提示符（去掉末尾的空格），和报告过的目录。
+    fn prompts_after_commands(
+        command: &str,
+        start: &std::path::Path,
+        next: &std::path::Path,
+    ) -> (Vec<String>, Vec<String>) {
+        let pattern = regex::Regex::new(r"QI\[(True|False)\|\d*\] [^>\r\n]*>").unwrap();
+        let prompts = |shell: &Session| {
+            let mut seen: Vec<String> = Vec::new();
+            for found in pattern.find_iter(&shell.text()) {
+                // ConPTY 重画时会再写一遍旧的提示符：只记第一次。
+                if !seen.iter().any(|prompt| prompt == found.as_str()) {
+                    seen.push(found.as_str().to_string());
+                }
+            }
+            seen
+        };
+        let mut shell = Session::start(launch_in(command, start));
+        let lines = [
+            format!("cd -LiteralPath '{}'", next.display()),
+            r"Get-Item -LiteralPath 'C:\no\such' -ErrorAction SilentlyContinue".to_string(),
+            "cmd /c exit 3".to_string(),
+            "'ok' | Out-Null".to_string(),
+        ];
+        for (count, line) in lines.iter().enumerate() {
+            assert!(
+                shell.wait_for(30, |shell| prompts(shell).len() > count),
+                "{}",
+                shell.text()
+            );
+            shell.write(&format!("{line}\r"));
+        }
+        assert!(
+            shell.wait_for(30, |shell| prompts(shell).len() > lines.len()),
+            "{}",
+            shell.text()
+        );
+        (prompts(&shell), shell.reported.clone())
     }
 
     #[test]
