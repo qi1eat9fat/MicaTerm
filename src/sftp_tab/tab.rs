@@ -604,6 +604,7 @@ impl SftpTab {
             C::ClearFinishedTransfers => self.transfers.queue.clear_finished(),
             C::Reconnect => self.reconnect(cx),
             C::DoubleClick { side } => self.open_double_clicked(*side, window, cx),
+            C::ChooseFolder => self.choose_folder(window, cx),
         }
         self.sync_available(cx);
         cx.emit(SftpTabEvent::Changed);
@@ -870,6 +871,7 @@ fn needs_connection(command: &SftpTabCommand) -> bool {
         | C::Operate { side, .. } => side.is_remote(),
         C::Transfer { .. }
         | C::ChooseFiles
+        | C::ChooseFolder
         | C::UploadPaths { .. }
         | C::DownloadPaths { .. }
         | C::Enqueue(_) => true,
@@ -901,6 +903,7 @@ mod tests {
             side: CardSide::Local
         }));
         assert!(needs_connection(&SftpTabCommand::ChooseFiles));
+        assert!(needs_connection(&SftpTabCommand::ChooseFolder));
         // 选择、复制路径、重新连接本身不要。
         assert!(!needs_connection(&SftpTabCommand::SelectAll {
             side: CardSide::Remote
