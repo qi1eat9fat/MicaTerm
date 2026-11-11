@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
@@ -69,6 +69,8 @@ struct Faults {
     bastion: AtomicBool,
     /// 再开一个会话通道就断掉整条连接（工单 34）。
     end_on_another_channel: AtomicBool,
+    /// 收到命令不回答，过这么久整条连接断开（毫秒，0 是照常回答）。
+    stall_exec_then_end: AtomicU64,
 }
 
 /// The public keys [`TEST_USER`] logs in with, as `authorized_keys`.
@@ -161,6 +163,14 @@ impl TestServer {
         self.faults
             .end_on_another_channel
             .store(true, Ordering::SeqCst);
+    }
+
+    /// 从现在起收到命令（exec）不回答，过 `after` 后整条连接断开：探测超时以后连接才断的情形。
+    pub fn stall_exec_then_end(&self, after: Duration) {
+        let millis = u64::try_from(after.as_millis()).unwrap_or(u64::MAX).max(1);
+        self.faults
+            .stall_exec_then_end
+            .store(millis, Ordering::SeqCst);
     }
 
     /// 连进来过几条连接。
@@ -408,6 +418,21 @@ impl server::Handler for Handler {
     ) -> anyhow::Result<()> {
         let command = String::from_utf8_lossy(command).into_owned();
         lock(&self.seen).commands.push(command.clone());
+        let stall = self.faults.stall_exec_then_end.load(Ordering::SeqCst);
+        if stall > 0 {
+            let handle = session.handle();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(stall)).await;
+                let _ = handle
+                    .disconnect(
+                        russh::Disconnect::ByApplication,
+                        "the server gives up".into(),
+                        String::new(),
+                    )
+                    .await;
+            });
+            return Ok(());
+        }
         let output = lock(&self.replies)
             .get(&command)
             .cloned()

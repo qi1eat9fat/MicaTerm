@@ -7,7 +7,7 @@ use std::time::Duration;
 use gpui_kit::{ScrollDelta, point};
 
 use qishell::app::{ConnectHost, EditHost};
-use qishell::backend::{RemoteEvent, RemoteTerminalId};
+use qishell::backend::{ProbeFailure, RemoteEvent, RemoteTerminalId};
 use qishell_terminal::TerminalLifecycle;
 
 use crate::support::*;
@@ -151,9 +151,9 @@ fn a_probe_that_drops_the_connection_turns_the_probe_off_and_reconnects_in_place
     assert_eq!(notifications(cx, handle), 0);
 
     remote.emit(RemoteEvent::ProbeFailed {
-        host: 1,
+        host: HostId(1),
         terminals: vec![RemoteTerminalId(1)],
-        lost: true,
+        failure: ProbeFailure::ConnectionLost,
     });
 
     assert!(wait_until(cx, handle, |_| probes(&remote).len() == 2));
@@ -180,9 +180,9 @@ fn a_refused_probe_channel_turns_the_probe_off_without_reconnecting(cx: &mut Tes
     connect(cx, handle, &workspace, 1, 1);
 
     remote.emit(RemoteEvent::ProbeFailed {
-        host: 1,
+        host: HostId(1),
         terminals: vec![RemoteTerminalId(1)],
-        lost: false,
+        failure: ProbeFailure::Refused,
     });
 
     assert!(wait_until(cx, handle, |cx| !saved_host(cx, &workspace, 1)
@@ -195,9 +195,9 @@ fn a_refused_probe_channel_turns_the_probe_off_without_reconnecting(cx: &mut Tes
 
     // 同一台主机的另一条连接也失败了：已经关了，不再提示。
     remote.emit(RemoteEvent::ProbeFailed {
-        host: 1,
+        host: HostId(1),
         terminals: vec![RemoteTerminalId(1)],
-        lost: false,
+        failure: ProbeFailure::Refused,
     });
     wait_until(cx, handle, |_| false);
     assert_eq!(notifications(cx, handle), 1);
@@ -212,9 +212,9 @@ fn a_deleted_host_reconnects_from_its_snapshot_without_probing(cx: &mut TestAppC
     });
 
     remote.emit(RemoteEvent::ProbeFailed {
-        host: 1,
+        host: HostId(1),
         terminals: vec![RemoteTerminalId(1)],
-        lost: true,
+        failure: ProbeFailure::ConnectionLost,
     });
 
     assert!(wait_until(cx, handle, |_| probes(&remote).len() == 2));

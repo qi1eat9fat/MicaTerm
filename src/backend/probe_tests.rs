@@ -2,12 +2,14 @@
 //! 服务器模拟只给一个通道、或者再开通道就断开整条连接的堡垒机。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer};
 use qishell_ssh::{AgentLocation, HostLogin, LoginMethod, PROBE_COMMAND, SecretRef, SshConnector};
 
 use super::tests::{Answerer, Terminal};
-use super::{RemoteEvent, RemoteTarget, RemoteTerminalId, SshRemoteTerminals};
+use super::{ProbeFailure, RemoteEvent, RemoteTarget, RemoteTerminalId, SshRemoteTerminals};
+use qishell_hosts::HostId;
 
 /// 测试服务器、它的运行时和临时的 `known_hosts`。
 struct Fixture {
@@ -30,14 +32,25 @@ impl Fixture {
         }
     }
 
-    fn remote(&self) -> Arc<SshRemoteTerminals> {
-        let connector = SshConnector::new(
+    fn connector(&self) -> SshConnector {
+        SshConnector::new(
             self.directory.path().join("known_hosts"),
             Arc::new(super::tests::Secrets::default()),
         )
         .with_agent(AgentLocation::None)
-        .with_default_key_dir(None);
-        Arc::new(SshRemoteTerminals::with_connector(connector))
+        .with_default_key_dir(None)
+    }
+
+    fn remote(&self) -> Arc<SshRemoteTerminals> {
+        Arc::new(SshRemoteTerminals::with_connector(self.connector()))
+    }
+
+    /// 探测最多等 `timeout` 的连接表。
+    fn remote_with_probe_timeout(&self, timeout: Duration) -> Arc<SshRemoteTerminals> {
+        Arc::new(SshRemoteTerminals::with_probe_timeout(
+            self.connector(),
+            timeout,
+        ))
     }
 
     /// 主机 7，登录后探不探测系统。
@@ -74,13 +87,13 @@ fn wait_for_latency(answers: &Answerer, terminal: u64) {
     });
 }
 
-fn probe_failed(answers: &Answerer) -> (u64, Vec<RemoteTerminalId>, bool) {
+fn probe_failed(answers: &Answerer) -> (HostId, Vec<RemoteTerminalId>, ProbeFailure) {
     answers.wait_for(|event| match event {
         RemoteEvent::ProbeFailed {
             host,
             terminals,
-            lost,
-        } => Some((*host, terminals.clone(), *lost)),
+            failure,
+        } => Some((*host, terminals.clone(), *failure)),
         _ => None,
     })
 }
@@ -112,6 +125,33 @@ fn a_host_that_does_not_probe_opens_no_exec_channel() {
 }
 
 #[test]
+fn a_connection_that_ends_after_the_probe_timed_out_is_not_blamed_on_the_probe() {
+    let fixture = Fixture::start();
+    // 主机收下探测命令不回答，探测超时（300ms）之后又过一会儿整条连接才断。
+    fixture
+        .server
+        .stall_exec_then_end(Duration::from_millis(600));
+    let remote = fixture.remote_with_probe_timeout(Duration::from_millis(300));
+    let answers = Answerer::start(&remote, Some(TEST_PASSWORD));
+
+    let terminal = Terminal::open(&remote, 1, &fixture.target(true));
+    terminal.expect_started();
+    terminal.finish().expect_err("连接断了");
+    // 连接表发事件比终端看到断开晚一点：等一会儿再看。
+    std::thread::sleep(Duration::from_millis(700));
+
+    assert_eq!(fixture.probes(), 1);
+    assert!(
+        !answers
+            .events()
+            .iter()
+            .any(|event| matches!(event, RemoteEvent::ProbeFailed { .. })),
+        "超时之后才断的不算探测弄断：{:?}",
+        answers.events()
+    );
+}
+
+#[test]
 fn a_host_that_refuses_the_probe_channel_is_marked_and_keeps_its_shell() {
     let fixture = Fixture::start();
     fixture.server.single_channel();
@@ -121,10 +161,10 @@ fn a_host_that_refuses_the_probe_channel_is_marked_and_keeps_its_shell() {
     let terminal = Terminal::open(&remote, 1, &fixture.target(true));
     terminal.expect_started();
 
-    let (host, terminals, lost) = probe_failed(&answers);
-    assert_eq!(host, 7);
+    let (host, terminals, failure) = probe_failed(&answers);
+    assert_eq!(host, HostId(7));
     assert_eq!(terminals, [RemoteTerminalId(1)]);
-    assert!(!lost, "通道被拒，连接还在");
+    assert_eq!(failure, ProbeFailure::Refused, "通道被拒，连接还在");
     terminal.echo("still here");
     wait_for_latency(&answers, 1);
     terminal.close();
@@ -140,10 +180,13 @@ fn a_bastion_that_drops_the_connection_on_the_probe_reports_it_lost_and_reconnec
 
     let terminal = Terminal::open(&remote, 1, &fixture.target(true));
     terminal.expect_started();
-    let (host, terminals, lost) = probe_failed(&answers);
     assert_eq!(
-        (host, terminals, lost),
-        (7, vec![RemoteTerminalId(1)], true)
+        probe_failed(&answers),
+        (
+            HostId(7),
+            vec![RemoteTerminalId(1)],
+            ProbeFailure::ConnectionLost
+        )
     );
     let error = terminal.finish().expect_err("探测把 shell 一起弄断了");
     assert!(error.to_string().contains("断开"), "{error}");

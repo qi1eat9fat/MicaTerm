@@ -39,7 +39,8 @@ fn from_sql(id: i64) -> u64 {
 /// 的规矩加在表的最后一列后面。
 ///
 /// - 2（工单 34）：`hosts.probe_os`，登录后探不探测系统。
-pub const SCHEMA_VERSION: i64 = 2;
+/// - 3：`hosts.hostname`，上次探测到的 `uname -n`。
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// The whole schema, as a new database gets it.
 ///
@@ -63,6 +64,7 @@ pub const SCHEMA_VERSION: i64 = 2;
 ///   - `os` and `last_connected_at` are written by connections, not by the
 ///     host form.
 ///   - `probe_os` 是登录后探不探测系统：主机表单写它，探测把连接弄断时连接也写它。
+///   - `hostname` 是上次探测到的 `uname -n`，连接写它；关了探测时用来核对远程报告的目录。
 /// - **host_jumps** lists a host's jump hosts in order. A deleted jump
 ///   host leaves its row behind with no `jump_id`, so the host fails to
 ///   connect rather than skip the hop.
@@ -97,6 +99,7 @@ CREATE TABLE hosts (
     os                TEXT,
     last_connected_at INTEGER,
     probe_os          INTEGER NOT NULL DEFAULT 1 CHECK (probe_os IN (0, 1)),
+    hostname          TEXT CHECK (hostname <> ''),
     CHECK ((auth = 'credential') = (credential_id IS NOT NULL)),
     CHECK ((auth = 'credential') = (username IS NULL)),
     CHECK ((route = 'proxy') = (proxy_kind IS NOT NULL)),
@@ -248,7 +251,7 @@ impl HostDatabase {
             .prepare(
                 "SELECT id, sort_order, name, address, port, auth, username, credential_id, \
                  route, proxy_kind, proxy_host, proxy_port, proxy_username, notes, os, \
-                 probe_os FROM hosts ORDER BY sort_order, id",
+                 probe_os, hostname FROM hosts ORDER BY sort_order, id",
             )?
             .query_map([], |row| {
                 let id: i64 = row.get(0)?;
@@ -266,6 +269,7 @@ impl HostDatabase {
                 let notes: String = row.get(13)?;
                 let os: Option<String> = row.get(14)?;
                 let probe_os: bool = row.get(15)?;
+                let hostname: Option<String> = row.get(16)?;
                 let mut host = Host::new(
                     HostId(from_sql(id)),
                     HostDraft::new(
@@ -296,6 +300,7 @@ impl HostDatabase {
                     _ => Route::Direct,
                 };
                 host.os = os.as_deref().and_then(HostOs::from_stored);
+                host.hostname = hostname.map(Into::into);
                 Ok(host)
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -395,8 +400,9 @@ impl HostDatabase {
             connection.execute(
                 "INSERT INTO hosts (id, sort_order, name, address, port, auth, username, \
                  credential_id, route, proxy_kind, proxy_host, proxy_port, proxy_username, \
-                 notes, os, probe_os) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                 notes, os, probe_os, hostname) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                 ?17)",
                 params![
                     to_sql(host.id.0),
                     host.sort_order,
@@ -414,6 +420,7 @@ impl HostDatabase {
                     host.notes.as_ref(),
                     host.os.map(HostOs::as_str),
                     host.probe_os,
+                    host.hostname.as_deref(),
                 ],
             )?;
             write_jumps(connection, host)
@@ -423,7 +430,7 @@ impl HostDatabase {
     /// Rewrite the fields the host form edits, jump hosts included.
     /// `last_connected_at` and `os` are left alone: they are written by
     /// `touch_connected` and `set_host_os`, and neither is part of the host
-    /// form.
+    /// form. `hostname` 按主机数据给的写：地址、端口、路线变了时主机数据已经把它清掉了。
     pub fn update_host(&self, host: &Host) -> rusqlite::Result<()> {
         self.atomically(|connection| {
             let row = HostRow::of(host);
@@ -431,7 +438,7 @@ impl HostDatabase {
                 "UPDATE hosts SET sort_order = ?2, name = ?3, address = ?4, port = ?5, \
                  auth = ?6, username = ?7, credential_id = ?8, route = ?9, proxy_kind = ?10, \
                  proxy_host = ?11, proxy_port = ?12, proxy_username = ?13, notes = ?14, \
-                 probe_os = ?15 WHERE id = ?1",
+                 probe_os = ?15, hostname = ?16 WHERE id = ?1",
                 params![
                     to_sql(host.id.0),
                     host.sort_order,
@@ -448,6 +455,7 @@ impl HostDatabase {
                     row.proxy_username,
                     host.notes.as_ref(),
                     host.probe_os,
+                    host.hostname.as_deref(),
                 ],
             )?;
             write_jumps(connection, host)
@@ -570,6 +578,15 @@ impl HostDatabase {
         Ok(())
     }
 
+    /// 记下探测到的 `uname -n`；`None` 是忘掉。
+    pub fn set_host_hostname(&self, id: HostId, hostname: Option<&str>) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "UPDATE hosts SET hostname = ?2 WHERE id = ?1",
+            params![to_sql(id.0), hostname],
+        )?;
+        Ok(())
+    }
+
     /// 记下登录后探不探测系统（探测把连接弄断时自动关掉，工单 34）。
     pub fn set_host_probe(&self, id: HostId, probe_os: bool) -> rusqlite::Result<()> {
         self.connection.execute(
@@ -681,6 +698,15 @@ fn migrate(connection: &Connection) -> Result<(), OpenError> {
              COMMIT;",
         )?;
     }
+    if version < 3 {
+        // 上次探测到的 `uname -n`：升级前的主机还没记过。
+        connection.execute_batch(
+            "BEGIN;
+             ALTER TABLE hosts ADD COLUMN hostname TEXT CHECK (hostname <> '');
+             PRAGMA user_version = 3;
+             COMMIT;",
+        )?;
+    }
     Ok(())
 }
 
@@ -722,7 +748,7 @@ mod tests {
     #[test]
     fn a_fresh_database_is_empty_and_at_the_current_schema() {
         let db = HostDatabase::in_memory().unwrap();
-        assert_eq!(SCHEMA_VERSION, 2);
+        assert_eq!(SCHEMA_VERSION, 3);
         assert_eq!(version_of(&db.connection), SCHEMA_VERSION);
         let data = db.load().unwrap();
         assert!(data.hosts.is_empty());
@@ -1216,6 +1242,60 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
     }
 
     #[test]
+    fn the_probed_hostname_is_kept_across_restarts_and_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("qishell.db");
+        {
+            let db = HostDatabase::open(&path).unwrap();
+            db.insert_host(&host(1, "bastion")).unwrap();
+            assert_eq!(db.load().unwrap().hosts[0].hostname, None);
+            db.set_host_hostname(HostId(1), Some("web-01")).unwrap();
+        }
+        let db = HostDatabase::open(&path).unwrap();
+        let mut stored = db.load().unwrap().hosts.remove(0);
+        assert_eq!(stored.hostname.as_deref(), Some("web-01"));
+
+        // 主机表单保存时按主机数据给的写（地址变了时主机数据会先清掉它）。
+        stored.hostname = None;
+        db.update_host(&stored).unwrap();
+        assert_eq!(db.load().unwrap().hosts[0].hostname, None);
+
+        // 新建（复制出来的主机）时也写进去。
+        let mut copy = host(2, "copy");
+        copy.hostname = Some("web-01".into());
+        db.insert_host(&copy).unwrap();
+        assert_eq!(
+            db.load().unwrap().hosts[1].hostname.as_deref(),
+            Some("web-01")
+        );
+    }
+
+    #[test]
+    fn a_schema_two_file_is_brought_to_three_without_a_hostname() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("qishell.db");
+        drop(HostDatabase::open(&path).unwrap());
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(
+                "ALTER TABLE hosts DROP COLUMN hostname;\n\
+                 INSERT INTO hosts (id, name, address, port, auth, username, probe_os) \
+                 VALUES (1, 'web', '10.0.0.1', 22, 'password', 'root', 0);\n\
+                 PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        }
+
+        let db = HostDatabase::open(&path).unwrap();
+        assert_eq!(version_of(&db.connection), SCHEMA_VERSION);
+        let hosts = db.load().unwrap().hosts;
+        assert_eq!(hosts[0].hostname, None);
+        assert!(!hosts[0].probe_os);
+        let fresh = HostDatabase::in_memory().unwrap();
+        assert_eq!(schema_of(&db.connection), schema_of(&fresh.connection));
+    }
+
+    #[test]
     fn a_probe_turned_off_stays_off_after_a_restart() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("qishell.db");
@@ -1237,7 +1317,8 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
         {
             let old = Connection::open(&path).unwrap();
             old.execute_batch(
-                "ALTER TABLE hosts DROP COLUMN probe_os;\n\
+                "ALTER TABLE hosts DROP COLUMN hostname;\n\
+                 ALTER TABLE hosts DROP COLUMN probe_os;\n\
                  INSERT INTO hosts (id, name, address, port, auth, username) \
                  VALUES (1, 'web', '10.0.0.1', 22, 'password', 'root');\n\
                  PRAGMA user_version = 1;",

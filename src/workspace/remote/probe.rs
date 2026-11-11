@@ -5,27 +5,27 @@
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::*;
 
-use crate::backend::RemoteTerminalId;
+use crate::backend::{ProbeFailure, RemoteTerminalId};
 use crate::host::HostId;
 use crate::i18n::t;
 use crate::workspace::Workspace;
 
 impl Workspace {
-    /// 连接表说主机 `host` 的探测失败了；`lost` 时连接断了，`terminals` 上的卡片原地重连。
+    /// 连接表说主机 `host` 的探测失败了；连接断了时 `terminals` 上的卡片原地重连。
     pub(in crate::workspace) fn on_probe_failed(
         &mut self,
-        host: u64,
+        host: HostId,
         terminals: Vec<RemoteTerminalId>,
-        lost: bool,
+        failure: ProbeFailure,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let host = HostId(host);
+        let lost = failure == ProbeFailure::ConnectionLost;
         let cards: Vec<_> = terminals
             .into_iter()
             .filter_map(|terminal| self.card(super::card_of(terminal), cx))
             .collect();
-        // 卡片记着的主机快照也不再探测：主机删了，重连就按快照，不能再探测一次又断掉。
+        // 卡片记着的登录也不再探测：主机删了，重连就按它，不能再探测一次又断掉。
         for card in &cards {
             card.update(cx, |card, _| card.stop_probing());
         }

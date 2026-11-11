@@ -13,6 +13,8 @@ anyhow = "1"
 async-channel = "2"
 # 解析线程等输出时，只等到同步更新的期限。
 async-io = "2"
+# 本地 PowerShell 的 `-EncodedCommand`（工单 31）。
+base64 = "0.22"
 futures = "0.3"
 gpui-kit = { version = "0.6.1" }
 portable-pty = "0.9"

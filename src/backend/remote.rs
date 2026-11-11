@@ -8,7 +8,9 @@
 //! 生产实现是 [`SshRemoteTerminals`]，UI 测试注入假的。
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use qishell_hosts::HostId;
 use qishell_ssh::{
     ConnectionPromptKind, ConnectionPromptReply, HostLogin, Latency, ProbedHost,
     SharedSecretSource, SshConnector,
@@ -98,14 +100,23 @@ pub enum RemoteEvent {
     /// 连接 `connection` 不要了（等它的终端都放手了）：它还没答的问题都作废，窗口壳关掉问答框、
     /// 不再问排着的。
     PromptsWithdrawn { connection: ConnectionId },
-    /// 探测系统失败了（工单 34）：探测通道打不开，或者探测时整条连接断了（`lost`，有的堡垒机
-    /// 再开一个通道就断开）。窗口壳把主机 `host` 记成不再探测；`lost` 时连接上的终端
-    /// `terminals` 都断了，原地重连。每条连接最多发一次。
+    /// 探测系统失败了（工单 34）：窗口壳把主机 `host` 记成不再探测；连接断了
+    /// （[`ProbeFailure::ConnectionLost`]）时连接上的终端 `terminals` 都断了，原地重连。
+    /// 每条连接最多发一次。
     ProbeFailed {
-        host: u64,
+        host: HostId,
         terminals: Vec<RemoteTerminalId>,
-        lost: bool,
+        failure: ProbeFailure,
     },
+}
+
+/// 系统探测怎么失败的（工单 34）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeFailure {
+    /// 探测通道打不开（主机拒开第二个通道、拒跑命令），连接还在。
+    Refused,
+    /// 开探测通道或探测进行中整条连接断了（有的堡垒机再开一个通道就断开）。
+    ConnectionLost,
 }
 
 /// 远程终端的传输从哪里来。生产是 [`SshRemoteTerminals`]，测试注入假的。
@@ -145,9 +156,14 @@ impl SshRemoteTerminals {
 
     /// 用给定的连接器（测试里指定 Agent、默认私钥目录）。
     pub fn with_connector(connector: SshConnector) -> Self {
+        Self::with_probe_timeout(connector, super::pool::PROBE_TIMEOUT)
+    }
+
+    /// 用给定的连接器，系统探测最多等 `probe_timeout`（测试里缩短）。
+    pub(super) fn with_probe_timeout(connector: SshConnector, probe_timeout: Duration) -> Self {
         let (sender, events) = async_channel::unbounded();
         Self {
-            pool: ConnectionPool::new(super::runtime::shared(), connector, sender),
+            pool: ConnectionPool::new(super::runtime::shared(), connector, sender, probe_timeout),
             events,
         }
     }

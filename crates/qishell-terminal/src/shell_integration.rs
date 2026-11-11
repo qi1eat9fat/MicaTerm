@@ -17,6 +17,8 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use portable_pty::CommandBuilder;
 
 /// 认得出、能接上目录报告的 shell。
@@ -38,10 +40,22 @@ const PLAIN_POWERSHELL_SWITCHES: &[&str] = &[
     "noe",
     "sta",
     "mta",
+    // pwsh 7：当登录 shell 启动。
+    "login",
+    "l",
 ];
 
-/// 跟着一个值的参数：`-ExecutionPolicy Bypass`。
-const POWERSHELL_OPTIONS_WITH_A_VALUE: &[&str] = &["executionpolicy", "ep", "ex"];
+/// 跟着一个值的参数：`-ExecutionPolicy Bypass`、`-WindowStyle Hidden`、
+/// pwsh 7 的 `-WorkingDirectory <目录>`。
+const POWERSHELL_OPTIONS_WITH_A_VALUE: &[&str] = &[
+    "executionpolicy",
+    "ep",
+    "ex",
+    "windowstyle",
+    "w",
+    "workingdirectory",
+    "wd",
+];
 
 /// 给本地 shell 接上目录报告：认得的 shell 才改，改不了就原样。
 pub(crate) fn report_directory(command: &mut CommandBuilder) {
@@ -144,25 +158,7 @@ pub(crate) const POWERSHELL_PROMPT: &str = r#"try {
 /// `-EncodedCommand` 要的写法：UTF-16LE 的 Base64。
 pub(crate) fn encoded_command(script: &str) -> String {
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    base64(&bytes)
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut text = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let group = chunk.iter().enumerate().fold(0_u32, |group, (at, &byte)| {
-            group | u32::from(byte) << (16 - 8 * at)
-        });
-        for at in 0..4 {
-            if at <= chunk.len() {
-                text.push(char::from(ALPHABET[(group >> (18 - 6 * at)) as usize & 63]));
-            } else {
-                text.push('=');
-            }
-        }
-    }
-    text
+    STANDARD.encode(bytes)
 }
 
 /// cmd 的 `PROMPT`：在 `prompt`（没有时是 cmd 默认的 `$P$G`）前加一条 OSC 9;9。
@@ -222,6 +218,29 @@ mod tests {
         );
     }
 
+    /// pwsh 的 `-Login`、`-WorkingDirectory <目录>`、`-WindowStyle <样式>`（及缩写）不妨碍接上。
+    #[test]
+    fn pwsh_login_working_directory_and_window_style_still_report() {
+        for words in [
+            &["pwsh.exe", "-Login", "-WorkingDirectory", r"D:\work dir"][..],
+            &["pwsh.exe", "-l", "-wd", "~"],
+            &["powershell.exe", "-WindowStyle", "Hidden", "-NoLogo"],
+            &["pwsh.exe", "-w", "Normal"],
+        ] {
+            let argv = argv(&integrated(words));
+            assert_eq!(argv[..words.len()], *words, "{words:?}");
+            assert_eq!(
+                argv[words.len()..words.len() + 2],
+                ["-NoExit", "-EncodedCommand"]
+            );
+        }
+        // 缺了值的不认。
+        assert_eq!(
+            argv(&integrated(&["pwsh.exe", "-WorkingDirectory"])).len(),
+            2
+        );
+    }
+
     /// 用户自己让 PowerShell 跑什么（`-Command`、`-File`……），就不动它。
     #[test]
     fn powershell_told_what_to_run_is_left_alone() {
@@ -277,7 +296,6 @@ mod tests {
         // `[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(...))` 算的。
         assert_eq!(encoded_command("dir"), "ZABpAHIA");
         assert_eq!(encoded_command("cd 中文"), "YwBkACAALU6HZQ==");
-        assert_eq!(base64(b"ab"), "YWI=");
-        assert_eq!(base64(b""), "");
+        assert_eq!(encoded_command(""), "");
     }
 }

@@ -18,6 +18,7 @@
 use percent_encoding::percent_decode_str;
 
 use crate::ReportedDirectory;
+use crate::directory::HostMatch;
 use crate::directory::{context_fields, joined, unescape};
 
 /// shell 集成说的「命令在跑 / 回到提示符」。
@@ -381,14 +382,14 @@ fn looks_like_a_command(name: &str) -> bool {
 /// 一条连接一份，重连时换新的。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ShellActivity {
-    /// 序列报告的目录（核对过主机名）。
-    reported: Option<String>,
+    /// 序列报告的目录。
+    reported: Option<Heard>,
     /// 现在的窗口标题。
     title: Option<String>,
     /// 标题说了什么（`read_title(title)`）。
     title_says: TitleSays,
-    /// 从标题解析出的目录（核对过主机名），只在没有序列报告时用。
-    title_directory: Option<String>,
+    /// 从标题解析出的目录，只在没有序列报告时用。
+    title_directory: Option<Heard>,
     /// 这条连接上见过 shell 设的标题：shell 会在提示符下改标题，别的标题就是程序设的。
     shell_title_seen: bool,
     /// shell 集成最近说的；`None` 是这条连接上还没见过集成。
@@ -397,31 +398,61 @@ pub struct ShellActivity {
     full_screen: bool,
 }
 
+/// 远程说的一个目录，和它核对过主机名没有。
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Heard {
+    path: String,
+    /// 核对过：不带主机名，或者和 `uname -n` 对得上。没核对过的只用来显示。
+    checked: bool,
+}
+
+/// 按主机名核对的结果记下 `path`：别的主机说的不收，之前没核对过的这时也不要了
+/// （知道了 `uname -n` 才发现是别处的）。返回收没收下。
+fn hear(slot: &mut Option<Heard>, path: &str, origin: HostMatch) -> bool {
+    let checked = match origin {
+        HostMatch::Here => true,
+        HostMatch::Unknown => false,
+        HostMatch::Elsewhere => {
+            if slot.as_ref().is_some_and(|heard| !heard.checked) {
+                *slot = None;
+            }
+            return false;
+        }
+    };
+    *slot = Some(Heard {
+        path: path.to_string(),
+        checked,
+    });
+    true
+}
+
 impl ShellActivity {
-    /// 序列报告了目录：带主机名的要和 `hostname`（`uname -n`）对得上。返回收没收下。
+    /// 序列报告了目录：带主机名的要和 `hostname`（`uname -n`）对得上；不知道 `uname -n` 时
+    /// 只收来显示（不当初始目录）。返回收没收下。
     pub fn report_directory(
         &mut self,
         directory: &ReportedDirectory,
         hostname: Option<&str>,
     ) -> bool {
-        if !directory.is_from(hostname) {
-            return false;
-        }
-        self.reported = Some(directory.path.clone());
-        true
+        hear(
+            &mut self.reported,
+            &directory.path,
+            directory.origin(hostname),
+        )
     }
 
-    /// 窗口标题是 `title`（`hostname` 是 `uname -n`，核对标题里的主机名）。标题没变也可以再调：
-    /// 探测出主机名以后，之前对不上的标题目录要重新核对。
+    /// 窗口标题是 `title`（`hostname` 是 `uname -n`，核对标题里的主机名，不知道时只收来显示）。
+    /// 标题没变也可以再调：探测出主机名以后，之前的标题目录要重新核对。
     pub fn set_title(&mut self, title: Option<&str>, hostname: Option<&str>) {
         self.title = title.map(str::to_string);
         self.title_says = title.map_or(TitleSays::Unknown, read_title);
         if let TitleSays::Shell { host, directory } = &self.title_says {
             self.shell_title_seen = true;
-            if let Some(directory) = directory
-                && host.as_deref().is_none_or(|host| same_host(host, hostname))
-            {
-                self.title_directory = Some(directory.clone());
+            if let Some(directory) = directory {
+                let origin = host
+                    .as_deref()
+                    .map_or(HostMatch::Here, |host| same_host(host, hostname));
+                hear(&mut self.title_directory, directory, origin);
             }
         }
     }
@@ -467,14 +498,21 @@ impl ShellActivity {
 
     /// 显示用的目录：序列报告的优先，其次是标题里的。
     pub fn directory(&self) -> Option<&str> {
-        self.reported.as_deref().or(self.title_directory.as_deref())
+        self.reported
+            .as_ref()
+            .or(self.title_directory.as_ref())
+            .map(|heard| heard.path.as_str())
     }
 
-    /// 能用作 SFTP 和分屏初始目录的：序列报告的；标题里的只有 `/` 或 `~/` 开头才算。
+    /// 能用作 SFTP 和分屏初始目录的：核对过主机名的序列报告；标题里的只有 `/` 或 `~/` 开头才算。
     pub fn start_directory(&self) -> Option<&str> {
-        self.reported.as_deref().or(self
-            .title_directory
-            .as_deref()
+        fn checked(heard: &Option<Heard>) -> Option<&str> {
+            heard
+                .as_ref()
+                .filter(|heard| heard.checked)
+                .map(|heard| heard.path.as_str())
+        }
+        checked(&self.reported).or(checked(&self.title_directory)
             .filter(|directory| directory.starts_with('/') || directory.starts_with("~/")))
     }
 
@@ -490,15 +528,21 @@ fn is_vim(name: &str) -> bool {
 }
 
 /// 标题里的主机名和 `uname -n` 是不是同一台：标题常用短主机名（RHEL 的 `${HOSTNAME%%.*}`、
-/// bash 的 `\h`），对得上全名或第一段都算。不知道 `uname -n` 时不信。
-fn same_host(host: &str, hostname: Option<&str>) -> bool {
-    hostname.is_some_and(|name| {
-        name.eq_ignore_ascii_case(host)
-            || name
-                .split('.')
-                .next()
-                .is_some_and(|short| short.eq_ignore_ascii_case(host))
-    })
+/// bash 的 `\h`），对得上全名或第一段都算。不知道 `uname -n` 时是 `Unknown`。
+fn same_host(host: &str, hostname: Option<&str>) -> HostMatch {
+    let Some(name) = hostname else {
+        return HostMatch::Unknown;
+    };
+    let same = name.eq_ignore_ascii_case(host)
+        || name
+            .split('.')
+            .next()
+            .is_some_and(|short| short.eq_ignore_ascii_case(host));
+    if same {
+        HostMatch::Here
+    } else {
+        HostMatch::Elsewhere
+    }
 }
 
 #[cfg(test)]
@@ -516,6 +560,8 @@ mod tests {
         screen: Screen,
         hostname: Option<&'static str>,
         activity: ShellActivity,
+        /// 最后一次报告的目录（引擎里也记着，卡片重新核对时用）。
+        last: Option<ReportedDirectory>,
     }
 
     #[derive(Default)]
@@ -549,6 +595,7 @@ mod tests {
                 screen: Screen::default(),
                 hostname,
                 activity: ShellActivity::default(),
+                last: None,
             }
         }
 
@@ -557,6 +604,7 @@ mod tests {
             self.parser.advance(&mut self.screen, bytes);
             if let Some(directory) = self.scanner.take_directory() {
                 self.activity.report_directory(&directory, self.hostname);
+                self.last = Some(directory);
             }
             if let Some(command) = self.scanner.take_command() {
                 self.activity.shell_command(command);
@@ -565,6 +613,15 @@ mod tests {
                 .set_title(self.screen.title.as_deref(), self.hostname);
             self.activity.set_full_screen(self.screen.full);
             self
+        }
+
+        /// 知道了新的 `uname -n`：和卡片一样，把最后一次报告和现在的标题重新核对。
+        fn recheck(&mut self) {
+            if let Some(directory) = &self.last {
+                self.activity.report_directory(directory, self.hostname);
+            }
+            self.activity
+                .set_title(self.screen.title.as_deref(), self.hostname);
         }
 
         fn program(&self) -> Option<&str> {
@@ -622,10 +679,21 @@ mod tests {
         remote.feed(b"\x1b]7;file://db-01/var/lib\x07");
         remote.feed(b"\x1b]3008;start=2;type=shell;hostname=db-01;cwd=/tmp\x1b\\");
         assert_eq!(remote.directory(), Some("/srv"));
-        // 还不知道 `uname -n` 时，带主机名的报告一律不信。
+        // 还不知道 `uname -n` 时（关了探测、从没探测过），带主机名的报告只信来显示，
+        // 不当 SFTP 和分屏的初始目录。
         let mut unknown = Remote::on(None);
         unknown.feed(b"\x1b]7;file://web-01/srv\x07");
-        assert_eq!(unknown.directory(), None);
+        assert_eq!(unknown.directory(), Some("/srv"));
+        assert_eq!(unknown.activity.start_directory(), None);
+        // 后来知道了 `uname -n`：对得上的算数，对不上的连显示也不要了。
+        let mut elsewhere = Remote::on(None);
+        elsewhere.feed(b"]7;file://web-01/srv");
+        unknown.hostname = Some("WEB-01");
+        unknown.recheck();
+        assert_eq!(unknown.activity.start_directory(), Some("/srv"));
+        elsewhere.hostname = Some("db-01");
+        elsewhere.recheck();
+        assert_eq!(elsewhere.directory(), None);
         // 不带主机名的照信。
         let mut unnamed = Remote::on(None);
         unnamed.feed(b"\x1b]1337;CurrentDir=/no/host\x07");
@@ -659,14 +727,21 @@ mod tests {
     }
 
     #[test]
-    fn a_title_naming_a_host_waits_for_its_name() {
+    fn a_title_naming_a_host_shows_its_folder_before_the_name_is_known() {
         let mut remote = Remote::on(None);
         remote.feed(b"\x1b]0;qi@web-01: ~/src\x07");
-        assert_eq!(remote.directory(), None);
+        assert_eq!(remote.directory(), Some("~/src"));
+        assert_eq!(remote.activity.start_directory(), None);
         // 探测出主机名后，同一个标题重新核对。
         remote.hostname = Some("WEB-01");
         remote.feed(b"");
-        assert_eq!(remote.directory(), Some("~/src"));
+        assert_eq!(remote.activity.start_directory(), Some("~/src"));
+        // 对不上的标题连显示也不要了。
+        let mut elsewhere = Remote::on(None);
+        elsewhere.feed(b"]0;qi@web-01: ~/src");
+        elsewhere.hostname = Some("db-01");
+        elsewhere.feed(b"");
+        assert_eq!(elsewhere.directory(), None);
     }
 
     #[test]

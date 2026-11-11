@@ -101,6 +101,8 @@ pub enum Change {
     Batch,
     /// 登录后探不探测系统（工单 34）。
     HostProbe,
+    /// 探测到的 `uname -n`（F1）。
+    HostHostname,
 }
 
 /// What could not be kept. The change stands in memory all the same.
@@ -375,9 +377,14 @@ impl HostData {
         // The form owns none of these, so rebuilding from the draft must not
         // drop them.
         let (os, sort_order) = (host.os, host.sort_order);
+        // 探测到的 `uname -n` 只在还连到同一处时留着：地址、端口、路线变了可能就是另一台机器。
+        let same_place =
+            host.address == draft.address && host.port == draft.port && host.route == draft.route;
+        let hostname = host.hostname.take().filter(|_| same_place);
         *host = Host::new(id, draft);
         host.os = os;
         host.sort_order = sort_order;
+        host.hostname = hostname;
         true
     }
 
@@ -442,6 +449,7 @@ impl HostData {
         let mut copy = Host::new(copy_id, draft);
         // Same host, so the copy already knows what it will find there.
         copy.os = self.hosts[ix].os;
+        copy.hostname = self.hosts[ix].hostname.clone();
         copy.sort_order = self.hosts[ix].sort_order + 1;
         for host in &mut self.hosts {
             if host.sort_order >= copy.sort_order {
@@ -705,6 +713,23 @@ impl HostData {
             return false;
         }
         host.os = os;
+        true
+    }
+
+    /// 记下探测到的 `uname -n`（F1）：关了探测以后拿它核对远程报告的目录。
+    /// 返回变没变（没有这台主机、本来就是这个时什么都不做）。
+    pub fn set_host_hostname(&mut self, id: HostId, hostname: Option<SharedString>) -> bool {
+        let Some(host) = self.host_mut(id) else {
+            return false;
+        };
+        if host.hostname == hostname {
+            return false;
+        }
+        host.hostname = hostname.clone();
+        self.persist(Change::HostHostname, |db| {
+            db.set_host_hostname(id, hostname.as_deref())
+        });
+        self.changed();
         true
     }
 
@@ -1238,6 +1263,45 @@ mod tests {
         assert!(store.host(id).unwrap().probe_os);
 
         assert!(!store.set_host_probe(HostId(99), false), "没有这台主机");
+    }
+
+    #[test]
+    fn the_probed_hostname_is_saved_and_forgotten_when_the_host_moves() {
+        let mut store = HostData::load(HostDatabase::in_memory().unwrap()).unwrap();
+        let id = store.insert(draft("web"));
+        store.take_events();
+
+        assert!(store.set_host_hostname(id, Some("web-01".into())));
+        assert_eq!(store.host(id).unwrap().hostname.as_deref(), Some("web-01"));
+        assert!(
+            store
+                .take_events()
+                .iter()
+                .any(|event| matches!(event, HostEvent::Changed))
+        );
+        let reloaded = store.database.as_ref().unwrap().load().unwrap();
+        assert_eq!(reloaded.hosts[0].hostname.as_deref(), Some("web-01"));
+        assert!(!store.set_host_hostname(id, Some("web-01".into())));
+        assert!(!store.set_host_hostname(HostId(99), None), "没有这台主机");
+
+        // 改名、改备注还是那台机器；复制出来的也是。
+        let mut edit = store.host(id).unwrap().draft();
+        edit.name = "web-renamed".into();
+        store.update(id, edit.clone());
+        assert_eq!(store.host(id).unwrap().hostname.as_deref(), Some("web-01"));
+        let copy = store.duplicate(id, "copy".into()).unwrap();
+        assert_eq!(
+            store.host(copy).unwrap().hostname.as_deref(),
+            Some("web-01")
+        );
+
+        // 改了地址（或端口、路线）可能就是另一台机器了：忘掉，数据库里也是。
+        edit.address = "10.9.9.9".into();
+        store.update(id, edit);
+        assert_eq!(store.host(id).unwrap().hostname, None);
+        let reloaded = store.database.as_ref().unwrap().load().unwrap();
+        let stored = reloaded.hosts.iter().find(|host| host.id == id).unwrap();
+        assert_eq!(stored.hostname, None);
     }
 
     #[test]

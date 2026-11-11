@@ -14,7 +14,7 @@
 
 use gpui_kit::SharedString;
 use qishell_hosts::{Host, HostOs, mark_color};
-use qishell_ssh::{JumpLogin, LoginRoute, ProxyKind};
+use qishell_ssh::{JumpLogin, LoginRoute};
 use qishell_terminal::{
     ReportedDirectory, SharedTerminalTransportFactory, ShellActivity, ShellCommand,
     TerminalLifecycle,
@@ -79,6 +79,7 @@ pub enum RemoteState {
     /// 断开了，带原因。
     Disconnected(SharedString),
     /// 连接要用保险库里的秘密，保险库锁着：卡片建好了，等用户解锁再连（工单 33）。
+    /// 就是卡片记着的 `VaultHold::Waiting`，由 [`RemoteCard::state`] 推出来，不另存。
     WaitingForVault,
 }
 
@@ -112,9 +113,10 @@ impl RemoteCard {
     pub(super) fn new(host: Host, target: RemoteTarget) -> Self {
         Self {
             os: host.os,
+            // 上次探测到的 `uname -n`：这次探测出来之前（或关了探测时）拿它核对。
+            hostname: host.hostname.as_deref().map(str::to_string),
             host,
             target,
-            hostname: None,
             latency: None,
             connection: None,
             shell: ShellActivity::default(),
@@ -153,6 +155,9 @@ impl RemoteCard {
         if host.os.is_some() {
             self.os = host.os;
         }
+        if let Some(hostname) = &host.hostname {
+            self.hostname = Some(hostname.to_string());
+        }
         self.host = host;
         self.target = target;
         self.latency = None;
@@ -163,9 +168,9 @@ impl RemoteCard {
         self.vault_hold = None;
     }
 
-    /// 这台主机不再探测系统（工单 34）：探测把连接弄断了。主机删了时重连按这里记着的来。
+    /// 这台主机不再探测系统（工单 34）：探测把连接弄断了。主机删了时重连按这里记着的登录来。
+    /// 探不探测只看登录（`RemoteTarget::probe_os`）：主机快照里的那份是打开时的样子，不用它。
     pub(super) fn stop_probing(&mut self) {
-        self.host.probe_os = false;
         self.target.probe_os = false;
     }
 
@@ -188,7 +193,10 @@ impl RemoteCard {
             RemoteUpdate::Attached(connection) => self.connection = Some(connection),
             RemoteUpdate::Latency(latency) => self.latency = Some(latency),
             RemoteUpdate::Probed(probed) => {
-                self.hostname = probed.hostname;
+                // 这次没拿到 `uname -n` 时还按之前知道的核对。
+                if let Some(hostname) = probed.hostname {
+                    self.hostname = Some(hostname);
+                }
                 if let Some(os) = HostOs::from_stored(probed.os) {
                     self.os = Some(os);
                     return Some(os);
@@ -198,7 +206,8 @@ impl RemoteCard {
         None
     }
 
-    /// 远程 shell 报告了目录：带主机名的要和 `uname -n` 对得上（在卡片里又 ssh 到别处的不算）。
+    /// 远程 shell 报告了目录：带主机名的要和 `uname -n`（这次探测到的，没有时用上次探测到的）
+    /// 对得上（在卡片里又 ssh 到别处的不算）；从没探测过时只用来显示，不当初始目录。
     /// 返回解析结果变没变。
     pub(super) fn report_directory(&mut self, directory: &ReportedDirectory) -> bool {
         self.shell
@@ -338,13 +347,12 @@ fn route_label(route: &LoginRoute) -> Option<String> {
                 .collect();
             (!names.is_empty()).then(|| names.join(" → "))
         }
-        LoginRoute::Proxy(proxy) => {
-            let kind = match proxy.kind {
-                ProxyKind::Http => "HTTP",
-                ProxyKind::Socks5 => "SOCKS5",
-            };
-            Some(format!("{kind} {}:{}", proxy.host, proxy.port))
-        }
+        LoginRoute::Proxy(proxy) => Some(format!(
+            "{} {}:{}",
+            proxy.kind.label(),
+            proxy.host,
+            proxy.port
+        )),
     }
 }
 
@@ -480,9 +488,11 @@ mod tests {
             host: Some("web-01".into()),
             path: "/srv".into(),
         };
-        assert!(!card.report_directory(&report));
+        // 还不知道 `uname -n`：只用来显示，不当初始目录。
+        assert!(card.report_directory(&report));
         assert!(card.observe_screen(Some("root@web-01: ~/x"), false));
-        assert_eq!(card.directory(), None);
+        assert_eq!(card.directory(), Some("/srv"));
+        assert_eq!(card.activity.start_directory, None);
         card.apply(RemoteUpdate::Probed(ProbedHost {
             os: "ubuntu",
             hostname: Some("web-01".into()),
@@ -557,7 +567,7 @@ mod tests {
 
     #[test]
     fn the_connecting_line_names_the_jump_hosts_or_the_proxy() {
-        use qishell_ssh::ProxyLogin;
+        use qishell_ssh::{ProxyKind, ProxyLogin};
 
         let mut card = card(None);
         assert_eq!(

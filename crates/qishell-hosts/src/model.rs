@@ -329,6 +329,9 @@ pub struct Host {
     /// 登录后另开 exec 通道探测系统（工单 34）。有的堡垒机再开一个通道就断掉整条连接：
     /// 用户在主机对话框里关掉，或者探测失败后连接这边自动关掉（`HostData::set_host_probe`）。
     pub probe_os: bool,
+    /// 上次探测到的 `uname -n`（F1）：关了探测时拿它核对远程报告的目录里的主机名。
+    /// 连接写它，主机表单不管；改了地址、端口或路线时忘掉（可能是另一台机器了）。
+    pub hostname: Option<SharedString>,
 }
 
 impl Host {
@@ -346,6 +349,7 @@ impl Host {
             sort_order: 0,
             os: None,
             probe_os: draft.probe_os,
+            hostname: None,
         }
     }
 
