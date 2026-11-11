@@ -42,7 +42,7 @@ mod theme;
 mod transport;
 
 pub use activity::{ShellActivity, ShellCommand, TitleSays, command_name, read_title, shell_words};
-pub use directory::ReportedDirectory;
+pub use directory::{HostMatch, ReportedDirectory};
 pub use engine::{TerminalCell, TerminalEngine, TerminalEvent, TerminalSnapshot};
 pub use font::{
     DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, FONT_SIZE_RANGE,

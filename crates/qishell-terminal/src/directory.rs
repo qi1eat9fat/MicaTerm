@@ -28,16 +28,27 @@ impl ReportedDirectory {
             .then(|| format!("cd -- '{}'", self.path.replace('\'', r"'\''")))
     }
 
-    /// Whether the report comes from the host called `hostname` (its
-    /// `uname -n`). One that names no host is taken at its word; one that
-    /// names a host is taken only from a host whose name is known.
-    pub fn is_from(&self, hostname: Option<&str>) -> bool {
+    /// 报告是不是来自 `uname -n` 叫 `hostname` 的主机：不带主机名的照它说的算；带主机名的
+    /// 要对得上，不知道 `uname -n` 时是 [`HostMatch::Unknown`]。
+    pub fn origin(&self, hostname: Option<&str>) -> HostMatch {
         match (&self.host, hostname) {
-            (None, _) => true,
-            (Some(host), Some(name)) => host.eq_ignore_ascii_case(name),
-            (Some(_), None) => false,
+            (None, _) => HostMatch::Here,
+            (Some(host), Some(name)) if host.eq_ignore_ascii_case(name) => HostMatch::Here,
+            (Some(_), Some(_)) => HostMatch::Elsewhere,
+            (Some(_), None) => HostMatch::Unknown,
         }
     }
+}
+
+/// 远程报告（目录序列、窗口标题）里的主机名和卡片所连主机的 `uname -n` 对不对得上。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostMatch {
+    /// 对得上，或者报告没说主机名。
+    Here,
+    /// 是别的主机（比如在卡片里又 ssh 到了别处）。
+    Elsewhere,
+    /// 报告说了主机名，但不知道 `uname -n`（关了探测、从没探测过）：只信来显示。
+    Unknown,
 }
 
 /// 哪一种序列报告的目录，越靠前越可信（工单 17 的目录优先级）：同一条连接上收到过靠前的，
@@ -328,10 +339,10 @@ mod tests {
     #[test]
     fn a_report_naming_a_host_counts_only_from_that_host() {
         let named = at(Some("WEB-01"), "/srv").unwrap();
-        assert!(named.is_from(Some("web-01")));
-        assert!(!named.is_from(Some("db-01")));
-        assert!(!named.is_from(None));
-        assert!(at(None, "/srv").unwrap().is_from(None));
+        assert_eq!(named.origin(Some("web-01")), HostMatch::Here);
+        assert_eq!(named.origin(Some("db-01")), HostMatch::Elsewhere);
+        assert_eq!(named.origin(None), HostMatch::Unknown);
+        assert_eq!(at(None, "/srv").unwrap().origin(None), HostMatch::Here);
     }
 
     #[test]
