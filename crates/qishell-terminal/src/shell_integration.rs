@@ -38,10 +38,22 @@ const PLAIN_POWERSHELL_SWITCHES: &[&str] = &[
     "noe",
     "sta",
     "mta",
+    // pwsh 7：当登录 shell 启动。
+    "login",
+    "l",
 ];
 
-/// 跟着一个值的参数：`-ExecutionPolicy Bypass`。
-const POWERSHELL_OPTIONS_WITH_A_VALUE: &[&str] = &["executionpolicy", "ep", "ex"];
+/// 跟着一个值的参数：`-ExecutionPolicy Bypass`、`-WindowStyle Hidden`、
+/// pwsh 7 的 `-WorkingDirectory <目录>`。
+const POWERSHELL_OPTIONS_WITH_A_VALUE: &[&str] = &[
+    "executionpolicy",
+    "ep",
+    "ex",
+    "windowstyle",
+    "w",
+    "workingdirectory",
+    "wd",
+];
 
 /// 给本地 shell 接上目录报告：认得的 shell 才改，改不了就原样。
 pub(crate) fn report_directory(command: &mut CommandBuilder) {
@@ -219,6 +231,29 @@ mod tests {
             ]))
             .len(),
             7
+        );
+    }
+
+    /// pwsh 的 `-Login`、`-WorkingDirectory <目录>`、`-WindowStyle <样式>`（及缩写）不妨碍接上。
+    #[test]
+    fn pwsh_login_working_directory_and_window_style_still_report() {
+        for words in [
+            &["pwsh.exe", "-Login", "-WorkingDirectory", r"D:\work dir"][..],
+            &["pwsh.exe", "-l", "-wd", "~"],
+            &["powershell.exe", "-WindowStyle", "Hidden", "-NoLogo"],
+            &["pwsh.exe", "-w", "Normal"],
+        ] {
+            let argv = argv(&integrated(words));
+            assert_eq!(argv[..words.len()], *words, "{words:?}");
+            assert_eq!(
+                argv[words.len()..words.len() + 2],
+                ["-NoExit", "-EncodedCommand"]
+            );
+        }
+        // 缺了值的不认。
+        assert_eq!(
+            argv(&integrated(&["pwsh.exe", "-WorkingDirectory"])).len(),
+            2
         );
     }
 
