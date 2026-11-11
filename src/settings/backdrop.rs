@@ -49,14 +49,15 @@ impl WindowBackdrop {
 /// 让窗口的背景和设置一致；没变的不动。`mode` 是应用现在的深浅色。
 pub(super) fn apply_backdrop(wanted: bool, mode: ThemeMode, window: &mut Window, cx: &mut App) {
     // Mica 的底色跟着窗口的「深色模式」属性走，GPUI 按系统的深浅色设它；应用外观单独设成
-    // 深色（或浅色）时要改成应用的，否则深色界面下透出来的是浅色 Mica。系统换深浅色时 GPUI
-    // 先通知窗口（这里跟着应用设置）、再按系统改一遍这个属性，所以等这一轮消息处理完再设一次。
+    // 深色（或浅色）时要改成应用的，否则深色界面下透出来的是浅色 Mica。
+    //
+    // GPUI（gpui-pre-windows 0.3.2）只在两处按系统写这个属性：建窗口时（`WindowsWindow::new`，
+    // 早于窗口壳建好、第一次应用设置），和收到 `WM_SETTINGCHANGE`「ImmersiveColorSet」时
+    // （`handle_system_theme_changed`：先调外观回调，紧接着同步写属性）。那个外观回调
+    // （gpui-pre 的 `on_appearance_changed`）只往前台派一个任务，`observe_window_appearance`
+    // 的观察者在那个任务里跑；前台任务经 `PostMessageW` 排进消息队列，要等这条消息处理完才轮到。
+    // 所以窗口壳的外观观察者调到这里时，GPUI 已经写完了，这里按应用外观再写一遍就是最终的值。
     sync_dark_frame(mode, window);
-    window
-        .spawn(cx, async move |cx| {
-            cx.update(|window, _| sync_dark_frame(mode, window)).ok();
-        })
-        .detach();
 
     let backdrop = WindowBackdrop::for_setting(wanted);
     if cx.try_global::<WindowBackdrop>() == Some(&backdrop) {

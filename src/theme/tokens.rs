@@ -178,8 +178,8 @@ impl Tokens {
     }
 
     /// 窗口背景：从 `bg_top` 到 `bg_bottom` 的竖直渐变。`translucent`（开了 Mica，工单 26）时
-    /// 两端都降到 `MICA_TINT_OPACITY`，让系统的 Mica 透出来，又压住 Mica 和应用外观不一致的色调
-    /// （Mica 跟系统的深浅色走，应用外观可以单独设）。
+    /// 两端都降到 `MICA_TINT_OPACITY`，让系统的 Mica 透出来，又带着界面原型的底色。
+    /// Mica 自己的深浅由窗口的深色属性决定，已经按应用外观设好（`settings::backdrop`）。
     pub fn window_gradient(&self, translucent: bool) -> Background {
         let tint = |color: Hsla| {
             if translucent {
