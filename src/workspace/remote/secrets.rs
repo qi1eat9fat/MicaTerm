@@ -7,9 +7,9 @@
 //!   1. 卡片照常建出来、放进标签、拿到焦点，但先不连：终端是占位的，正文写「正在连接 …」，状态栏写
 //!      「等待解锁保险库」（`TerminalCard::remote_waiting_for_vault`，原地重连是
 //!      `TerminalCard::wait_for_vault`）；
-//!   2. 卡片排进 `Workspace::vault_waiters`（[`Workspace::wait_for_vault`]）。第一张排进来时，等这次
-//!      更新结束（卡片已经放好、拿到焦点）再弹解锁框，焦点落在主密码框；框开着时再排进来的卡片
-//!      共用这一个框；
+//!   2. 卡片自己记着在等（`VaultHold::Waiting`），窗口壳只记解锁框开没开（[`Workspace::wait_for_vault`]）。
+//!      框还没开时，等这次更新结束（卡片已经放好、拿到焦点）再弹，焦点落在主密码框；框开着时再等起来的
+//!      卡片共用这一个框；
 //!   3. 用户答了（[`Workspace::vault_answered`]）：解开了，等着的卡片各自在原地接着连
 //!      （`TerminalCard::reconnect`，连接表的问答照常弹）；取消了，卡片显示未连接，原因是
 //!      「保险库没有解锁」（`TerminalCard::vault_declined`），Enter 原地重连会再弹解锁框；
@@ -23,7 +23,7 @@
 use gpui_kit::*;
 
 use crate::backend::RemoteTarget;
-use crate::card::{CardId, VaultHold};
+use crate::card::{TerminalCard, VaultHold};
 use crate::host::HostId;
 use crate::vault::{
     asks_before_retrying, asks_before_using, before_using_secrets, login_secrets,
@@ -51,40 +51,41 @@ impl Workspace {
         }
     }
 
-    /// 卡片 `card` 在等保险库（卡片已经是「等待解锁保险库」）：排进等待表。第一张排进来时，等这次
-    /// 更新结束（卡片放好、拿到焦点以后）再弹解锁框；框已经开着就共用它。
+    /// 有卡片刚开始等保险库（卡片已经是「等待解锁保险库」）：解锁框还没开就等这次更新结束（卡片放好、
+    /// 拿到焦点以后）再弹；框已经开着就共用它。
     pub(in crate::workspace) fn wait_for_vault(
         &mut self,
-        card: CardId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.vault_waiters.contains(&card) {
+        if self.vault_unlock_asked {
             return;
         }
-        self.vault_waiters.push(card);
-        if self.vault_waiters.len() == 1 {
-            cx.defer_in(window, |this, window, cx| this.ask_to_unlock(window, cx));
-        }
+        self.vault_unlock_asked = true;
+        cx.defer_in(window, |this, window, cx| this.ask_to_unlock(window, cx));
     }
 
-    /// 弹解锁框：说的是第一张还在等的卡片的主机和秘密。
+    /// 在等保险库的卡片，从左边的标签起。
+    fn cards_waiting_for_vault(&self, cx: &App) -> Vec<Entity<TerminalCard>> {
+        self.terminal_tabs()
+            .flat_map(|tab| tab.cards())
+            .filter(|card| card.read(cx).vault_hold() == Some(VaultHold::Waiting))
+            .cloned()
+            .collect()
+    }
+
+    /// 弹解锁框：说的是第一张在等的卡片的主机和秘密。
     fn ask_to_unlock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let waiting = self.vault_waiters.iter().find_map(|card| {
-            let card = self.card(*card, cx)?;
+        let waiting = self.cards_waiting_for_vault(cx).iter().find_map(|card| {
             let card = card.read(cx);
-            (card.vault_hold() == Some(VaultHold::Waiting))
-                .then(|| {
-                    Some((
-                        card.remote_host_snapshot()?.name.clone(),
-                        card.remote_target()?.clone(),
-                    ))
-                })
-                .flatten()
+            Some((
+                card.remote_host_snapshot()?.name.clone(),
+                card.remote_target()?.clone(),
+            ))
         });
         let Some((name, target)) = waiting else {
             // 等着的卡片都关了（或者断开了）：没什么要问的。
-            self.vault_waiters.clear();
+            self.vault_unlock_asked = false;
             return;
         };
         let secrets = login_secrets(&target.login);
@@ -109,15 +110,10 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        for card in std::mem::take(&mut self.vault_waiters) {
-            let Some(entity) = self.card(card, cx) else {
-                continue;
-            };
+        self.vault_unlock_asked = false;
+        for entity in self.cards_waiting_for_vault(cx) {
             let (host, target) = {
                 let card = entity.read(cx);
-                if card.vault_hold() != Some(VaultHold::Waiting) {
-                    continue;
-                }
                 let (Some(host), Some(target)) =
                     (card.remote_host_snapshot(), card.remote_target())
                 else {

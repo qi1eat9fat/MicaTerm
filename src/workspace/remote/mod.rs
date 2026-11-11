@@ -161,7 +161,7 @@ impl Workspace {
                 TerminalCard::remote_waiting_for_vault(id, host, target, focus, window, cx)
             });
             self.watch_notices(&card, window, cx);
-            self.wait_for_vault(id, window, cx);
+            self.wait_for_vault(window, cx);
             return card;
         }
         let factory = self.remote_factory(id, &target);
@@ -292,7 +292,7 @@ impl Workspace {
             Some(VaultHold::Waiting) => {}
             _ if self.waits_for_vault(&target, hold == Some(VaultHold::Declined), cx) => {
                 entity.update(cx, |card, cx| card.wait_for_vault(host, target, cx));
-                self.wait_for_vault(card, window, cx);
+                self.wait_for_vault(window, cx);
             }
             _ => self.reconnect_in_place(&entity, host, target, cx),
         }

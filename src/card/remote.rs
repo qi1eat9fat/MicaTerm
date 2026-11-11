@@ -79,6 +79,7 @@ pub enum RemoteState {
     /// 断开了，带原因。
     Disconnected(SharedString),
     /// 连接要用保险库里的秘密，保险库锁着：卡片建好了，等用户解锁再连（工单 33）。
+    /// 就是卡片记着的 `VaultHold::Waiting`，由 [`RemoteCard::state`] 推出来，不另存。
     WaitingForVault,
 }
 

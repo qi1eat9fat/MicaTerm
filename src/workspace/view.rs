@@ -192,8 +192,9 @@ pub struct Workspace {
     pub(super) snippet_panel: SnippetPanel,
     /// 连接表的问题，一次问一个（工单 12）。
     pub(super) prompts: PromptQueue,
-    /// 等保险库解锁的远程卡片（工单 33），按排进来的顺序；不空时解锁框开着（一个框管所有）。
-    pub(super) vault_waiters: Vec<crate::card::CardId>,
+    /// 解锁框开着（或者等这次更新结束就弹）：等保险库的远程卡片共用这一个框（工单 33）。
+    /// 哪些卡片在等只看卡片自己的 `VaultHold::Waiting`。
+    pub(super) vault_unlock_asked: bool,
     /// 保险库（工单 13），也装成了全局量，对话框和设置页经 `VaultStore::global` 找到它。
     pub(super) vault: Entity<VaultStore>,
     /// 凭据面板（工单 14）。
@@ -322,7 +323,7 @@ impl Workspace {
             right_panel: None,
             snippet_panel,
             prompts: PromptQueue::default(),
-            vault_waiters: Vec::new(),
+            vault_unlock_asked: false,
             vault,
             credential_panel,
             _remote_events: remote_events,
