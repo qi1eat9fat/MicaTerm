@@ -108,7 +108,8 @@ pub fn command_name(line: &str) -> Option<String> {
     let mut at = 0;
     while let Some(word) = words.get(at).map(String::as_str) {
         at += 1;
-        if is_assignment(word) {
+        // `VAR=值`，以及前一个命令只有前缀和赋值时（`FOO=1; ls`）它后面的 `;`、`&&`、`|`。
+        if is_assignment(word) || is_operator(word) {
             continue;
         }
         let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
@@ -150,8 +151,17 @@ fn is_assignment(word: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
+/// `shell_words` 切出来的 `;`、`&&`、`|` 这类控制符。
+fn is_operator(word: &str) -> bool {
+    !word.is_empty()
+        && word
+            .chars()
+            .all(|character| matches!(character, ';' | '&' | '|'))
+}
+
 /// 按 shell 的规则把一行切成词：空白分词，认反斜杠、单引号、双引号和 `$'…'`（bash `%q` 的写法）。
-/// 不展开变量，也不认 `;`、`|` 这些（第一个命令总在最前面）。
+/// 没引起来的 `;`、`&`、`|` 自成一词（连着的算一个，`&&`、`||`），不会粘在前一个词上：oh-my-zsh
+/// 把整行命令设成标题，`sudo -n true; ls` 的第一个命令是 `true`，不是 `true;`。不展开变量。
 pub fn shell_words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut word = String::new();
@@ -198,6 +208,17 @@ pub fn shell_words(line: &str) -> Vec<String> {
                     words.push(std::mem::take(&mut word));
                     in_word = false;
                 }
+            }
+            ';' | '&' | '|' => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+                let mut operator = String::from(character);
+                while let Some(next) = chars.next_if(|next| matches!(next, ';' | '&' | '|')) {
+                    operator.push(next);
+                }
+                words.push(operator);
             }
             character => {
                 in_word = true;
@@ -745,6 +766,10 @@ mod tests {
             ("nohup nice -n 5 time make", Some("make")),
             ("doas -u root vi x", Some("vi")),
             ("'my tool' --flag", Some("my tool")),
+            // oh-my-zsh 设成标题的整行命令。
+            ("sudo -n true; FOO=1 ls --color=tty -d /tmp", Some("true")),
+            ("FOO=1; ls", Some("ls")),
+            ("make&&make install", Some("make")),
             ("sudo", None),
             ("FOO=1", None),
             ("", None),
@@ -763,6 +788,12 @@ mod tests {
         assert_eq!(shell_words("echo 'it''s'"), ["echo", "its"]);
         assert_eq!(shell_words(r"$'ls\n-l\x41'"), ["ls\n-lA"]);
         assert_eq!(shell_words("  a \t b  "), ["a", "b"]);
+        // 没引起来的控制符自成一词，引起来、转义了的不算。
+        assert_eq!(
+            shell_words("a;b && c|d"),
+            ["a", ";", "b", "&&", "c", "|", "d"]
+        );
+        assert_eq!(shell_words(r"a\;b 'c|d' &"), ["a;b", "c|d", "&"]);
     }
 
     #[test]
@@ -776,6 +807,110 @@ mod tests {
         assert_eq!(
             ShellCommand::Running(None).after(Some(&ShellCommand::Prompt)),
             ShellCommand::Running(None)
+        );
+    }
+
+    // 抓自真机的会话（工单 28）：WSL 里各发行版默认配置的 sshd，客户端 `TERM=xterm-256color`，
+    // 依次敲 `cd /etc`、`mkdir -p ~/src/a\ b && cd ~/src/a\ b`、`cd ~`、`sleep 1`、
+    // `sudo -n true; FOO=1 ls -d /tmp`、`vim x.txt`（里面 `:verbose set title?`、`:q!`）、`vi y.txt`
+    // （同样）、`exit`。从第一个提示符截到 `exit`；主机名换成 web-01，机器 ID、启动 ID、上下文 ID 换成假的。
+    /// Ubuntu 26.04（systemd 259）的 bash，普通用户：OSC 3008 加 `user@host: 目录` 标题。
+    const UBUNTU_BASH: &[u8] = include_bytes!("../testdata/remote/ubuntu-26.04-bash.bin");
+    /// Debian 13（systemd 257）的 bash，普通用户：只有 `user@host: 目录` 标题。
+    const DEBIAN_BASH: &[u8] = include_bytes!("../testdata/remote/debian-13-bash.bin");
+    /// Debian 13 的 root：什么都不发。
+    const DEBIAN_ROOT_BASH: &[u8] = include_bytes!("../testdata/remote/debian-13-root-bash.bin");
+    /// Rocky Linux 9（systemd 252）的 bash：`user@host:目录` 标题（冒号后没有空格）。
+    const ROCKY_BASH: &[u8] = include_bytes!("../testdata/remote/rocky-9-bash.bin");
+    /// Ubuntu 26.04 上的 zsh 加 oh-my-zsh 默认配置：提示符下 `user@host:目录`，命令运行时是整行命令。
+    const OH_MY_ZSH: &[u8] = include_bytes!("../testdata/remote/ubuntu-26.04-oh-my-zsh.bin");
+
+    /// 卡片在某一刻看到的。
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct Seen {
+        program: Option<String>,
+        directory: Option<String>,
+        running: bool,
+    }
+
+    /// 一个字节一个字节地喂一段会话（`uname -n` 是 web-01），记下卡片看到的每次变化。
+    fn replay(session: &[u8]) -> Vec<Seen> {
+        let mut remote = Remote::on(Some("web-01"));
+        let mut seen: Vec<Seen> = Vec::new();
+        for byte in session {
+            remote.feed(std::slice::from_ref(byte));
+            let now = Seen {
+                program: remote.program().map(str::to_string),
+                directory: remote.directory().map(str::to_string),
+                running: remote.activity.running(),
+            };
+            if seen.last() != Some(&now) {
+                seen.push(now);
+            }
+        }
+        seen
+    }
+
+    /// 先后显示过的目录。
+    fn directories(seen: &[Seen]) -> Vec<&str> {
+        let mut directories: Vec<&str> =
+            seen.iter().filter_map(|s| s.directory.as_deref()).collect();
+        directories.dedup();
+        directories
+    }
+
+    /// 先后认出的程序。
+    fn programs(seen: &[Seen]) -> Vec<&str> {
+        let mut programs: Vec<&str> = seen.iter().filter_map(|s| s.program.as_deref()).collect();
+        programs.dedup();
+        programs
+    }
+
+    #[test]
+    fn ubuntu_bash_reports_its_folder_by_osc_3008() {
+        let seen = replay(UBUNTU_BASH);
+        // 3008 的 `cwd=` 是绝对路径（标题里的 `~` 用不上），目录里的空格原样保留。
+        assert_eq!(
+            directories(&seen),
+            ["/home/qtest", "/etc", "/home/qtest/src/a b", "/home/qtest"]
+        );
+        // 3008 只说有命令在跑，不说是什么；vim 的 `'title'` 默认关着，标题一直是提示符设的。
+        assert_eq!(programs(&seen), Vec::<&str>::new());
+        assert!(seen.iter().any(|s| s.running));
+        assert!(!seen.last().unwrap().running);
+    }
+
+    #[test]
+    fn debian_and_rocky_bash_titles_give_the_folder_for_show() {
+        for (session, name) in [(DEBIAN_BASH, "Debian"), (ROCKY_BASH, "Rocky")] {
+            let seen = replay(session);
+            assert_eq!(
+                directories(&seen),
+                ["~", "/etc", "~/src/a b", "~"],
+                "{name}"
+            );
+            assert_eq!(programs(&seen), Vec::<&str>::new(), "{name}");
+            // 没有 shell 集成：只有 vim 进全屏时知道在跑。
+            assert!(seen.iter().any(|s| s.running), "{name}");
+        }
+    }
+
+    #[test]
+    fn debian_root_bash_tells_nothing_but_full_screen() {
+        let seen = replay(DEBIAN_ROOT_BASH);
+        assert_eq!(directories(&seen), Vec::<&str>::new());
+        assert_eq!(programs(&seen), Vec::<&str>::new());
+        assert!(seen.iter().any(|s| s.running));
+    }
+
+    #[test]
+    fn oh_my_zsh_titles_give_each_command_and_the_folder() {
+        let seen = replay(OH_MY_ZSH);
+        assert_eq!(directories(&seen), ["~", "/etc", "~/src/a b", "~"]);
+        // 标题是整行命令（别名展开过），取第一个真正的命令；`;` 粘在词尾也认得出。
+        assert_eq!(
+            programs(&seen),
+            ["cd", "mkdir", "cd", "sleep", "true", "vim", "vi", "exit"]
         );
     }
 
