@@ -17,6 +17,8 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use portable_pty::CommandBuilder;
 
 /// 认得出、能接上目录报告的 shell。
@@ -156,25 +158,7 @@ pub(crate) const POWERSHELL_PROMPT: &str = r#"try {
 /// `-EncodedCommand` 要的写法：UTF-16LE 的 Base64。
 pub(crate) fn encoded_command(script: &str) -> String {
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    base64(&bytes)
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut text = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let group = chunk.iter().enumerate().fold(0_u32, |group, (at, &byte)| {
-            group | u32::from(byte) << (16 - 8 * at)
-        });
-        for at in 0..4 {
-            if at <= chunk.len() {
-                text.push(char::from(ALPHABET[(group >> (18 - 6 * at)) as usize & 63]));
-            } else {
-                text.push('=');
-            }
-        }
-    }
-    text
+    STANDARD.encode(bytes)
 }
 
 /// cmd 的 `PROMPT`：在 `prompt`（没有时是 cmd 默认的 `$P$G`）前加一条 OSC 9;9。
@@ -312,7 +296,6 @@ mod tests {
         // `[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(...))` 算的。
         assert_eq!(encoded_command("dir"), "ZABpAHIA");
         assert_eq!(encoded_command("cd 中文"), "YwBkACAALU6HZQ==");
-        assert_eq!(base64(b"ab"), "YWI=");
-        assert_eq!(base64(b""), "");
+        assert_eq!(encoded_command(""), "");
     }
 }
