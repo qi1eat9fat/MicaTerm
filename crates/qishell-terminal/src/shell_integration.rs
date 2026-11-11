@@ -56,7 +56,11 @@ pub(crate) fn report_directory(command: &mut CommandBuilder) {
     match shell_of(&program) {
         Some(Shell::PowerShell) => {
             if plain_powershell_arguments(&command.get_argv()[1..]) {
-                command.args(["-NoExit", "-EncodedCommand", &encoded_command(POWERSHELL_PROMPT)]);
+                command.args([
+                    "-NoExit",
+                    "-EncodedCommand",
+                    &encoded_command(POWERSHELL_PROMPT),
+                ]);
             }
         }
         Some(Shell::Cmd) => {
@@ -73,7 +77,10 @@ pub(crate) fn report_directory(command: &mut CommandBuilder) {
 
 /// `program` 是哪种 shell：看文件名，不分大小写，`.exe` 可有可无。
 fn shell_of(program: &OsStr) -> Option<Shell> {
-    let name = Path::new(program).file_name()?.to_str()?.to_ascii_lowercase();
+    let name = Path::new(program)
+        .file_name()?
+        .to_str()?
+        .to_ascii_lowercase();
     let name = name.strip_suffix(".exe").unwrap_or(&name);
     match name {
         "powershell" | "pwsh" => Some(Shell::PowerShell),
@@ -144,10 +151,9 @@ fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut text = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let group = chunk
-            .iter()
-            .enumerate()
-            .fold(0_u32, |group, (at, &byte)| group | u32::from(byte) << (16 - 8 * at));
+        let group = chunk.iter().enumerate().fold(0_u32, |group, (at, &byte)| {
+            group | u32::from(byte) << (16 - 8 * at)
+        });
         for at in 0..4 {
             if at <= chunk.len() {
                 text.push(char::from(ALPHABET[(group >> (18 - 6 * at)) as usize & 63]));
@@ -205,7 +211,13 @@ mod tests {
             );
         }
         assert_eq!(
-            argv(&integrated(&["pwsh.exe", "/nop", "-ExecutionPolicy", "Bypass"])).len(),
+            argv(&integrated(&[
+                "pwsh.exe",
+                "/nop",
+                "-ExecutionPolicy",
+                "Bypass"
+            ]))
+            .len(),
             7
         );
     }
@@ -239,7 +251,10 @@ mod tests {
     #[test]
     fn cmd_reports_before_its_prompt() {
         assert_eq!(cmd_prompt(None).as_deref(), Some(r#"$e]9;9;"$P"$e\$P$G"#));
-        assert_eq!(cmd_prompt(Some("")).as_deref(), Some(r#"$e]9;9;"$P"$e\$P$G"#));
+        assert_eq!(
+            cmd_prompt(Some("")).as_deref(),
+            Some(r#"$e]9;9;"$P"$e\$P$G"#)
+        );
         assert_eq!(
             cmd_prompt(Some("$T $P$_$G")).as_deref(),
             Some(r#"$e]9;9;"$P"$e\$T $P$_$G"#)
