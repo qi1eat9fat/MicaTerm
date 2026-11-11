@@ -206,7 +206,7 @@ pub struct Workspace {
     pub(super) start_highlight: usize,
     /// 等窗口停稳再写 `window.json` 的那一次（工单 26）；窗口又动了就换一个新的。
     pub(super) window_state_save: Option<Task<()>>,
-    pub(super) _subscriptions: Vec<Subscription>,
+    pub(super) subscriptions: Vec<Subscription>,
 }
 
 impl Workspace {
@@ -327,7 +327,7 @@ impl Workspace {
             quick_connect_anchor: Default::default(),
             start_highlight: 0,
             window_state_save: None,
-            _subscriptions: subscriptions,
+            subscriptions,
         };
         // 记住窗口大小和位置（工单 26）：没有数据目录就不记。
         if let Some(path) = window_state_path {
@@ -630,7 +630,7 @@ impl Render for Workspace {
             .overflow_hidden()
             .text_color(tokens.text)
             // 不透明的两色标渐变；开了 Mica 时是半透明的，让系统的 Mica 透出来（工单 26）。
-            .bg(tokens.window_gradient(WindowBackdrop::current(cx) == WindowBackdrop::Mica))
+            .bg(tokens.window_gradient(WindowBackdrop::current(cx)))
             .when(self.host_sidebar_open, |root| {
                 root.child(render_host_sidebar(
                     self.hosts.read(cx).hosts().len(),

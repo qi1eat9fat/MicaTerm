@@ -6,6 +6,8 @@ use gpui_kit::{App, Background, Hsla, Rgba, linear_color_stop, linear_gradient, 
 
 use gpui_kit::component::ActiveTheme as _;
 
+use crate::settings::WindowBackdrop;
+
 /// 开了 Mica 时窗口背景渐变的不透明度：0 是纯 Mica，1 是看不见 Mica。
 pub const MICA_TINT_OPACITY: f32 = 0.5;
 
@@ -177,16 +179,13 @@ impl Tokens {
         }
     }
 
-    /// 窗口背景：从 `bg_top` 到 `bg_bottom` 的竖直渐变。`translucent`（开了 Mica，工单 26）时
+    /// 窗口背景：从 `bg_top` 到 `bg_bottom` 的竖直渐变。窗口用 Mica（工单 26）时
     /// 两端都降到 `MICA_TINT_OPACITY`，让系统的 Mica 透出来，又带着界面原型的底色。
     /// Mica 自己的深浅由窗口的深色属性决定，已经按应用外观设好（`settings::backdrop`）。
-    pub fn window_gradient(&self, translucent: bool) -> Background {
-        let tint = |color: Hsla| {
-            if translucent {
-                color.opacity(MICA_TINT_OPACITY)
-            } else {
-                color
-            }
+    pub fn window_gradient(&self, backdrop: WindowBackdrop) -> Background {
+        let tint = |color: Hsla| match backdrop {
+            WindowBackdrop::Opaque => color,
+            WindowBackdrop::Mica => color.opacity(MICA_TINT_OPACITY),
         };
         linear_gradient(
             180.,

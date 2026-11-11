@@ -136,7 +136,7 @@ impl Workspace {
                     .await;
             }));
         });
-        self._subscriptions.push(subscription);
+        self.subscriptions.push(subscription);
     }
 }
 

@@ -96,7 +96,7 @@ fn sync_dark_frame(mode: ThemeMode, window: &Window) {
 fn sync_dark_frame(_: ThemeMode, _: &Window) {}
 
 /// 有 Mica 的最早的 Windows build（Windows 11 22H2），和 GPUI 的判断一致。
-pub const MICA_MIN_BUILD: u32 = 22621;
+const MICA_MIN_BUILD: u32 = 22621;
 
 /// 这台电脑能不能用 Mica：Windows 11 22H2 及以上。别的系统都不能。
 pub fn mica_supported() -> bool {
