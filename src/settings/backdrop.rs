@@ -71,18 +71,11 @@ pub(super) fn apply_backdrop(wanted: bool, mode: ThemeMode, window: &mut Window,
 /// 它决定 Mica 和窗口边框的底色。拿不到窗口句柄（无头测试）就什么都不做。
 #[cfg(windows)]
 fn sync_dark_frame(mode: ThemeMode, window: &Window) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 
-    // `Window` 自己也有个 `window_handle`（GPUI 的窗口 id），这里要的是系统的句柄。
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+    let Some(hwnd) = crate::app::win32::hwnd(window) else {
         return;
     };
-    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
-        return;
-    };
-    let hwnd = HWND(handle.hwnd.get() as *mut std::ffi::c_void);
     // Win32 的 BOOL：4 字节整数。
     let dark: i32 = (mode == ThemeMode::Dark).into();
     // SAFETY: `hwnd` 是这个窗口自己的句柄；属性值指向一个活着的 4 字节 BOOL，长度如实给出。

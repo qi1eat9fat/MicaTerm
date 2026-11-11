@@ -6,6 +6,8 @@ mod fonts;
 mod paths;
 mod quit;
 pub mod shortcuts;
+#[cfg(windows)]
+pub mod win32;
 
 pub use actions::*;
 pub use assets::{AppAssets, CatalogIcon};
