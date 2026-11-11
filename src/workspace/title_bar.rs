@@ -3,7 +3,7 @@
 //!
 //! 不用 gpui-component 的 `TitleBar`：它把子元素整块当作拖动区。这里只给 `title-drag`
 //! 那块空白标 `WindowControlArea::Drag`，标签轨道和按钮都不在拖动区里。
-//! 标签轨道（`tab-rail`）里的东西由 `tabs::TabRail` 画好传进来。
+//! 标签轨道（`tab-rail`）里的东西由 `tabs::TabRail` 画。
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -16,26 +16,43 @@ use super::quick_connect::QuickConnectAnchor;
 use super::window_buttons::render_window_buttons;
 use crate::app::{CatalogIcon, NewLocalTerminalTab, QuickConnect, ToggleHostSidebar};
 use crate::i18n::t;
-use crate::tabs::TabRail;
+use crate::tabs::{TabRail, TabSnapshot};
 use crate::theme::{GAP, TITLE_BAR_HEIGHT, Tokens};
 
 /// macOS 上主机栏收起时，给红绿灯让出的宽度。
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(72.);
 
-/// `quick_connect_open`：快速连接开着，「+ ⌄」显示成按下的底色（原型 `.plusgrp.open`）；
-/// `anchor` 记下这组按钮画在哪里，弹层挂在它下面。
-/// 拖着的标签由整条标题栏接住（`rail`，工单 29）：松开在轨道右端以外（`+`、拖动区）算放到最后。
-#[allow(clippy::too_many_arguments)]
+/// 画标题栏要的窗口壳状态。
+pub(super) struct TitleBarState<'a> {
+    /// 主机栏开着：不画「展开主机栏」。
+    pub host_sidebar_open: bool,
+    /// 快速连接开着：「+ ⌄」显示成按下的底色（原型 `.plusgrp.open`）。
+    pub quick_connect_open: bool,
+    /// 记下「+ ⌄」画在哪里，快速连接的弹层挂在它下面。
+    pub anchor: &'a Rc<QuickConnectAnchor>,
+    /// 标签轨道：画 `tabs`，也接住拖着的标签（工单 29）。
+    pub rail: &'a TabRail,
+    pub tabs: Vec<TabSnapshot>,
+}
+
+/// 点击和菜单都经 `target`（窗口壳的焦点）派发。
+/// 拖着的标签由整条标题栏接住（工单 29）：松开在轨道右端以外（`+`、拖动区）放到最后，
+/// 左端以外（「展开主机栏」）放到第一个。
 pub(super) fn render_title_bar(
-    host_sidebar_open: bool,
-    quick_connect_open: bool,
-    anchor: &Rc<QuickConnectAnchor>,
-    tabs: Option<impl IntoElement>,
-    rail: &TabRail,
+    state: TitleBarState<'_>,
     target: &FocusHandle,
     tokens: &Tokens,
     window: &Window,
+    cx: &App,
 ) -> impl IntoElement {
+    let TitleBarState {
+        host_sidebar_open,
+        quick_connect_open,
+        anchor,
+        rail,
+        tabs,
+    } = state;
+    let tabs = rail.render(tabs, target, tokens, window, cx);
     div()
         .id("title-bar")
         .map(|bar| rail.accept_drops(bar, target))

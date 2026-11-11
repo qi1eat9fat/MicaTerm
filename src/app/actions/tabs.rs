@@ -2,7 +2,7 @@
 
 use gpui_kit::{Action, Pixels, Point};
 
-use crate::tabs::TabId;
+use crate::tabs::{TabDrop, TabId};
 
 gpui_kit::actions!(
     qishell,
@@ -51,10 +51,10 @@ pub struct OpenTabMenu {
     pub position: Point<Pixels>,
 }
 
-/// 把这个标签挪到第 `to` 个（从 0 数起，超出的放到最后），在前的标签不变（拖动排序，工单 29）。
+/// 把这个标签放到 `drop` 说的地方（某个标签前后、最前、最后），在前的标签不变（拖动排序，工单 29）。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
 #[action(namespace = qishell, no_json)]
 pub struct MoveTab {
     pub tab: TabId,
-    pub to: usize,
+    pub drop: TabDrop,
 }

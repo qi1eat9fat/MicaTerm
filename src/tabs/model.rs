@@ -5,6 +5,34 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TabId(pub u64);
 
+/// 拖动排序时标签放到哪里（工单 29）：和主机栏的 `HostDrop` 一样按「放在某个标签前后」说，
+/// 另有最前、最后（拖过轨道左端、右端）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabDrop {
+    Before(TabId),
+    After(TabId),
+    First,
+    Last,
+}
+
+impl TabDrop {
+    /// 把 `id` 照这样放进 `order`，挪完在第几个（从 0 数起）。
+    /// 顺序不变（放回原处）、`id` 或参照的标签不在 `order` 里时返回 `None`。
+    pub fn destination(self, order: &[TabId], id: TabId) -> Option<usize> {
+        let from = order.iter().position(|tab| *tab == id)?;
+        let last = order.len() - 1;
+        // 先按「还没拿出来」的位置算缝，再换成拿出来以后的位置。
+        let gap = match self {
+            Self::First => 0,
+            Self::Last => last + 1,
+            Self::Before(target) => order.iter().position(|tab| *tab == target)?,
+            Self::After(target) => order.iter().position(|tab| *tab == target)? + 1,
+        };
+        let to = if gap > from { gap - 1 } else { gap };
+        (to != from).then_some(to)
+    }
+}
+
 /// 按顺序排着的标签，每个带一份 `T`（终端标签是它的卡片），加上在前的那个。
 #[derive(Debug)]
 pub struct TabList<T> {
@@ -140,16 +168,13 @@ impl<T> TabList<T> {
         }
     }
 
-    /// 把 `id` 挪到第 `index` 个（从 0 数起，超出的放到最后），在前的标签不变（工单 29 拖动排序）。
-    /// 顺序变了返回 `true`；没有这个标签、或它本来就在那里时返回 `false`。
-    pub fn move_to(&mut self, id: TabId, index: usize) -> bool {
-        let Some(from) = self.index_of(id) else {
+    /// 把 `id` 放到 `drop` 说的地方，在前的标签不变（工单 29 拖动排序）。
+    /// 顺序变了返回 `true`；放回原处、没有这个标签或参照的标签时返回 `false`。
+    pub fn move_to(&mut self, id: TabId, drop: TabDrop) -> bool {
+        let Some(to) = drop.destination(&self.ids(), id) else {
             return false;
         };
-        let to = index.min(self.tabs.len() - 1);
-        if from == to {
-            return false;
-        }
+        let from = self.index_of(id).expect("destination found the tab");
         let tab = self.tabs.remove(from);
         self.tabs.insert(to, tab);
         true
@@ -167,7 +192,7 @@ impl<T> TabList<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TabId, TabList};
+    use super::{TabDrop, TabId, TabList};
 
     fn list(names: &[&'static str]) -> TabList<&'static str> {
         let mut tabs = TabList::default();
@@ -256,29 +281,63 @@ mod tests {
         assert!(tabs.others(TabId(9)).is_empty());
     }
 
-    /// 拖动排序（工单 29）：挪到第 `index` 个（从 0 数起），超出的放到最后；在前的标签不变。
+    /// 拖动排序（工单 29）：放在某个标签前面、后面，或者最前、最后；在前的标签不变。
     #[test]
-    fn moving_a_tab_puts_it_at_the_index_and_keeps_the_front_one() {
+    fn moving_a_tab_puts_it_where_it_is_dropped_and_keeps_the_front_one() {
         let mut tabs = list(&["a", "b", "c", "d"]);
         tabs.activate(TabId(2));
 
-        assert!(tabs.move_to(TabId(4), 0));
+        assert!(tabs.move_to(TabId(4), TabDrop::Before(TabId(1))));
         assert_eq!(tabs.ids(), [TabId(4), TabId(1), TabId(2), TabId(3)]);
-        assert!(tabs.move_to(TabId(4), 2));
+        assert!(tabs.move_to(TabId(4), TabDrop::After(TabId(2))));
         assert_eq!(tabs.ids(), [TabId(1), TabId(2), TabId(4), TabId(3)]);
-        assert!(tabs.move_to(TabId(1), 9));
+        assert!(tabs.move_to(TabId(1), TabDrop::Last));
         assert_eq!(tabs.ids(), [TabId(2), TabId(4), TabId(3), TabId(1)]);
+        assert!(tabs.move_to(TabId(3), TabDrop::First));
+        assert_eq!(tabs.ids(), [TabId(3), TabId(2), TabId(4), TabId(1)]);
+        assert!(tabs.move_to(TabId(3), TabDrop::After(TabId(1))));
+        assert_eq!(tabs.ids(), [TabId(2), TabId(4), TabId(1), TabId(3)]);
         assert_eq!(tabs.active(), Some(TabId(2)));
         assert_eq!(tabs.get(TabId(1)), Some(&"a"));
     }
 
+    /// 放回原处（自己身上、紧挨着的缝、已经在最前或最后），或者标签不在：什么都不变。
     #[test]
-    fn moving_a_tab_to_where_it_is_or_a_tab_that_is_gone_changes_nothing() {
+    fn dropping_a_tab_where_it_already_is_changes_nothing() {
         let mut tabs = list(&["a", "b", "c"]);
-        assert!(!tabs.move_to(TabId(2), 1));
-        assert!(!tabs.move_to(TabId(3), 7));
-        assert!(!tabs.move_to(TabId(9), 0));
+        for drop in [
+            TabDrop::Before(TabId(2)),
+            TabDrop::After(TabId(2)),
+            TabDrop::Before(TabId(3)),
+            TabDrop::After(TabId(1)),
+        ] {
+            assert!(!tabs.move_to(TabId(2), drop), "{drop:?}");
+        }
+        assert!(!tabs.move_to(TabId(1), TabDrop::First));
+        assert!(!tabs.move_to(TabId(3), TabDrop::Last));
+        assert!(!tabs.move_to(TabId(9), TabDrop::First));
+        assert!(!tabs.move_to(TabId(1), TabDrop::Before(TabId(9))));
         assert_eq!(tabs.ids(), [TabId(1), TabId(2), TabId(3)]);
+    }
+
+    /// 轨道画插入线前先问一声：放下去顺序变不变、变了挪到第几个。
+    #[test]
+    fn a_drop_tells_where_the_tab_would_land() {
+        let order = [TabId(1), TabId(2), TabId(3)];
+        assert_eq!(
+            TabDrop::After(TabId(3)).destination(&order, TabId(1)),
+            Some(2)
+        );
+        assert_eq!(
+            TabDrop::Before(TabId(3)).destination(&order, TabId(1)),
+            Some(1)
+        );
+        assert_eq!(TabDrop::First.destination(&order, TabId(3)), Some(0));
+        assert_eq!(
+            TabDrop::Before(TabId(2)).destination(&order, TabId(1)),
+            None
+        );
+        assert_eq!(TabDrop::Last.destination(&order, TabId(9)), None);
     }
 
     #[test]

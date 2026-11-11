@@ -617,6 +617,21 @@ fn dropping_past_the_track_puts_the_tab_last(cx: &mut TestAppContext) {
     assert_eq!(active_tab(cx, &workspace), Some(TabId(3)));
 }
 
+/// 拖过轨道左端，放在「展开主机栏」上：放到第一个（和右端对称）。
+#[gpui_kit::test]
+fn dropping_before_the_track_puts_the_tab_first(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_tabs(cx, 3);
+    dispatch(cx, handle, ToggleHostSidebar);
+
+    in_frame(cx, handle, |window, cx| {
+        let from = window.find(tab(3)).bounds().center();
+        let to = window.find("expand-host-sidebar").bounds().center();
+        window.drag(from, to, cx);
+    });
+    assert_order(cx, handle, &workspace, &[3, 1, 2]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(3)));
+}
+
 /// 轨道放不下时，拖到轨道左端停住：轨道自己往回滚，滚到头放下就是第一个。
 #[gpui_kit::test]
 fn dragging_to_the_end_of_the_track_scrolls_it(cx: &mut TestAppContext) {

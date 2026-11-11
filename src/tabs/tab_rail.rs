@@ -1,7 +1,7 @@
 //! 标签轨道（原型 `.track`）和里面的标签（`.tab`）：宽固定 180、高 28，叠放的程序图块、名称、目录和状态点。
 //! 点标签切过去；悬停时状态点让位给 ×，点了关闭整个标签；右键菜单三项；放不下时轨道横向滚动。
 //! 按住标签左右拖动改顺序（工单 29）：标题栏里有插入线，拖到轨道两端自动横向滚动，
-//! 拖过轨道右端（`+`、拖动区）算放到最后；拖动中不切换在前的标签。
+//! 拖过轨道右端（`+`、拖动区）放到最后，拖过左端（「展开主机栏」）放到第一个；拖动中不切换在前的标签。
 //! 渲染不读实体，只拿窗口壳取好的快照；点击、菜单、拖动排序都经窗口壳的焦点派发 action。
 // 参考 gorex 的模型重写：tabs.go 的标签外观、悬停时出现 ×。
 
@@ -14,7 +14,7 @@ use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::TabId;
+use super::{TabDrop, TabId};
 use crate::app::{
     ActivateTab, CatalogIcon, CloseOtherTabs, CloseTab, CloseTabsToRight, MoveTab, OpenTabMenu,
 };
@@ -22,6 +22,7 @@ use crate::card::{StatusDot, render_status_dot, render_tile_stack};
 use crate::i18n::t;
 use crate::programs::Program;
 use crate::theme::{TAB_HEIGHT, TAB_TRACK_HEIGHT, TAB_WIDTH, Tokens};
+use crate::ui::drag::{DragSlot, DropEdge, fade_while_dragged, render_drop_line};
 
 /// 画一个标签要的东西。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,7 +49,7 @@ pub struct TabRail {
     reveal_requested: Cell<bool>,
     menu: Option<OpenMenu>,
     /// 正在拖的标签：标题栏的拖动监听写，渲染时读来画插入线、自动滚动。
-    drag: Rc<Cell<Option<TabDrag>>>,
+    drag: Rc<DragSlot<TabDrag>>,
     /// 上一帧画的标签顺序：松开时按它算放到第几个。
     order: Rc<RefCell<Vec<TabId>>>,
 }
@@ -94,9 +95,7 @@ impl TabRail {
         cx: &App,
     ) -> Option<impl IntoElement + use<>> {
         // 拖动在别处放下或取消了：插入线和变淡都收掉。
-        if !cx.has_active_drag() {
-            self.drag.set(None);
-        }
+        self.drag.settle(cx);
         *self.order.borrow_mut() = tabs.iter().map(|tab| tab.id).collect();
         if tabs.is_empty() {
             self.revealed.set(None);
@@ -108,21 +107,18 @@ impl TabRail {
         let count = tabs.len();
         let drag = self.drag.get();
         let line = drag.and_then(|drag| {
-            let gap = self.follow_drag(drag, count, window)?;
-            let from = tabs.iter().position(|tab| tab.id == drag.source)?;
-            drop_index(from, gap)?;
-            Some(gap)
+            let order = self.order.borrow();
+            let drop = self.follow_drag(drag, &order, window)?;
+            // 放回原处不画线。
+            drop.destination(&order, drag.source)?;
+            line_position(drop, &order)
         });
         let mut children = Vec::with_capacity(count * 2);
         for (index, tab) in tabs.into_iter().enumerate() {
             let look = TabLook {
                 pressed: menu_tab == Some(tab.id),
                 dragged: drag.is_some_and(|drag| drag.source == tab.id),
-                line: match line {
-                    Some(gap) if gap == index => Some(Edge::Left),
-                    Some(gap) if gap == count && index + 1 == count => Some(Edge::Right),
-                    _ => None,
-                },
+                line: line.and_then(|(at, edge)| (at == index).then_some(edge)),
             };
             children.push(render_tab(tab, look, target, tokens).into_any_element());
             if index + 1 < count {
@@ -162,32 +158,26 @@ impl TabRail {
     /// 让标题栏接住拖着的标签（工单 29）：在标题栏里移动时记下位置（插入线、自动滚动看它），
     /// 在标题栏里松开时按松开的位置派发 `MoveTab`。拖动区本身不挂任何处理器，照常拖窗口。
     pub fn accept_drops(&self, bar: Stateful<Div>, target: &FocusHandle) -> Stateful<Div> {
-        let drag = self.drag.clone();
-        let dropped = self.drag.clone();
+        // 同一份拖动状态，移动时记、松开时清，两个处理器各拿一份。
+        let drag_on_move = self.drag.clone();
+        let drag_on_drop = self.drag.clone();
         let scroll = self.scroll.clone();
         let order = self.order.clone();
         let target = target.clone();
         bar.on_drag_move(move |event: &DragMoveEvent<DraggedTab>, _, cx| {
             let pointer = event.event.position;
-            drag.set(Some(TabDrag {
+            drag_on_move.set(Some(TabDrag {
                 source: event.drag(cx).tab.id,
                 pointer,
                 over_title_bar: event.bounds.contains(&pointer),
             }));
         })
         .on_drop(move |dragged: &DraggedTab, window, cx| {
-            dropped.set(None);
+            drag_on_drop.take();
             let tab = dragged.tab.id;
-            let (from, count) = {
-                let order = order.borrow();
-                let Some(from) = order.iter().position(|id| *id == tab) else {
-                    return;
-                };
-                (from, order.len())
-            };
-            let gap = insertion_gap(window.mouse_position().x, &scroll, count);
-            if let Some(to) = drop_index(from, gap) {
-                target.dispatch_action(&MoveTab { tab, to }, window, cx);
+            let drop = drop_at(window.mouse_position().x, &scroll, &order.borrow());
+            if let Some(drop) = drop {
+                target.dispatch_action(&MoveTab { tab, drop }, window, cx);
             }
         })
     }
@@ -238,9 +228,9 @@ impl TabRail {
         }
     }
 
-    /// 拖着标签的这一帧：鼠标在轨道两端就滚一步、要下一帧接着滚；返回插入线落在哪个缝。
-    /// 鼠标不在标题栏里时没有插入线。
-    fn follow_drag(&self, drag: TabDrag, count: usize, window: &Window) -> Option<usize> {
+    /// 拖着标签的这一帧：鼠标在轨道两端就滚一步、要下一帧接着滚；返回此刻松开会放到哪里。
+    /// 鼠标不在标题栏里时松开就取消，返回 `None`。
+    fn follow_drag(&self, drag: TabDrag, order: &[TabId], window: &Window) -> Option<TabDrop> {
         if !drag.over_title_bar {
             return None;
         }
@@ -259,34 +249,43 @@ impl TabRail {
             self.scroll.set_offset(point(scrolled, offset.y));
             window.request_animation_frame();
         }
-        Some(insertion_gap(x, &self.scroll, count))
+        drop_at(x, &self.scroll, order)
     }
 }
 
-/// 鼠标在 `x`（窗口坐标）时插入线落在哪个缝：0 是第一个标签前面，`count` 是最后一个后面。
-/// 看的是标签露出来的中线（布局位置加上滚动）；过了轨道右端（`+`、拖动区）算放到最后，
-/// 轨道左边按轨道左端算。
-fn insertion_gap(x: Pixels, scroll: &ScrollHandle, count: usize) -> usize {
+/// 鼠标在 `x`（窗口坐标）时松开，标签放到哪里。`order` 是轨道里标签的顺序。
+/// 停在某个标签上：左半边放在它前面，右半边放在它后面（看的是标签露出来的位置：布局位置加上滚动）；
+/// 过了轨道右端（`+`、拖动区）放到最后，过了左端（「展开主机栏」）放到第一个。
+fn drop_at(x: Pixels, scroll: &ScrollHandle, order: &[TabId]) -> Option<TabDrop> {
     let track = scroll.bounds();
     if x > track.right() {
-        return count;
+        return Some(TabDrop::Last);
     }
-    let x = x.max(track.left());
+    if x < track.left() {
+        return Some(TabDrop::First);
+    }
     let offset = scroll.offset().x;
-    (0..count)
-        .filter_map(|index| scroll.bounds_for_item(index * 2))
-        .filter(|bounds| bounds.center().x + offset < x)
-        .count()
+    for (index, id) in order.iter().enumerate() {
+        let bounds = scroll.bounds_for_item(index * 2)?;
+        if x < bounds.center().x + offset {
+            return Some(TabDrop::Before(*id));
+        }
+        if x <= bounds.right() + offset {
+            return Some(TabDrop::After(*id));
+        }
+    }
+    // 最后一个标签右边、轨道的内边距里。
+    order.last().map(|id| TabDrop::After(*id))
 }
 
-/// 从第 `from` 个拖到缝 `gap`，挪完在第几个；拖回自己两边的缝不算挪动。
-fn drop_index(from: usize, gap: usize) -> Option<usize> {
-    if gap == from || gap == from + 1 {
-        None
-    } else if gap > from {
-        Some(gap - 1)
-    } else {
-        Some(gap)
+/// 插入线画在第几个标签的哪一边。
+fn line_position(drop: TabDrop, order: &[TabId]) -> Option<(usize, DropEdge)> {
+    let index_of = |target: TabId| order.iter().position(|id| *id == target);
+    match drop {
+        TabDrop::Before(target) => Some((index_of(target)?, DropEdge::Left)),
+        TabDrop::After(target) => Some((index_of(target)?, DropEdge::Right)),
+        TabDrop::First => Some((0, DropEdge::Left)),
+        TabDrop::Last => Some((order.len().checked_sub(1)?, DropEdge::Right)),
     }
 }
 
@@ -306,13 +305,6 @@ pub fn build_tab_menu(
     })
 }
 
-/// 插入线画在标签的哪一边。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Edge {
-    Left,
-    Right,
-}
-
 /// 标签随轨道状态变的样子。
 struct TabLook {
     /// 这个标签的右键菜单开着（原型 `.tab.rc`）。
@@ -320,7 +312,7 @@ struct TabLook {
     /// 正拖着它：变淡，跟着鼠标的是它的预览。
     dragged: bool,
     /// 插入线落在它的哪一边。
-    line: Option<Edge>,
+    line: Option<DropEdge>,
 }
 
 fn render_tab(
@@ -343,11 +335,12 @@ fn render_tab(
         .relative()
         .cursor_pointer()
         .when(tab.active, |this| {
-            this.bg(tokens.tab_active).shadow(raised(tokens.shadow))
+            this.bg(tokens.tab_active)
+                .shadow(floating_shadow(tokens.shadow))
         })
         .when(!tab.active, |this| this.hover(move |style| style.bg(hover)))
         .when(look.pressed, |this| this.bg(tokens.pressed))
-        .when(look.dragged, |this| this.opacity(0.45))
+        .map(|this| fade_while_dragged(this, look.dragged))
         // 按下标签不把焦点交给窗口壳：拖动排序（或拖出去取消）之后焦点还在原来的卡片里。
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         .on_click(move |_, window, cx| {
@@ -382,7 +375,10 @@ fn render_tab(
                 )
                 .child(render_close_button(id, target, tokens)),
         )
-        .children(look.line.map(|edge| render_drop_line(edge, tokens)))
+        .children(look.line.map(|edge| {
+            // 中线往外挪半像素，骑在两个标签之间的竖线上。
+            render_drop_line("tab-drop-line".into(), edge, px(4.), px(0.5), tokens)
+        }))
 }
 
 /// 标签的外形和左边的内容（图块、名称、目录）：轨道里的标签和拖动预览共用。
@@ -426,8 +422,8 @@ fn render_tab_face(tab: &TabSnapshot, tiles: ElementId, tokens: &Tokens) -> Div 
         )
 }
 
-/// 在前的标签（和拖动预览）的浮起阴影。
-fn raised(shadow: Hsla) -> Vec<BoxShadow> {
+/// 在前的标签和拖动预览底下的阴影：让它们看着浮在轨道上。
+fn floating_shadow(shadow: Hsla) -> Vec<BoxShadow> {
     vec![
         BoxShadow {
             color: shadow,
@@ -444,23 +440,6 @@ fn raised(shadow: Hsla) -> Vec<BoxShadow> {
             inset: false,
         },
     ]
-}
-
-/// 拖动时的插入线：竖在标签左边或右边的缝上（盖住竖线）。
-fn render_drop_line(edge: Edge, tokens: &Tokens) -> impl IntoElement {
-    div()
-        .id("tab-drop-line")
-        .test_support()
-        .absolute()
-        .top(px(4.))
-        .bottom(px(4.))
-        .w(px(2.))
-        .rounded(px(1.))
-        .bg(tokens.accent)
-        .map(|line| match edge {
-            Edge::Left => line.left(px(-1.5)),
-            Edge::Right => line.right(px(-1.5)),
-        })
 }
 
 /// 标签右端的 ×：只在悬停这个标签时出现，点了关闭整个标签。
@@ -514,7 +493,7 @@ impl Render for DraggedTab {
         };
         render_tab_face(&tab, ("tab-drag-tiles", tab.id.0 as usize).into(), &tokens)
             .bg(tokens.tab_active)
-            .shadow(raised(tokens.shadow))
+            .shadow(floating_shadow(tokens.shadow))
             .opacity(0.92)
     }
 }
