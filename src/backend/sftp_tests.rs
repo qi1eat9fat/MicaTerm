@@ -875,3 +875,31 @@ fn a_connection_dropped_while_scanning_reconnects_on_its_own() {
         "uploaded"
     );
 }
+
+/// 「上传文件夹…」（工单 35）：选中的文件夹整个传上去，子目录、深一层的文件和空文件夹都在。
+#[test]
+fn a_folder_with_subfolders_is_uploaded_whole() {
+    let Some((served, state)) = directories() else {
+        return;
+    };
+    let folder = state.path().join("工程");
+    std::fs::create_dir_all(folder.join("子目录").join("深")).unwrap();
+    std::fs::create_dir(folder.join("空")).unwrap();
+    std::fs::write(folder.join("说明.txt"), "顶层").unwrap();
+    std::fs::write(folder.join("子目录").join("a.txt"), "一层").unwrap();
+    std::fs::write(folder.join("子目录").join("深").join("b.txt"), "两层").unwrap();
+    let session = Session::open(served.path(), state.path());
+
+    session.upload(&folder);
+    session.wait_phase(TransferPhase::Completed, |question| {
+        panic!("unexpected question: {question:?}")
+    });
+    let uploaded = served.path().join("工程");
+    let read = |path: &Path| std::fs::read_to_string(uploaded.join(path)).unwrap();
+    assert_eq!(read(Path::new("说明.txt")), "顶层");
+    assert_eq!(read(&Path::new("子目录").join("a.txt")), "一层");
+    assert_eq!(read(&Path::new("子目录").join("深").join("b.txt")), "两层");
+    assert!(uploaded.join("空").is_dir());
+    let names = session.list(&session.home.join("工程").unwrap()).unwrap();
+    assert!(names.contains(&"子目录".to_string()), "{names:?}");
+}
