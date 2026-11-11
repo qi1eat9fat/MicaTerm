@@ -167,3 +167,6 @@ sftp_transfer.queue.status.not_started:
   zh-CN: 无法开始：%{reason}
 sftp_transfer.queue.status.removed:
   zh-CN: 已移出
+# 上传文件夹（工单 35）
+sftp_transfer.confirm.choose_folders:
+  zh-CN: 选择要上传的文件夹

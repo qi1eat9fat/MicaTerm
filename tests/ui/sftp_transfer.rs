@@ -349,6 +349,39 @@ fn the_native_picker_leads_to_the_same_confirmation(cx: &mut TestAppContext) {
     );
 }
 
+/// 「上传文件夹…」（工单 35）：系统的文件夹选择框只选文件夹，选中的整个走同一个确认框和传输队列。
+#[gpui_kit::test]
+fn the_folder_picker_uploads_the_chosen_folder_through_the_queue(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    let picked = tempfile::tempdir().unwrap();
+    let folder = picked.path().join("工程");
+    std::fs::create_dir_all(folder.join("子目录")).unwrap();
+    command(cx, &fixture, SftpTabCommand::ChooseFolder);
+    cx.run_until_parked();
+    assert!(cx.did_prompt_for_paths());
+    let answer = folder.clone();
+    cx.simulate_path_prompt_response(move |options| {
+        assert!(options.directories && !options.files, "{options:?}");
+        assert_eq!(options.prompt.as_deref(), Some("选择要上传的文件夹"));
+        Some(vec![answer])
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        value(cx, &fixture, "upload-target").as_deref(),
+        Some("/home/tester")
+    );
+    let summary = label(cx, &fixture, "transfer-summary").unwrap();
+    assert!(summary.starts_with("上传 1 个文件夹到 "), "{summary}");
+
+    click(cx, &fixture, "upload-confirm");
+    wait(cx, &fixture, "工作线程收到这一批", |_, fixture| {
+        !fixture.sftp.requests.lock().unwrap().is_empty()
+    });
+    let requests = fixture.sftp.requests.lock().unwrap();
+    assert_eq!(requests[0].sources(), [folder]);
+    assert_eq!(requests[0].destination().as_str(), "/home/tester");
+}
+
 #[gpui_kit::test]
 fn dropping_files_from_outside_on_a_remote_folder_asks_to_upload_there(cx: &mut TestAppContext) {
     let fixture = open(cx);

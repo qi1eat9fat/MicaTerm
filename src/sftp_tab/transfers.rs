@@ -390,14 +390,36 @@ impl SftpTab {
     }
 
     /// 用原生选择框挑要上传的，再走同一个确认框。Windows 的选择框只能选文件或者只能选文件夹，
-    /// 那里只选文件：文件夹从资源管理器拖进来。
+    /// 那里只选文件：文件夹走「上传文件夹…」（`choose_folder`）。
     pub(super) fn choose_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let choice = cx.prompt_for_paths(PathPromptOptions {
+        let options = PathPromptOptions {
             files: true,
             directories: cx.can_select_mixed_files_and_dirs(),
             multiple: true,
             prompt: Some(t!("sftp_transfer.confirm.choose_files")),
-        });
+        };
+        self.choose_upload_sources(options, window, cx);
+    }
+
+    /// 「上传文件夹…」：原生的文件夹选择框，选中的文件夹整个上传到远程当前目录（工单 35）。
+    pub(super) fn choose_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let options = PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: true,
+            prompt: Some(t!("sftp_transfer.confirm.choose_folders")),
+        };
+        self.choose_upload_sources(options, window, cx);
+    }
+
+    /// 开原生选择框，选好了问要不要上传到远程当前目录。
+    fn choose_upload_sources(
+        &mut self,
+        options: PathPromptOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let choice = cx.prompt_for_paths(options);
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = choice.await {
                 let _ = this.update_in(cx, |this, window, cx| {

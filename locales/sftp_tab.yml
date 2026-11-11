@@ -131,3 +131,6 @@ sftp_tab.close.confirm:
   zh-CN: 关闭
 sftp_tab.connection.no_resume_folder:
   zh-CN: 找不到数据目录，这次的传输不会记续传记录，断了不能接着传：%{error}
+# 上传文件夹（工单 35）
+sftp_tab.menu.upload_folder:
+  zh-CN: 上传文件夹…
