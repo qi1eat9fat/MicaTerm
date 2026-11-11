@@ -212,6 +212,14 @@ impl ProxyKind {
         }
     }
 
+    /// 给用户看的名字：主机对话框的代理类型、卡片上「（经 SOCKS5 …）」。
+    pub fn label(self) -> &'static str {
+        match self {
+            ProxyKind::Http => "HTTP",
+            ProxyKind::Socks5 => "SOCKS5",
+        }
+    }
+
     pub fn from_stored(value: &str) -> Option<Self> {
         match value {
             "http" => Some(ProxyKind::Http),

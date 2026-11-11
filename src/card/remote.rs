@@ -14,7 +14,7 @@
 
 use gpui_kit::SharedString;
 use qishell_hosts::{Host, HostOs, mark_color};
-use qishell_ssh::{JumpLogin, LoginRoute, ProxyKind};
+use qishell_ssh::{JumpLogin, LoginRoute};
 use qishell_terminal::{
     ReportedDirectory, SharedTerminalTransportFactory, ShellActivity, ShellCommand,
     TerminalLifecycle,
@@ -346,13 +346,12 @@ fn route_label(route: &LoginRoute) -> Option<String> {
                 .collect();
             (!names.is_empty()).then(|| names.join(" → "))
         }
-        LoginRoute::Proxy(proxy) => {
-            let kind = match proxy.kind {
-                ProxyKind::Http => "HTTP",
-                ProxyKind::Socks5 => "SOCKS5",
-            };
-            Some(format!("{kind} {}:{}", proxy.host, proxy.port))
-        }
+        LoginRoute::Proxy(proxy) => Some(format!(
+            "{} {}:{}",
+            proxy.kind.label(),
+            proxy.host,
+            proxy.port
+        )),
     }
 }
 
@@ -567,7 +566,7 @@ mod tests {
 
     #[test]
     fn the_connecting_line_names_the_jump_hosts_or_the_proxy() {
-        use qishell_ssh::ProxyLogin;
+        use qishell_ssh::{ProxyKind, ProxyLogin};
 
         let mut card = card(None);
         assert_eq!(

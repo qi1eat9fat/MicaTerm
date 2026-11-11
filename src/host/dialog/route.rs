@@ -93,14 +93,6 @@ impl RouteChoice {
     }
 }
 
-/// 代理类型的显示名，和 `ProxyKind::ALL` 一一对应。
-fn proxy_kind_label(kind: ProxyKind) -> SharedString {
-    match kind {
-        ProxyKind::Http => "HTTP".into(),
-        ProxyKind::Socks5 => "SOCKS5".into(),
-    }
-}
-
 /// 可以当跳板的一台主机，打开对话框时的样子。
 #[derive(Clone, Debug)]
 struct JumpHost {
@@ -667,7 +659,7 @@ impl RouteSection {
                     ProxyKind::ALL
                         .iter()
                         .copied()
-                        .map(proxy_kind_label)
+                        .map(|kind| SharedString::from(kind.label()))
                         .collect(),
                     ProxyKind::ALL
                         .iter()
