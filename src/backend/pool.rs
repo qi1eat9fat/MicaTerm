@@ -5,6 +5,8 @@
 //!   主机密钥、密码、验证码只问一次；
 //! - 连接的问题经 `events` 发给窗口壳，带上在等它的终端；
 //! - 第一个 shell 通道开好以后，这条连接探测一次系统，并且每 5 秒量一次延迟，结果发给它上面的每个终端；
+//!   主机关了探测（`RemoteTarget::probe_os`）就不开 exec 通道。探测通道打不开、或者探测时整条连接断了
+//!   （有的堡垒机再开一个通道就断开），发 `ProbeFailed`，窗口壳记下这台主机不再探测（工单 34）；
 //! - 最后一个终端放手时才断开连接；还在连的时候都放手了，就取消（问题随之作废）；
 //! - 服务器只给一个通道（复用时开不出 shell 通道）：这台主机记一个「单通道」标记（本次运行有效），
 //!   之后它的终端都新建连接。
@@ -28,6 +30,8 @@ use crate::i18n::t;
 
 /// 探测系统最多等多久：主机不回答也只是没有徽章。
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// 探测没成时，等多久看连接是不是跟着断了（会话任务结束、`is_closed` 变真要一会儿）。
+const PROBE_LOST_GRACE: Duration = Duration::from_millis(500);
 /// 挂断时最多等多久。
 const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -58,6 +62,14 @@ struct PoolState {
     single_channel: Vec<RemoteTarget>,
 }
 
+impl PoolState {
+    fn is_single_channel(&self, target: &RemoteTarget) -> bool {
+        self.single_channel
+            .iter()
+            .any(|single| single.shares_connection_with(target))
+    }
+}
+
 struct Entry {
     id: ConnectionId,
     target: RemoteTarget,
@@ -75,6 +87,11 @@ struct Entry {
 }
 
 impl Entry {
+    /// 能不能给连 `target` 的新终端用：登录一样（探不探测不算），没连失败、没断。
+    fn reusable_for(&self, target: &RemoteTarget) -> bool {
+        self.target.shares_connection_with(target) && self.reusable()
+    }
+
     /// 还能不能给新来的终端用：没连失败、没断。
     fn reusable(&self) -> bool {
         if self.exclusive {
@@ -165,11 +182,8 @@ impl ConnectionPool {
     /// 现在 `attach(.., target, false)` 会不会复用已有的连接（不新登录）。
     pub(super) fn reuses_connection(&self, target: &RemoteTarget) -> bool {
         let state = self.lock();
-        !state.single_channel.contains(target)
-            && state
-                .entries
-                .iter()
-                .any(|entry| &entry.target == target && entry.reusable())
+        !state.is_single_channel(target)
+            && state.entries.iter().any(|entry| entry.reusable_for(target))
     }
 
     /// 终端 `terminal` 借一条到 `target` 的连接：有能复用的就复用，否则新登录一次。
@@ -181,12 +195,12 @@ impl ConnectionPool {
         fresh: bool,
     ) -> Lease {
         let mut state = self.lock();
-        let single = fresh || state.single_channel.contains(target);
+        let single = fresh || state.is_single_channel(target);
         if !single
             && let Some(entry) = state
                 .entries
                 .iter_mut()
-                .find(|entry| &entry.target == target && entry.reusable())
+                .find(|entry| entry.reusable_for(target))
         {
             entry.terminals.push(terminal);
             return Lease {
@@ -303,7 +317,7 @@ impl ConnectionPool {
     /// 复用的连接开不出 shell 通道：这台主机只给一个通道，之后都新建连接。
     pub(super) fn mark_single_channel(&self, target: &RemoteTarget) {
         let mut state = self.lock();
-        if !state.single_channel.contains(target) {
+        if !state.is_single_channel(target) {
             state.single_channel.push(target.clone());
         }
     }
@@ -337,19 +351,13 @@ impl ConnectionPool {
 
     /// 连接 `id` 活着的时候：先探测一次系统，再每 5 秒量一次延迟，结果发给它上面的每个终端。
     async fn monitor(self: Arc<Self>, id: ConnectionId, handle: Arc<SshHandle>) {
-        let mut shutdown = match self.lock().entries.iter().find(|entry| entry.id == id) {
-            Some(entry) => entry.shutdown.subscribe(),
+        let (mut shutdown, probe_os) = match self.lock().entries.iter().find(|entry| entry.id == id)
+        {
+            Some(entry) => (entry.shutdown.subscribe(), entry.target.probe_os),
             None => return,
         };
-        if let Ok(Some(host)) = tokio::time::timeout(PROBE_TIMEOUT, probe(&handle)).await {
-            self.publish(
-                id,
-                |entry| entry.probed = Some(host.clone()),
-                |terminal| RemoteEvent::Probed {
-                    terminal,
-                    host: host.clone(),
-                },
-            );
+        if probe_os && !self.probe(id, &handle).await {
+            return;
         }
         let mut ticker = tokio::time::interval(LATENCY_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -370,6 +378,45 @@ impl ConnectionPool {
                 return;
             }
         }
+    }
+
+    /// 探测连接 `id` 上主机的系统，结果发给它上面的每个终端。探测通道打不开、或者探测时连接断了：
+    /// 发一次 `ProbeFailed`。返回连接还在不在。
+    async fn probe(&self, id: ConnectionId, handle: &SshHandle) -> bool {
+        let outcome = tokio::time::timeout(PROBE_TIMEOUT, probe(handle))
+            .await
+            .unwrap_or(Probe::Unknown);
+        if let Probe::Found(host) = outcome {
+            self.publish(
+                id,
+                |entry| entry.probed = Some(host.clone()),
+                |terminal| RemoteEvent::Probed {
+                    terminal,
+                    host: host.clone(),
+                },
+            );
+            return true;
+        }
+        let lost = closes_soon(handle).await;
+        if lost || matches!(outcome, Probe::Refused) {
+            let failed = {
+                let state = self.lock();
+                state
+                    .entries
+                    .iter()
+                    .find(|entry| entry.id == id)
+                    .map(|entry| (entry.target.host, entry.terminals.clone()))
+            };
+            // 连接已经不在表里（终端都关了）：不是探测弄断的，什么都不说。
+            if let Some((host, terminals)) = failed {
+                let _ = self.events.try_send(RemoteEvent::ProbeFailed {
+                    host,
+                    terminals,
+                    lost,
+                });
+            }
+        }
+        !lost
     }
 
     /// 记进连接 `id`，再发给它上面的每个终端。连接已经不在了就返回 `false`。
@@ -435,11 +482,34 @@ async fn hang_up(handle: &SshHandle) {
     .await;
 }
 
-/// 在自己的通道上探测主机的系统（先 POSIX，认不出再问 Windows）。主机不回答就是 `None`。
-async fn probe(handle: &SshHandle) -> Option<ProbedHost> {
+/// 一次探测的结果。
+enum Probe {
+    Found(ProbedHost),
+    /// 主机回答了，认不出来（或者没在限时内回答）。
+    Unknown,
+    /// 探测通道打不开（拒开通道、拒跑命令、连接断了）。
+    Refused,
+}
+
+/// 连接 `handle` 是不是已经断了，或者在 [`PROBE_LOST_GRACE`] 之内断开。
+async fn closes_soon(handle: &SshHandle) -> bool {
+    let started = tokio::time::Instant::now();
+    while !handle.is_closed() {
+        if started.elapsed() >= PROBE_LOST_GRACE {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    true
+}
+
+/// 在自己的通道上探测主机的系统（先 POSIX，认不出再问 Windows）。
+async fn probe(handle: &SshHandle) -> Probe {
     let mut probe = HostOsProbe::new();
     while let Some(command) = probe.command() {
-        let mut channel = open_probe(handle, Some(command)).await?;
+        let Some(mut channel) = open_probe(handle, Some(command)).await else {
+            return Probe::Refused;
+        };
         loop {
             match channel.wait().await {
                 // stderr 不要：Windows 上只有 shell 抱怨 `uname` 不存在。
@@ -449,10 +519,10 @@ async fn probe(handle: &SshHandle) -> Option<ProbedHost> {
             }
         }
         match probe.finish() {
-            ProbeOutcome::Detected(host) => return Some(host),
+            ProbeOutcome::Detected(host) => return Probe::Found(host),
             ProbeOutcome::AskWindows => continue,
-            ProbeOutcome::GaveUp => return None,
+            ProbeOutcome::GaveUp => return Probe::Unknown,
         }
     }
-    None
+    Probe::Unknown
 }

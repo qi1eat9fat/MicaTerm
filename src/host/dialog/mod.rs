@@ -9,13 +9,15 @@
 //! - `general`：名称（留空用地址）、地址、端口；
 //! - `auth`：认证：密码 / 使用凭据 / 无密码（13 改密码框的锁定显示，14 加「使用凭据」「无密码」）；
 //! - `route`：连接方式：直接 / SSH 跳板 / 代理（工单 15），代理密码和主机密码一样单独写进保险库；
-//! - `notes`：备注。
+//! - `notes`：备注；
+//! - `advanced`：高级：「登录后探测系统」开关（工单 34）。
 //!
 //! 校验：出错的字段描红，下面写原因，保存失败时对话框不关闭。
 //!
 //! 「测试连接」（工单 12）用表单里现在的值真的登录一次（`ConnectionTester`），第一次见到的主机密钥
 //! 叠一个确认框问；结果写在按钮旁边。
 
+mod advanced;
 mod auth;
 mod delete;
 mod general;
@@ -32,6 +34,7 @@ use gpui_kit::*;
 use futures::FutureExt as _;
 use qishell_hosts::{AuthKind, Host, HostDraft, HostDraftError, HostId, SSH_PORT};
 
+pub use advanced::FIELD_PROBE_OS;
 pub use auth::{
     AUTH_CHOICE, AUTH_HINT, CREDENTIAL_NEW, CREDENTIAL_OPTION, FIELD_CREDENTIAL, FIELD_PASSWORD,
     FIELD_USER,
@@ -45,6 +48,7 @@ pub use route::{
     ROUTE_CHAIN, ROUTE_CHOICE,
 };
 
+use self::advanced::AdvancedSection;
 use self::auth::AuthSection;
 use self::general::GeneralSection;
 use self::notes::NotesSection;
@@ -79,6 +83,7 @@ pub struct HostDialog {
     auth: AuthSection,
     route: RouteSection,
     notes: NotesSection,
+    advanced: AdvancedSection,
     errors: FieldErrors,
     /// 「测试连接」用的测试器（工单 12）。
     tester: SharedConnectionTester,
@@ -119,6 +124,7 @@ impl HostDialog {
         );
         let route = RouteSection::new(&draft, editing, &store, window, cx);
         let notes = NotesSection::new(&draft, window, cx);
+        let advanced = AdvancedSection::new(&draft);
         // 改了哪个字段，就先收起它的错误。
         let subscriptions = general
             .inputs()
@@ -144,6 +150,7 @@ impl HostDialog {
             auth,
             route,
             notes,
+            advanced,
             errors: FieldErrors::default(),
             tester,
             testing: None,
@@ -172,6 +179,7 @@ impl HostDialog {
         self.auth.fill(&mut draft, &mut errors, cx);
         self.route.fill(&mut draft, &mut errors, cx);
         self.notes.fill(&mut draft, &mut errors, cx);
+        self.advanced.fill(&mut draft, &mut errors);
         let draft = match draft.validated() {
             Ok(draft) => Some(draft),
             Err(error) => {
@@ -491,7 +499,8 @@ impl Render for HostDialog {
                         self.general.shown_name(cx),
                         cx,
                     ))
-                    .child(self.notes.render(&self.errors, &tokens)),
+                    .child(self.notes.render(&self.errors, &tokens))
+                    .child(self.advanced.render(&tokens, cx)),
             )
             .child(self.render_footer(cx))
     }

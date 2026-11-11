@@ -39,6 +39,31 @@ pub struct PromptId {
 pub struct RemoteTarget {
     pub host: u64,
     pub login: HostLogin,
+    /// 登录后另开 exec 通道探测系统（工单 34，主机的 `probe_os`）。不算登录的一部分：
+    /// 只差这一项的终端照样共用一条连接（连接只在第一个 shell 通道开好时探测一次）。
+    pub probe_os: bool,
+}
+
+impl RemoteTarget {
+    /// 连 `host`，用 `login` 登录，登录后探测系统。
+    pub fn new(host: u64, login: HostLogin) -> Self {
+        Self {
+            host,
+            login,
+            probe_os: true,
+        }
+    }
+
+    /// 登录后探不探测系统。
+    pub fn with_probe_os(mut self, probe_os: bool) -> Self {
+        self.probe_os = probe_os;
+        self
+    }
+
+    /// 能不能和 `other` 共用一条连接：同一台主机、同样的登录（探不探测不算）。
+    pub fn shares_connection_with(&self, other: &RemoteTarget) -> bool {
+        self.host == other.host && self.login == other.login
+    }
 }
 
 /// 连接要问用户的一件事。属于一条连接：同一条连接上有几张卡片也只问一次。
@@ -73,6 +98,14 @@ pub enum RemoteEvent {
     /// 连接 `connection` 不要了（等它的终端都放手了）：它还没答的问题都作废，窗口壳关掉问答框、
     /// 不再问排着的。
     PromptsWithdrawn { connection: ConnectionId },
+    /// 探测系统失败了（工单 34）：探测通道打不开，或者探测时整条连接断了（`lost`，有的堡垒机
+    /// 再开一个通道就断开）。窗口壳把主机 `host` 记成不再探测；`lost` 时连接上的终端
+    /// `terminals` 都断了，原地重连。每条连接最多发一次。
+    ProbeFailed {
+        host: u64,
+        terminals: Vec<RemoteTerminalId>,
+        lost: bool,
+    },
 }
 
 /// 远程终端的传输从哪里来。生产是 [`SshRemoteTerminals`]，测试注入假的。

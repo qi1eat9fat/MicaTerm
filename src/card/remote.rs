@@ -145,6 +145,12 @@ impl RemoteCard {
         self.stopped = false;
     }
 
+    /// 这台主机不再探测系统（工单 34）：探测把连接弄断了。主机删了时重连按这里记着的来。
+    pub(super) fn stop_probing(&mut self) {
+        self.host.probe_os = false;
+        self.target.probe_os = false;
+    }
+
     pub(super) fn stopped(&mut self) {
         self.stopped = true;
     }
@@ -331,7 +337,7 @@ mod tests {
             "ubuntu",
             qishell_ssh::LoginMethod::Password,
         );
-        RemoteCard::new(host, RemoteTarget { host: 3, login })
+        RemoteCard::new(host, RemoteTarget::new(3, login))
     }
 
     #[test]
