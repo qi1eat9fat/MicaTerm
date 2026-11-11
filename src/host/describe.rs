@@ -87,5 +87,6 @@ fn not_saved(change: Change, error: &str) -> SharedString {
         Change::DeleteSnippet => t!("host.store.not_saved.delete_snippet", error = error),
         Change::Batch => t!("host.store.not_saved.batch", error = error),
         Change::HostProbe => t!("host.store.not_saved.host_probe", error = error),
+        Change::HostHostname => t!("host.store.not_saved.host_hostname", error = error),
     }
 }

@@ -18,9 +18,20 @@ fn open_remote(
     Entity<Workspace>,
     Arc<FakeRemoteTerminals>,
 ) {
+    open_remote_with(cx, HostData::seed())
+}
+
+fn open_remote_with(
+    cx: &mut TestAppContext,
+    hosts: HostData,
+) -> (
+    WindowHandle<Root>,
+    Entity<Workspace>,
+    Arc<FakeRemoteTerminals>,
+) {
     let remote = Arc::new(FakeRemoteTerminals::default());
     let services = WorkspaceServices {
-        hosts: HostData::seed(),
+        hosts,
         remote_terminals: remote.clone(),
         ..fake_services()
     };
@@ -77,6 +88,15 @@ fn directory(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> String {
     })
 }
 
+fn start_directory(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> Option<String> {
+    cx.update(|cx| {
+        workspace
+            .read(cx)
+            .card(CardId(1), cx)
+            .and_then(|card| card.read(cx).remote_start_directory().map(str::to_string))
+    })
+}
+
 fn probe(remote: &FakeRemoteTerminals, cx: &mut TestAppContext) {
     remote.emit(RemoteEvent::Probed {
         terminal: RemoteTerminalId(1),
@@ -124,30 +144,68 @@ fn a_full_screen_program_with_no_name_keeps_the_badge_and_lights_the_dot(cx: &mu
 }
 
 #[gpui_kit::test]
-fn a_reported_folder_naming_the_host_shows_once_its_name_is_known(cx: &mut TestAppContext) {
+fn a_reported_folder_naming_the_host_shows_at_once_and_starts_sftp_once_its_name_is_known(
+    cx: &mut TestAppContext,
+) {
     let (handle, workspace, remote) = open_remote(cx);
     connect(cx, handle, &workspace);
     remote
         .factory
         .print(1, "\x1b]7;file://web-01/srv/app\x07$ ");
-    // 还没探测出 `uname -n`：带主机名的报告先不信。
-    wait_until(cx, handle, |cx| !directory(cx, &workspace).is_empty());
-    assert_eq!(directory(cx, &workspace), "");
+    // 还没探测出 `uname -n`：带主机名的报告先只用来显示，不当 SFTP 的初始目录。
+    assert!(wait_until(cx, handle, |cx| directory(cx, &workspace) == "/srv/app"));
+    assert_eq!(start_directory(cx, &workspace), None);
 
     probe(&remote, cx);
     assert_eq!(directory(cx, &workspace), "/srv/app");
+    assert_eq!(start_directory(cx, &workspace), Some("/srv/app".into()));
+    // 探测到的 `uname -n` 记进主机：以后关了探测也能拿它核对。
     assert_eq!(
-        cx.update(|cx| workspace
-            .read(cx)
-            .card(CardId(1), cx)
-            .and_then(|card| card.read(cx).remote_start_directory().map(str::to_string))),
-        Some("/srv/app".into())
+        saved_host(cx, &workspace, 1).and_then(|host| host.hostname),
+        Some("web-01".into())
     );
 
     // 在卡片里又 ssh 到了别的主机：它报的目录不动卡片。
     remote.factory.print(1, "\x1b]7;file://db-01/var/lib\x07$ ");
     wait_until(cx, handle, |cx| directory(cx, &workspace) != "/srv/app");
     assert_eq!(directory(cx, &workspace), "/srv/app");
+}
+
+#[gpui_kit::test]
+fn with_the_probe_off_reports_are_checked_against_the_hostname_probed_before(
+    cx: &mut TestAppContext,
+) {
+    let mut hosts = HostData::seed();
+    hosts.set_host_hostname(HostId(1), Some("web-01".into()));
+    hosts.set_host_probe(HostId(1), false);
+    let (handle, workspace, remote) = open_remote_with(cx, hosts);
+    connect(cx, handle, &workspace);
+    remote
+        .factory
+        .print(1, "\x1b]7;file://WEB-01/srv/app\x07$ ");
+    assert!(wait_until(cx, handle, |cx| directory(cx, &workspace) == "/srv/app"));
+    assert_eq!(start_directory(cx, &workspace), Some("/srv/app".into()));
+
+    // 在卡片里又 ssh 到了别的主机：它报的目录不动卡片。
+    remote.factory.print(1, "\x1b]7;file://db-01/var/lib\x07$ ");
+    wait_until(cx, handle, |cx| directory(cx, &workspace) != "/srv/app");
+    assert_eq!(directory(cx, &workspace), "/srv/app");
+}
+
+#[gpui_kit::test]
+fn with_the_probe_off_and_never_probed_a_bash_title_still_shows_the_folder(
+    cx: &mut TestAppContext,
+) {
+    let mut hosts = HostData::seed();
+    hosts.set_host_probe(HostId(1), false);
+    let (handle, workspace, remote) = open_remote_with(cx, hosts);
+    connect(cx, handle, &workspace);
+    remote
+        .factory
+        .print(1, "\x1b]0;root@web-01: /etc/nginx\x07$ ");
+    assert!(wait_until(cx, handle, |cx| directory(cx, &workspace) == "/etc/nginx"));
+    // 没核对过主机名：不当 SFTP 的初始目录。
+    assert_eq!(start_directory(cx, &workspace), None);
 }
 
 #[gpui_kit::test]

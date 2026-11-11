@@ -112,9 +112,10 @@ impl RemoteCard {
     pub(super) fn new(host: Host, target: RemoteTarget) -> Self {
         Self {
             os: host.os,
+            // 上次探测到的 `uname -n`：这次探测出来之前（或关了探测时）拿它核对。
+            hostname: host.hostname.as_deref().map(str::to_string),
             host,
             target,
-            hostname: None,
             latency: None,
             connection: None,
             shell: ShellActivity::default(),
@@ -153,6 +154,9 @@ impl RemoteCard {
         if host.os.is_some() {
             self.os = host.os;
         }
+        if let Some(hostname) = &host.hostname {
+            self.hostname = Some(hostname.to_string());
+        }
         self.host = host;
         self.target = target;
         self.latency = None;
@@ -188,7 +192,10 @@ impl RemoteCard {
             RemoteUpdate::Attached(connection) => self.connection = Some(connection),
             RemoteUpdate::Latency(latency) => self.latency = Some(latency),
             RemoteUpdate::Probed(probed) => {
-                self.hostname = probed.hostname;
+                // 这次没拿到 `uname -n` 时还按之前知道的核对。
+                if let Some(hostname) = probed.hostname {
+                    self.hostname = Some(hostname);
+                }
                 if let Some(os) = HostOs::from_stored(probed.os) {
                     self.os = Some(os);
                     return Some(os);
@@ -198,7 +205,8 @@ impl RemoteCard {
         None
     }
 
-    /// 远程 shell 报告了目录：带主机名的要和 `uname -n` 对得上（在卡片里又 ssh 到别处的不算）。
+    /// 远程 shell 报告了目录：带主机名的要和 `uname -n`（这次探测到的，没有时用上次探测到的）
+    /// 对得上（在卡片里又 ssh 到别处的不算）；从没探测过时只用来显示，不当初始目录。
     /// 返回解析结果变没变。
     pub(super) fn report_directory(&mut self, directory: &ReportedDirectory) -> bool {
         self.shell
@@ -480,9 +488,11 @@ mod tests {
             host: Some("web-01".into()),
             path: "/srv".into(),
         };
-        assert!(!card.report_directory(&report));
+        // 还不知道 `uname -n`：只用来显示，不当初始目录。
+        assert!(card.report_directory(&report));
         assert!(card.observe_screen(Some("root@web-01: ~/x"), false));
-        assert_eq!(card.directory(), None);
+        assert_eq!(card.directory(), Some("/srv"));
+        assert_eq!(card.activity.start_directory, None);
         card.apply(RemoteUpdate::Probed(ProbedHost {
             os: "ubuntu",
             hostname: Some("web-01".into()),

@@ -84,14 +84,24 @@ impl Workspace {
         let Some(card) = self.card(card_of(terminal), cx) else {
             return;
         };
+        let hostname = match &update {
+            RemoteUpdate::Probed(probed) => probed.hostname.clone(),
+            _ => None,
+        };
         let os = card.update(cx, |card, cx| card.apply_remote(update, cx));
-        let (Some(os), Some(host)) = (os, card.read(cx).remote_host()) else {
+        let Some(host) = card.read(cx).remote_host() else {
             return;
         };
-        // 探测出的系统记进主机，主机栏的徽章跟着变（主机已经删了就不记）。
+        // 探测出的系统和 `uname -n` 记进主机（主机已经删了就不记）：主机栏的徽章跟着变，
+        // 以后关了探测也能拿 `uname -n` 核对远程报告的目录。
         self.hosts.update(cx, |store, cx| {
-            if store.host(host).is_some_and(|host| host.os != Some(os)) {
+            if let Some(os) = os
+                && store.host(host).is_some_and(|host| host.os != Some(os))
+            {
                 store.set_host_os(host, Some(os), cx);
+            }
+            if let Some(hostname) = hostname {
+                store.set_host_hostname(host, Some(hostname.into()), cx);
             }
         });
     }
