@@ -18,7 +18,7 @@ use super::notices::NoticeTimes;
 use super::quick_connect::{QuickConnectAnchor, QuickConnectPopup};
 use super::remote::PromptQueue;
 use super::right_sidebar::{RightPanel, render_right_sidebar};
-use super::title_bar::render_title_bar;
+use super::title_bar::{TitleBarState, render_title_bar};
 use crate::app::PRODUCT_NAME;
 use crate::backend::sftp::{
     SharedLocalDirectoryProvider, SharedSftpTransportProvider, SshSftpTransportProvider,
@@ -580,15 +580,17 @@ impl Render for Workspace {
             .flex_1()
             .min_w_0()
             .child(render_title_bar(
-                self.host_sidebar_open,
-                self.quick_connect.is_some(),
-                &self.quick_connect_anchor(),
-                self.tab_rail
-                    .render(self.tab_snapshots(cx), &target, &tokens, window, cx),
-                &self.tab_rail,
+                TitleBarState {
+                    host_sidebar_open: self.host_sidebar_open,
+                    quick_connect_open: self.quick_connect.is_some(),
+                    anchor: &self.quick_connect_anchor(),
+                    rail: &self.tab_rail,
+                    tabs: self.tab_snapshots(cx),
+                },
                 &target,
                 &tokens,
                 window,
+                cx,
             ))
             .child(
                 div()

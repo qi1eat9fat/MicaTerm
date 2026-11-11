@@ -158,21 +158,22 @@ impl TabRail {
     /// 让标题栏接住拖着的标签（工单 29）：在标题栏里移动时记下位置（插入线、自动滚动看它），
     /// 在标题栏里松开时按松开的位置派发 `MoveTab`。拖动区本身不挂任何处理器，照常拖窗口。
     pub fn accept_drops(&self, bar: Stateful<Div>, target: &FocusHandle) -> Stateful<Div> {
-        let drag = self.drag.clone();
-        let dropped = self.drag.clone();
+        // 同一份拖动状态，移动时记、松开时清，两个处理器各拿一份。
+        let drag_on_move = self.drag.clone();
+        let drag_on_drop = self.drag.clone();
         let scroll = self.scroll.clone();
         let order = self.order.clone();
         let target = target.clone();
         bar.on_drag_move(move |event: &DragMoveEvent<DraggedTab>, _, cx| {
             let pointer = event.event.position;
-            drag.set(Some(TabDrag {
+            drag_on_move.set(Some(TabDrag {
                 source: event.drag(cx).tab.id,
                 pointer,
                 over_title_bar: event.bounds.contains(&pointer),
             }));
         })
         .on_drop(move |dragged: &DraggedTab, window, cx| {
-            dropped.take();
+            drag_on_drop.take();
             let tab = dragged.tab.id;
             let drop = drop_at(window.mouse_position().x, &scroll, &order.borrow());
             if let Some(drop) = drop {
@@ -334,7 +335,8 @@ fn render_tab(
         .relative()
         .cursor_pointer()
         .when(tab.active, |this| {
-            this.bg(tokens.tab_active).shadow(raised(tokens.shadow))
+            this.bg(tokens.tab_active)
+                .shadow(floating_shadow(tokens.shadow))
         })
         .when(!tab.active, |this| this.hover(move |style| style.bg(hover)))
         .when(look.pressed, |this| this.bg(tokens.pressed))
@@ -420,8 +422,8 @@ fn render_tab_face(tab: &TabSnapshot, tiles: ElementId, tokens: &Tokens) -> Div 
         )
 }
 
-/// 在前的标签（和拖动预览）的浮起阴影。
-fn raised(shadow: Hsla) -> Vec<BoxShadow> {
+/// 在前的标签和拖动预览底下的阴影：让它们看着浮在轨道上。
+fn floating_shadow(shadow: Hsla) -> Vec<BoxShadow> {
     vec![
         BoxShadow {
             color: shadow,
@@ -491,7 +493,7 @@ impl Render for DraggedTab {
         };
         render_tab_face(&tab, ("tab-drag-tiles", tab.id.0 as usize).into(), &tokens)
             .bg(tokens.tab_active)
-            .shadow(raised(tokens.shadow))
+            .shadow(floating_shadow(tokens.shadow))
             .opacity(0.92)
     }
 }

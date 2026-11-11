@@ -238,18 +238,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// 拖动排序（工单 29）：只改顺序，在前的标签和焦点都不动。
-    fn on_move_tab(
-        &mut self,
-        &MoveTab { tab, drop }: &MoveTab,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.tabs.move_to(tab, drop) {
-            cx.notify();
-        }
-    }
-
     /// 让 `id` 到前面来并滚进视野，焦点给它的焦点卡片；没有这个标签时什么都不做。
     pub(in crate::workspace) fn activate_tab(
         &mut self,
@@ -655,5 +643,17 @@ impl Workspace {
             Tab::Editor(_) => {}
         }
         self.focus_active_tab(window, cx);
+    }
+
+    /// 拖动排序（工单 29）：只改顺序，在前的标签和焦点都不动。
+    fn on_move_tab(
+        &mut self,
+        &MoveTab { tab, drop }: &MoveTab,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tabs.move_to(tab, drop) {
+            cx.notify();
+        }
     }
 }
