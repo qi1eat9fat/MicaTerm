@@ -22,6 +22,7 @@ use crate::card::{StatusDot, render_status_dot, render_tile_stack};
 use crate::i18n::t;
 use crate::programs::Program;
 use crate::theme::{TAB_HEIGHT, TAB_TRACK_HEIGHT, TAB_WIDTH, Tokens};
+use crate::ui::drag::{DragSlot, DropEdge, fade_while_dragged, render_drop_line};
 
 /// 画一个标签要的东西。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,7 +49,7 @@ pub struct TabRail {
     reveal_requested: Cell<bool>,
     menu: Option<OpenMenu>,
     /// 正在拖的标签：标题栏的拖动监听写，渲染时读来画插入线、自动滚动。
-    drag: Rc<Cell<Option<TabDrag>>>,
+    drag: Rc<DragSlot<TabDrag>>,
     /// 上一帧画的标签顺序：松开时按它算放到第几个。
     order: Rc<RefCell<Vec<TabId>>>,
 }
@@ -94,9 +95,7 @@ impl TabRail {
         cx: &App,
     ) -> Option<impl IntoElement + use<>> {
         // 拖动在别处放下或取消了：插入线和变淡都收掉。
-        if !cx.has_active_drag() {
-            self.drag.set(None);
-        }
+        self.drag.settle(cx);
         *self.order.borrow_mut() = tabs.iter().map(|tab| tab.id).collect();
         if tabs.is_empty() {
             self.revealed.set(None);
@@ -173,7 +172,7 @@ impl TabRail {
             }));
         })
         .on_drop(move |dragged: &DraggedTab, window, cx| {
-            dropped.set(None);
+            dropped.take();
             let tab = dragged.tab.id;
             let drop = drop_at(window.mouse_position().x, &scroll, &order.borrow());
             if let Some(drop) = drop {
@@ -279,13 +278,13 @@ fn drop_at(x: Pixels, scroll: &ScrollHandle, order: &[TabId]) -> Option<TabDrop>
 }
 
 /// 插入线画在第几个标签的哪一边。
-fn line_position(drop: TabDrop, order: &[TabId]) -> Option<(usize, Edge)> {
+fn line_position(drop: TabDrop, order: &[TabId]) -> Option<(usize, DropEdge)> {
     let index_of = |target: TabId| order.iter().position(|id| *id == target);
     match drop {
-        TabDrop::Before(target) => Some((index_of(target)?, Edge::Left)),
-        TabDrop::After(target) => Some((index_of(target)?, Edge::Right)),
-        TabDrop::First => Some((0, Edge::Left)),
-        TabDrop::Last => Some((order.len().checked_sub(1)?, Edge::Right)),
+        TabDrop::Before(target) => Some((index_of(target)?, DropEdge::Left)),
+        TabDrop::After(target) => Some((index_of(target)?, DropEdge::Right)),
+        TabDrop::First => Some((0, DropEdge::Left)),
+        TabDrop::Last => Some((order.len().checked_sub(1)?, DropEdge::Right)),
     }
 }
 
@@ -305,13 +304,6 @@ pub fn build_tab_menu(
     })
 }
 
-/// 插入线画在标签的哪一边。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Edge {
-    Left,
-    Right,
-}
-
 /// 标签随轨道状态变的样子。
 struct TabLook {
     /// 这个标签的右键菜单开着（原型 `.tab.rc`）。
@@ -319,7 +311,7 @@ struct TabLook {
     /// 正拖着它：变淡，跟着鼠标的是它的预览。
     dragged: bool,
     /// 插入线落在它的哪一边。
-    line: Option<Edge>,
+    line: Option<DropEdge>,
 }
 
 fn render_tab(
@@ -346,7 +338,7 @@ fn render_tab(
         })
         .when(!tab.active, |this| this.hover(move |style| style.bg(hover)))
         .when(look.pressed, |this| this.bg(tokens.pressed))
-        .when(look.dragged, |this| this.opacity(0.45))
+        .map(|this| fade_while_dragged(this, look.dragged))
         // 按下标签不把焦点交给窗口壳：拖动排序（或拖出去取消）之后焦点还在原来的卡片里。
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         .on_click(move |_, window, cx| {
@@ -381,7 +373,10 @@ fn render_tab(
                 )
                 .child(render_close_button(id, target, tokens)),
         )
-        .children(look.line.map(|edge| render_drop_line(edge, tokens)))
+        .children(look.line.map(|edge| {
+            // 中线往外挪半像素，骑在两个标签之间的竖线上。
+            render_drop_line("tab-drop-line".into(), edge, px(4.), px(0.5), tokens)
+        }))
 }
 
 /// 标签的外形和左边的内容（图块、名称、目录）：轨道里的标签和拖动预览共用。
@@ -443,23 +438,6 @@ fn raised(shadow: Hsla) -> Vec<BoxShadow> {
             inset: false,
         },
     ]
-}
-
-/// 拖动时的插入线：竖在标签左边或右边的缝上（盖住竖线）。
-fn render_drop_line(edge: Edge, tokens: &Tokens) -> impl IntoElement {
-    div()
-        .id("tab-drop-line")
-        .test_support()
-        .absolute()
-        .top(px(4.))
-        .bottom(px(4.))
-        .w(px(2.))
-        .rounded(px(1.))
-        .bg(tokens.accent)
-        .map(|line| match edge {
-            Edge::Left => line.left(px(-1.5)),
-            Edge::Right => line.right(px(-1.5)),
-        })
 }
 
 /// 标签右端的 ×：只在悬停这个标签时出现，点了关闭整个标签。

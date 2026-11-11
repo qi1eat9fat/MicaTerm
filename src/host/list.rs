@@ -32,6 +32,7 @@ use super::store::HostStore;
 use crate::app::{ConnectHost, MoveHost};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::ui::drag::{DragSlot, DropEdge, fade_while_dragged, render_drop_line};
 
 /// 行高（`.host`）。
 const ROW_HEIGHT: Pixels = px(42.);
@@ -55,7 +56,7 @@ pub struct HostList {
     /// 上一次见过的主机：多出来的就是刚新建或复制的，自动选上。
     seen: HashSet<HostId>,
     /// 正在拖动的主机和它要放下的位置。
-    drag: Option<DragState>,
+    drag: DragSlot<DragState>,
     menu: Option<OpenMenu>,
     scroll: ScrollHandle,
     /// 每台主机开着几张远程卡片（工单 16）：窗口壳每次重画时告诉列表，行右侧显示绿色数字。
@@ -118,7 +119,7 @@ impl HostList {
             selected: None,
             highlighted: 0,
             seen,
-            drag: None,
+            drag: DragSlot::default(),
             menu: None,
             scroll: ScrollHandle::new(),
             open_cards: HashMap::new(),
@@ -392,11 +393,12 @@ impl HostList {
         let selected = !searching && self.selected == Some(id);
         let highlighted = searching && self.highlighted == index;
         let pressed = self.menu.as_ref().is_some_and(|menu| menu.host == id);
-        let dragged = self.drag.is_some_and(|drag| drag.source == id);
-        let line = self.drag.and_then(|drag| match drag.drop {
+        let drag = self.drag.get();
+        let dragged = drag.is_some_and(|drag| drag.source == id);
+        let line = drag.and_then(|drag| match drag.drop {
             _ if drag.source == id => None,
-            HostDrop::Before(target) if target == id => Some(true),
-            HostDrop::After(target) if target == id => Some(false),
+            HostDrop::Before(target) if target == id => Some(DropEdge::Top),
+            HostDrop::After(target) if target == id => Some(DropEdge::Bottom),
             _ => None,
         });
         let hover = tokens.hover;
@@ -453,7 +455,7 @@ impl HostList {
                 }
             })
             .when(pressed && !selected, |row| row.bg(tokens.pressed))
-            .when(dragged, |row| row.opacity(0.45))
+            .map(|row| fade_while_dragged(row, dragged))
             .tooltip(move |_, cx| cx.new(|_| tooltip.clone()).into())
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 window.focus(&this.focus_handle, cx);
@@ -485,8 +487,7 @@ impl HostList {
                                 HostDrop::After(id)
                             };
                             let state = Some(DragState { source, drop });
-                            if this.drag != state {
-                                this.drag = state;
+                            if this.drag.set(state) {
                                 cx.notify();
                             }
                         },
@@ -552,23 +553,9 @@ impl HostList {
                     .bg(tokens.busy.opacity(0.14))
                     .child(count.to_string())
             }))
-            .children(line.map(|before| {
-                div()
-                    .id(("host-drop-line", id.0 as usize))
-                    .test_support()
-                    .absolute()
-                    .left(px(12.))
-                    .right(px(12.))
-                    .h(px(2.))
-                    .rounded(px(2.))
-                    .bg(tokens.accent)
-                    .map(|line| {
-                        if before {
-                            line.top(px(-1.))
-                        } else {
-                            line.bottom(px(-1.))
-                        }
-                    })
+            .children(line.map(|edge| {
+                let id = ("host-drop-line", id.0 as usize).into();
+                render_drop_line(id, edge, px(12.), px(0.), tokens)
             }))
     }
 }
@@ -582,9 +569,7 @@ impl Focusable for HostList {
 impl Render for HostList {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 拖动在别处放下或取消了：插入线和变淡都收掉。
-        if !cx.has_active_drag() {
-            self.drag = None;
-        }
+        self.drag.settle(cx);
         let tokens = Tokens::current(cx);
         let hosts: Vec<Host> = self
             .store
