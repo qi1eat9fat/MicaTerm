@@ -80,6 +80,8 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
     "Win32_System_SystemInformation",
+    # 窗口是不是最小化着（`IsIconic`，记住窗口用）。
+    "Win32_UI_WindowsAndMessaging",
 ] }
 raw-window-handle = "0.6"
 

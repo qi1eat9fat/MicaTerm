@@ -49,14 +49,15 @@ impl WindowBackdrop {
 /// 让窗口的背景和设置一致；没变的不动。`mode` 是应用现在的深浅色。
 pub(super) fn apply_backdrop(wanted: bool, mode: ThemeMode, window: &mut Window, cx: &mut App) {
     // Mica 的底色跟着窗口的「深色模式」属性走，GPUI 按系统的深浅色设它；应用外观单独设成
-    // 深色（或浅色）时要改成应用的，否则深色界面下透出来的是浅色 Mica。系统换深浅色时 GPUI
-    // 先通知窗口（这里跟着应用设置）、再按系统改一遍这个属性，所以等这一轮消息处理完再设一次。
+    // 深色（或浅色）时要改成应用的，否则深色界面下透出来的是浅色 Mica。
+    //
+    // GPUI（gpui-pre-windows 0.3.2）只在两处按系统写这个属性：建窗口时（`WindowsWindow::new`，
+    // 早于窗口壳建好、第一次应用设置），和收到 `WM_SETTINGCHANGE`「ImmersiveColorSet」时
+    // （`handle_system_theme_changed`：先调外观回调，紧接着同步写属性）。那个外观回调
+    // （gpui-pre 的 `on_appearance_changed`）只往前台派一个任务，`observe_window_appearance`
+    // 的观察者在那个任务里跑；前台任务经 `PostMessageW` 排进消息队列，要等这条消息处理完才轮到。
+    // 所以窗口壳的外观观察者调到这里时，GPUI 已经写完了，这里按应用外观再写一遍就是最终的值。
     sync_dark_frame(mode, window);
-    window
-        .spawn(cx, async move |cx| {
-            cx.update(|window, _| sync_dark_frame(mode, window)).ok();
-        })
-        .detach();
 
     let backdrop = WindowBackdrop::for_setting(wanted);
     if cx.try_global::<WindowBackdrop>() == Some(&backdrop) {
@@ -71,18 +72,11 @@ pub(super) fn apply_backdrop(wanted: bool, mode: ThemeMode, window: &mut Window,
 /// 它决定 Mica 和窗口边框的底色。拿不到窗口句柄（无头测试）就什么都不做。
 #[cfg(windows)]
 fn sync_dark_frame(mode: ThemeMode, window: &Window) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 
-    // `Window` 自己也有个 `window_handle`（GPUI 的窗口 id），这里要的是系统的句柄。
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+    let Some(hwnd) = crate::app::win32::hwnd(window) else {
         return;
     };
-    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
-        return;
-    };
-    let hwnd = HWND(handle.hwnd.get() as *mut std::ffi::c_void);
     // Win32 的 BOOL：4 字节整数。
     let dark: i32 = (mode == ThemeMode::Dark).into();
     // SAFETY: `hwnd` 是这个窗口自己的句柄；属性值指向一个活着的 4 字节 BOOL，长度如实给出。
@@ -102,7 +96,7 @@ fn sync_dark_frame(mode: ThemeMode, window: &Window) {
 fn sync_dark_frame(_: ThemeMode, _: &Window) {}
 
 /// 有 Mica 的最早的 Windows build（Windows 11 22H2），和 GPUI 的判断一致。
-pub const MICA_MIN_BUILD: u32 = 22621;
+const MICA_MIN_BUILD: u32 = 22621;
 
 /// 这台电脑能不能用 Mica：Windows 11 22H2 及以上。别的系统都不能。
 pub fn mica_supported() -> bool {

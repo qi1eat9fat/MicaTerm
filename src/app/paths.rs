@@ -100,6 +100,12 @@ pub fn known_hosts_path() -> io::Result<PathBuf> {
 /// 和设置分开放：窗口一动它就变。
 pub const WINDOW_STATE_FILE: &str = "window.json";
 
+/// 数据目录 `data_dir` 里的 `window.json`。数据目录由调用方给：启动时是 [`data_dir`]，
+/// 窗口壳用注入的那个（测试给临时目录）。不建目录，写的时候再建。
+pub fn window_state_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(WINDOW_STATE_FILE)
+}
+
 /// 上传的续传记录放在哪（工单 22）。
 pub fn upload_resume_dir() -> io::Result<PathBuf> {
     Ok(data_dir()?.join("upload-resume"))

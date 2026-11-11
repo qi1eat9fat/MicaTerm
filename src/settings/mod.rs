@@ -19,7 +19,7 @@ mod store;
 mod terminal_themes;
 
 pub use apply::{apply, apply_terminal, terminal_font};
-pub use backdrop::{MICA_MIN_BUILD, WindowBackdrop, mica_supported};
+pub use backdrop::{WindowBackdrop, mica_supported};
 pub use dialog::{
     SETTINGS_DIALOG_KEY_CONTEXT, SettingsDialog, SettingsDialogPaths, open_settings_dialog,
 };

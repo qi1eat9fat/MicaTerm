@@ -138,6 +138,121 @@ fn the_window_size_is_remembered_for_the_next_launch(cx: &mut TestAppContext) {
     }
 }
 
+fn rect(x: f32, y: f32, width: f32, height: f32) -> gpui_kit::Bounds<gpui_kit::Pixels> {
+    gpui_kit::Bounds::new(gpui_kit::point(px(x), px(y)), size(px(width), px(height)))
+}
+
+/// 上次退出时记下的 `window.json`：在测试的那块屏幕上，不最大化时是 `bounds`。
+fn write_window_file(
+    cx: &mut TestAppContext,
+    path: &Path,
+    bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
+    maximized: bool,
+) {
+    let display = cx.update(|cx| {
+        let display = cx.primary_display().expect("the test has a screen");
+        display.uuid().unwrap().to_string()
+    });
+    let state = serde_json::json!({
+        "display": display,
+        "bounds": {
+            "origin": { "x": bounds.origin.x.as_f32(), "y": bounds.origin.y.as_f32() },
+            "size": { "width": bounds.size.width.as_f32(), "height": bounds.size.height.as_f32() },
+        },
+        "maximized": maximized,
+    });
+    std::fs::write(path, state.to_string()).unwrap();
+}
+
+/// 像 `main` 那样启动：按数据目录里记下的样子和设置算窗口选项，再打开窗口壳。
+fn launch(
+    cx: &mut TestAppContext,
+    data_dir: &Path,
+    settings: WindowSettings,
+) -> (WindowHandle<Root>, Entity<Workspace>) {
+    init_app(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let saved = WindowState::load(&data_dir.join(WINDOW_STATE_FILE));
+    let options = cx.update(|cx| window_options(saved.as_ref(), settings, cx));
+    let services = WorkspaceServices {
+        data_dir: Some(data_dir.to_path_buf()),
+        ..fake_services()
+    };
+    let mut workspace = None;
+    let handle = cx
+        .update(|cx| {
+            cx.open_window(options, |window, cx| {
+                let settings = cx.new(|_| settings_store());
+                let view =
+                    cx.new(|cx| Workspace::new_with_services(settings, services, window, cx));
+                workspace = Some(view.clone());
+                cx.new(|cx| Root::new(view, window, cx))
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    (handle, workspace.expect("workspace created"))
+}
+
+fn window_bounds(
+    cx: &mut TestAppContext,
+    handle: WindowHandle<Root>,
+) -> gpui_kit::Bounds<gpui_kit::Pixels> {
+    cx.update_window(handle.into(), |_, window, _| window.bounds())
+        .unwrap()
+}
+
+#[gpui_kit::test]
+fn the_window_position_is_remembered_for_the_next_launch(cx: &mut TestAppContext) {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join(WINDOW_STATE_FILE);
+    let was = rect(240., 160., 1000., 640.);
+    write_window_file(cx, &path, was, false);
+
+    // 记住时开在上次的位置，是上次的大小。
+    let (handle, _) = launch(cx, data.path(), WindowSettings { remember: true });
+    assert_eq!(window_bounds(cx, handle), was);
+
+    // 再改大小：记下的位置还是窗口所在的位置。
+    cx.simulate_window_resize(handle.into(), size(px(1100.), px(700.)));
+    let_the_window_settle(cx);
+    let saved = WindowState::load(&path).expect("the window's place is written");
+    assert_eq!(saved.bounds(), rect(240., 160., 1100., 700.));
+    assert!(!saved.maximized());
+}
+
+#[gpui_kit::test]
+fn a_window_left_maximized_opens_maximized_over_its_restored_place(cx: &mut TestAppContext) {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join(WINDOW_STATE_FILE);
+    let restored = rect(240., 160., 1000., 640.);
+    write_window_file(cx, &path, restored, true);
+    let saved = WindowState::load(&path).unwrap();
+    assert!(saved.maximized());
+
+    let primary = cx.update(|cx| cx.primary_display().unwrap().id());
+    let options =
+        cx.update(|cx| window_options(Some(&saved), WindowSettings { remember: true }, cx));
+    assert_eq!(options.display_id, Some(primary));
+    let expected = if cfg!(target_os = "macos") {
+        // macOS 上最大化是填满屏幕可见部分的窗口。
+        let visible = cx.update(|cx| cx.primary_display().unwrap().visible_bounds());
+        gpui_kit::WindowBounds::Windowed(visible)
+    } else {
+        // 还原时回到上次的大小和位置。
+        gpui_kit::WindowBounds::Maximized(restored)
+    };
+    assert_eq!(options.window_bounds, Some(expected));
+
+    // 不记住：像新窗口一样，不最大化。
+    let options =
+        cx.update(|cx| window_options(Some(&saved), WindowSettings { remember: false }, cx));
+    assert!(matches!(
+        options.window_bounds,
+        Some(gpui_kit::WindowBounds::Windowed(bounds)) if bounds.size == default_window_size()
+    ));
+}
+
 #[gpui_kit::test]
 fn without_a_data_folder_the_window_is_not_remembered(cx: &mut TestAppContext) {
     let (handle, _) = open_with_data_dir(cx, None);

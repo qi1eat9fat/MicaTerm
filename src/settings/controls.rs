@@ -7,10 +7,13 @@ use gpui_kit::component::{
     Sizable as _,
     button::Button,
     menu::{DropdownMenu as _, PopupMenuItem},
+    switch::Switch,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::pages::write;
+use super::{AppSettings, SettingsStore};
 use crate::theme::Tokens;
 
 /// 分组标题（原型的 `h4`）：12px 半粗、次要文字色。
@@ -66,16 +69,35 @@ pub fn row(
     control: impl IntoElement,
     tokens: &Tokens,
 ) -> AnyElement {
-    let note = description.map(|description| {
-        div()
-            .mt(px(2.))
-            .text_size(px(11.5))
-            .line_height(relative(1.45))
-            .text_color(tokens.faint)
-            .child(description)
-            .into_any_element()
-    });
+    let note = description.map(|description| note(tokens).child(description).into_any_element());
     row_with_note(label, note, control)
+}
+
+/// 设置名称下面的一句说明的样式：11.5px、最淡的文字色。
+pub fn note(tokens: &Tokens) -> Div {
+    div()
+        .mt(px(2.))
+        .text_size(px(11.5))
+        .line_height(relative(1.45))
+        .text_color(tokens.faint)
+}
+
+/// 一项开关设置：显示 `checked`，拨动时用 `set` 把新值写进设置。`label` 是无障碍名，测试也靠它。
+pub fn setting_switch(
+    id: impl Into<ElementId>,
+    label: SharedString,
+    checked: bool,
+    store: &Entity<SettingsStore>,
+    set: impl Fn(&mut AppSettings, bool) + 'static,
+) -> Switch {
+    let store = store.clone();
+    Switch::new(id)
+        .checked(checked)
+        .accessibility_label(label)
+        .on_click(move |checked: &bool, _, cx| {
+            let checked = *checked;
+            write(&store, cx, |settings| set(settings, checked))
+        })
 }
 
 /// 一行设置，名称下面放任意内容（比如图标风格的示例图标），不只是一句说明。

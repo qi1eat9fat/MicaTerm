@@ -37,18 +37,38 @@ pub struct WindowState {
 }
 
 impl WindowState {
-    /// 窗口现在的样子。外接屏拔掉后醒来，窗口可能暂时不在任何屏幕上：这时返回 `None`，
-    /// 留着上一次的。
+    /// 窗口现在的样子。外接屏拔掉后醒来，窗口可能暂时不在任何屏幕上；或者窗口最小化着：
+    /// 这时返回 `None`，留着上一次的。
     pub fn capture(window: &Window, cx: &App) -> Option<Self> {
         // GPUI 在通知观察者之前已经更新了窗口所在的屏幕；先看它，macOS 的 `is_maximized` 假定有屏幕。
         let display = window.display(cx)?;
-        let (bounds, maximized) = match window.window_bounds() {
-            WindowBounds::Windowed(bounds) => (bounds, window.is_maximized()),
+        Self::observe(
+            display.uuid().ok().map(|uuid| uuid.to_string()),
+            window.window_bounds(),
+            window.is_maximized(),
+            is_minimized(window),
+        )
+    }
+
+    /// 从窗口报的样子得出要记的。最小化着时不记：Windows 上最大化后再最小化，报的是还原时的
+    /// 大小位置、`is_maximized` 是 false，记下来就丢了最大化。最小化不改还原时的大小位置，
+    /// 也不改最小化前是不是最大化，所以留着最小化前记的就对了。
+    fn observe(
+        display: Option<String>,
+        bounds: WindowBounds,
+        is_maximized: bool,
+        minimized: bool,
+    ) -> Option<Self> {
+        if minimized {
+            return None;
+        }
+        let (bounds, maximized) = match bounds {
+            WindowBounds::Windowed(bounds) => (bounds, is_maximized),
             WindowBounds::Maximized(bounds) => (bounds, true),
             WindowBounds::Fullscreen(bounds) => (bounds, false),
         };
         Some(Self {
-            display: display.uuid().ok().map(|uuid| uuid.to_string()),
+            display,
             bounds,
             maximized,
         })
@@ -116,8 +136,19 @@ impl Workspace {
                     .await;
             }));
         });
-        self._subscriptions.push(subscription);
+        self.subscriptions.push(subscription);
     }
+}
+
+/// 窗口是不是最小化着。GPUI 没有这个查询；macOS、Linux 上当作没有最小化，照旧记。
+#[cfg(windows)]
+fn is_minimized(window: &Window) -> bool {
+    crate::app::win32::is_minimized(window)
+}
+
+#[cfg(not(windows))]
+fn is_minimized(_: &Window) -> bool {
+    false
 }
 
 /// 记窗口的位置只是方便：写不进去只记日志，不打扰用户。
@@ -370,6 +401,27 @@ mod tests {
         assert_eq!(
             place(Some(&state), REMEMBER),
             (WindowBounds::Windowed(fitted), None)
+        );
+    }
+
+    #[test]
+    fn a_minimized_window_keeps_the_place_it_had_before() {
+        let restored = rect(1700., 120., 1600., 1000.);
+        let monitor = || Some("monitor".to_string());
+        // 最大化着：记下最大化和还原时的大小、位置。
+        assert_eq!(
+            WindowState::observe(monitor(), WindowBounds::Maximized(restored), true, false),
+            Some(saved("monitor", restored, true))
+        );
+        // 再最小化：Windows 报的是还原时的大小、位置，`is_maximized` 是 false。不记，留着上一次的，
+        // 这时从任务栏关掉，下次启动照样最大化。
+        assert_eq!(
+            WindowState::observe(monitor(), WindowBounds::Windowed(restored), false, true),
+            None
+        );
+        assert_eq!(
+            WindowState::observe(monitor(), WindowBounds::Windowed(restored), false, false),
+            Some(saved("monitor", restored, false))
         );
     }
 

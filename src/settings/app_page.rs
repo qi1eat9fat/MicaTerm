@@ -3,12 +3,10 @@
 
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::switch::Switch;
 use gpui_kit::*;
 
-use super::controls::{group, row, row_with_note, section_title};
+use super::controls::{group, note, row, row_with_note, section_title, setting_switch};
 use super::dialog::SettingsDialog;
-use super::pages::write;
 use crate::app::PRODUCT_NAME;
 use crate::i18n::t;
 use crate::theme::Tokens;
@@ -28,13 +26,13 @@ pub(super) fn app(
     let store = dialog.store.clone();
     let settings = store.read(cx).settings();
 
-    let remember = Switch::new("remember-window")
-        .checked(settings.window.remember)
-        .accessibility_label(t!("settings.app.remember_window"))
-        .on_click(move |checked: &bool, _, cx| {
-            let checked = *checked;
-            write(&store, cx, |settings| settings.window.remember = checked)
-        });
+    let remember = setting_switch(
+        "remember-window",
+        t!("settings.app.remember_window"),
+        settings.window.remember,
+        &store,
+        |settings, checked| settings.window.remember = checked,
+    );
 
     let data_dir = dialog.data_dir.clone();
     let (data_note, open_folder) = match data_dir {
@@ -51,21 +49,13 @@ pub(super) fn app(
         None => (t!("settings.app.no_data_dir").to_string(), None),
     };
     // 路径单独放一个带 id 的元素：测试读它的无障碍名。
-    let data_path = div()
+    let data_path = note(tokens)
         .id("data-dir-path")
         .test_support()
         .aria_label(data_note.clone())
-        .mt(px(2.))
-        .text_size(px(11.5))
-        .line_height(relative(1.45))
-        .text_color(tokens.faint)
         .child(data_note)
         .into_any_element();
-    let data_contents = div()
-        .mt(px(2.))
-        .text_size(px(11.5))
-        .line_height(relative(1.45))
-        .text_color(tokens.faint)
+    let data_contents = note(tokens)
         .child(t!("settings.app.data_dir_contents"))
         .into_any_element();
 
