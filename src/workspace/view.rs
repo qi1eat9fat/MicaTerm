@@ -584,7 +584,8 @@ impl Render for Workspace {
                 self.quick_connect.is_some(),
                 &self.quick_connect_anchor(),
                 self.tab_rail
-                    .render(self.tab_snapshots(cx), &target, &tokens),
+                    .render(self.tab_snapshots(cx), &target, &tokens, window, cx),
+                &self.tab_rail,
                 &target,
                 &tokens,
                 window,

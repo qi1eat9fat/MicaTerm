@@ -1,9 +1,12 @@
 //! 标签轨道（原型 `.track`）和里面的标签（`.tab`）：宽固定 180、高 28，叠放的程序图块、名称、目录和状态点。
 //! 点标签切过去；悬停时状态点让位给 ×，点了关闭整个标签；右键菜单三项；放不下时轨道横向滚动。
-//! 渲染不读实体，只拿窗口壳取好的快照；点击、菜单都经窗口壳的焦点派发 action。
+//! 按住标签左右拖动改顺序（工单 29）：标题栏里有插入线，拖到轨道两端自动横向滚动，
+//! 拖过轨道右端（`+`、拖动区）算放到最后；拖动中不切换在前的标签。
+//! 渲染不读实体，只拿窗口壳取好的快照；点击、菜单、拖动排序都经窗口壳的焦点派发 action。
 // 参考 gorex 的模型重写：tabs.go 的标签外观、悬停时出现 ×。
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use gpui_kit::base::POPUP_PRIORITY;
 use gpui_kit::component::Icon;
@@ -13,7 +16,7 @@ use gpui_kit::*;
 
 use super::TabId;
 use crate::app::{
-    ActivateTab, CatalogIcon, CloseOtherTabs, CloseTab, CloseTabsToRight, OpenTabMenu,
+    ActivateTab, CatalogIcon, CloseOtherTabs, CloseTab, CloseTabsToRight, MoveTab, OpenTabMenu,
 };
 use crate::card::{StatusDot, render_status_dot, render_tile_stack};
 use crate::i18n::t;
@@ -35,7 +38,7 @@ pub struct TabSnapshot {
     pub dot: StatusDot,
 }
 
-/// 标签轨道跨帧要记住的东西：横向滚动的位置、上一次露出来的在前标签、开着的右键菜单。
+/// 标签轨道跨帧要记住的东西：横向滚动的位置、上一次露出来的在前标签、开着的右键菜单、拖动。
 #[derive(Default)]
 pub struct TabRail {
     scroll: ScrollHandle,
@@ -44,6 +47,10 @@ pub struct TabRail {
     /// 下一帧不管换没换，都把在前的标签滚进视野（又切到它一次时）。
     reveal_requested: Cell<bool>,
     menu: Option<OpenMenu>,
+    /// 正在拖的标签：标题栏的拖动监听写，渲染时读来画插入线、自动滚动。
+    drag: Rc<Cell<Option<TabDrag>>>,
+    /// 上一帧画的标签顺序：松开时按它算放到第几个。
+    order: Rc<RefCell<Vec<TabId>>>,
 }
 
 /// 开着的标签右键菜单。菜单实体由轨道持有，关菜单时一起放掉。
@@ -57,20 +64,40 @@ struct OpenMenu {
     _dismiss: Subscription,
 }
 
+/// 拖动中的一刻：拖着哪个标签，鼠标在哪里（窗口坐标），在不在标题栏里。
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TabDrag {
+    source: TabId,
+    pointer: Point<Pixels>,
+    over_title_bar: bool,
+}
+
 /// 标签之间的竖线（`.tsep`）。
 const SEPARATOR_WIDTH: Pixels = px(1.);
 /// × 按钮的边长（`.tab .x`）。
 const CLOSE_BUTTON: Pixels = px(18.);
+/// 拖到离轨道两端这么近（或者过了两端）时自动横向滚动。
+const AUTO_SCROLL_EDGE: Pixels = px(32.);
+/// 自动滚动每帧滚多少。
+const AUTO_SCROLL_STEP: Pixels = px(8.);
 
 impl TabRail {
     /// 轨道（底色圆角条）和里面的标签；没有标签时什么都不画。
     /// `target` 是窗口壳的焦点：点击和菜单都经它派发，焦点在哪里都送得到窗口壳。
+    /// 拖着标签时顺带自动滚动轨道（要下一帧时向 `window` 要）。
     pub fn render(
         &self,
         tabs: Vec<TabSnapshot>,
         target: &FocusHandle,
         tokens: &Tokens,
+        window: &Window,
+        cx: &App,
     ) -> Option<impl IntoElement + use<>> {
+        // 拖动在别处放下或取消了：插入线和变淡都收掉。
+        if !cx.has_active_drag() {
+            self.drag.set(None);
+        }
+        *self.order.borrow_mut() = tabs.iter().map(|tab| tab.id).collect();
         if tabs.is_empty() {
             self.revealed.set(None);
             return None;
@@ -79,10 +106,25 @@ impl TabRail {
         let active = tabs.iter().position(|tab| tab.active);
         let menu_tab = self.menu_tab();
         let count = tabs.len();
+        let drag = self.drag.get();
+        let line = drag.and_then(|drag| {
+            let gap = self.follow_drag(drag, count, window)?;
+            let from = tabs.iter().position(|tab| tab.id == drag.source)?;
+            drop_index(from, gap)?;
+            Some(gap)
+        });
         let mut children = Vec::with_capacity(count * 2);
         for (index, tab) in tabs.into_iter().enumerate() {
-            let pressed = menu_tab == Some(tab.id);
-            children.push(render_tab(tab, pressed, target, tokens).into_any_element());
+            let look = TabLook {
+                pressed: menu_tab == Some(tab.id),
+                dragged: drag.is_some_and(|drag| drag.source == tab.id),
+                line: match line {
+                    Some(gap) if gap == index => Some(Edge::Left),
+                    Some(gap) if gap == count && index + 1 == count => Some(Edge::Right),
+                    _ => None,
+                },
+            };
+            children.push(render_tab(tab, look, target, tokens).into_any_element());
             if index + 1 < count {
                 // 在前的标签两边不画竖线（它自己有底色）。
                 let hidden = active == Some(index) || active == Some(index + 1);
@@ -115,6 +157,39 @@ impl TabRail {
                     .with_priority(POPUP_PRIORITY)
                 })),
         )
+    }
+
+    /// 让标题栏接住拖着的标签（工单 29）：在标题栏里移动时记下位置（插入线、自动滚动看它），
+    /// 在标题栏里松开时按松开的位置派发 `MoveTab`。拖动区本身不挂任何处理器，照常拖窗口。
+    pub fn accept_drops(&self, bar: Stateful<Div>, target: &FocusHandle) -> Stateful<Div> {
+        let drag = self.drag.clone();
+        let dropped = self.drag.clone();
+        let scroll = self.scroll.clone();
+        let order = self.order.clone();
+        let target = target.clone();
+        bar.on_drag_move(move |event: &DragMoveEvent<DraggedTab>, _, cx| {
+            let pointer = event.event.position;
+            drag.set(Some(TabDrag {
+                source: event.drag(cx).tab.id,
+                pointer,
+                over_title_bar: event.bounds.contains(&pointer),
+            }));
+        })
+        .on_drop(move |dragged: &DraggedTab, window, cx| {
+            dropped.set(None);
+            let tab = dragged.tab.id;
+            let (from, count) = {
+                let order = order.borrow();
+                let Some(from) = order.iter().position(|id| *id == tab) else {
+                    return;
+                };
+                (from, order.len())
+            };
+            let gap = insertion_gap(window.mouse_position().x, &scroll, count);
+            if let Some(to) = drop_index(from, gap) {
+                target.dispatch_action(&MoveTab { tab, to }, window, cx);
+            }
+        })
     }
 
     /// 下一帧把在前的标签滚进视野，即使它本来就在前（用户把它滚开了又切到它）。
@@ -162,6 +237,57 @@ impl TabRail {
             self.scroll.scroll_to_item(index * 2);
         }
     }
+
+    /// 拖着标签的这一帧：鼠标在轨道两端就滚一步、要下一帧接着滚；返回插入线落在哪个缝。
+    /// 鼠标不在标题栏里时没有插入线。
+    fn follow_drag(&self, drag: TabDrag, count: usize, window: &Window) -> Option<usize> {
+        if !drag.over_title_bar {
+            return None;
+        }
+        let track = self.scroll.bounds();
+        let x = drag.pointer.x;
+        let step = if x < track.left() + AUTO_SCROLL_EDGE {
+            AUTO_SCROLL_STEP
+        } else if x > track.right() - AUTO_SCROLL_EDGE {
+            -AUTO_SCROLL_STEP
+        } else {
+            px(0.)
+        };
+        let offset = self.scroll.offset();
+        let scrolled = (offset.x + step).clamp(-self.scroll.max_offset().x, px(0.));
+        if scrolled != offset.x {
+            self.scroll.set_offset(point(scrolled, offset.y));
+            window.request_animation_frame();
+        }
+        Some(insertion_gap(x, &self.scroll, count))
+    }
+}
+
+/// 鼠标在 `x`（窗口坐标）时插入线落在哪个缝：0 是第一个标签前面，`count` 是最后一个后面。
+/// 看的是标签露出来的中线（布局位置加上滚动）；过了轨道右端（`+`、拖动区）算放到最后，
+/// 轨道左边按轨道左端算。
+fn insertion_gap(x: Pixels, scroll: &ScrollHandle, count: usize) -> usize {
+    let track = scroll.bounds();
+    if x > track.right() {
+        return count;
+    }
+    let x = x.max(track.left());
+    let offset = scroll.offset().x;
+    (0..count)
+        .filter_map(|index| scroll.bounds_for_item(index * 2))
+        .filter(|bounds| bounds.center().x + offset < x)
+        .count()
+}
+
+/// 从第 `from` 个拖到缝 `gap`，挪完在第几个；拖回自己两边的缝不算挪动。
+fn drop_index(from: usize, gap: usize) -> Option<usize> {
+    if gap == from || gap == from + 1 {
+        None
+    } else if gap > from {
+        Some(gap - 1)
+    } else {
+        Some(gap)
+    }
 }
 
 /// 标签的右键菜单，只有三项。菜单派发的 action 送到 `target`（窗口壳的焦点）。
@@ -180,23 +306,88 @@ pub fn build_tab_menu(
     })
 }
 
-/// `pressed`：这个标签的右键菜单开着（原型 `.tab.rc`）。
+/// 插入线画在标签的哪一边。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Edge {
+    Left,
+    Right,
+}
+
+/// 标签随轨道状态变的样子。
+struct TabLook {
+    /// 这个标签的右键菜单开着（原型 `.tab.rc`）。
+    pressed: bool,
+    /// 正拖着它：变淡，跟着鼠标的是它的预览。
+    dragged: bool,
+    /// 插入线落在它的哪一边。
+    line: Option<Edge>,
+}
+
 fn render_tab(
     tab: TabSnapshot,
-    pressed: bool,
+    look: TabLook,
     target: &FocusHandle,
     tokens: &Tokens,
 ) -> impl IntoElement {
     let hover = tokens.hover;
-    let shadow = tokens.shadow;
     let id = tab.id;
     let activate = target.clone();
     let open_menu = target.clone();
-    div()
+    let dot = tab.dot;
+    let dragged = DraggedTab { tab: tab.clone() };
+    render_tab_face(&tab, ("tab-tiles", id.0 as usize).into(), tokens)
         .id(("tab", id.0 as usize))
         .test_support()
         .group("tab")
         .aria_label(format!("{} {}", tab.name, tab.directory))
+        .relative()
+        .cursor_pointer()
+        .when(tab.active, |this| {
+            this.bg(tokens.tab_active).shadow(raised(tokens.shadow))
+        })
+        .when(!tab.active, |this| this.hover(move |style| style.bg(hover)))
+        .when(look.pressed, |this| this.bg(tokens.pressed))
+        .when(look.dragged, |this| this.opacity(0.45))
+        // 按下标签不把焦点交给窗口壳：拖动排序（或拖出去取消）之后焦点还在原来的卡片里。
+        .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+        .on_click(move |_, window, cx| {
+            activate.dispatch_action(&ActivateTab(id), window, cx);
+        })
+        .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+            let position = event.position;
+            open_menu.dispatch_action(&OpenTabMenu { tab: id, position }, window, cx);
+        })
+        // 预览按住的位置跟着鼠标，看起来就是标签本身被拿起来。
+        .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+        .child(
+            // 状态点和 × 占同一个位置：悬停时点让位给 ×（原型 `.tab:hover .dot`）。
+            div()
+                .relative()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(CLOSE_BUTTON)
+                .children(
+                    render_status_dot(("tab-dot", id.0 as usize).into(), dot, tokens).map(|dot| {
+                        div()
+                            .absolute()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .group_hover("tab", |style| style.invisible())
+                            .child(dot)
+                    }),
+                )
+                .child(render_close_button(id, target, tokens)),
+        )
+        .children(look.line.map(|edge| render_drop_line(edge, tokens)))
+}
+
+/// 标签的外形和左边的内容（图块、名称、目录）：轨道里的标签和拖动预览共用。
+fn render_tab_face(tab: &TabSnapshot, tiles: ElementId, tokens: &Tokens) -> Div {
+    div()
         .flex()
         .flex_none()
         .items_center()
@@ -206,39 +397,7 @@ fn render_tab(
         .pl(px(6.))
         .pr(px(4.))
         .rounded(px(14.))
-        .cursor_pointer()
-        .when(tab.active, |this| {
-            this.bg(tokens.tab_active).shadow(vec![
-                BoxShadow {
-                    color: shadow,
-                    offset: point(px(0.), px(1.)),
-                    blur_radius: px(2.),
-                    spread_radius: px(0.),
-                    inset: false,
-                },
-                BoxShadow {
-                    color: shadow,
-                    offset: point(px(0.), px(2.)),
-                    blur_radius: px(8.),
-                    spread_radius: px(0.),
-                    inset: false,
-                },
-            ])
-        })
-        .when(!tab.active, |this| this.hover(move |style| style.bg(hover)))
-        .when(pressed, |this| this.bg(tokens.pressed))
-        .on_click(move |_, window, cx| {
-            activate.dispatch_action(&ActivateTab(id), window, cx);
-        })
-        .on_mouse_down(MouseButton::Right, move |event, window, cx| {
-            let position = event.position;
-            open_menu.dispatch_action(&OpenTabMenu { tab: id, position }, window, cx);
-        })
-        .child(render_tile_stack(
-            ("tab-tiles", id.0 as usize).into(),
-            &tab.tiles,
-            tokens,
-        ))
+        .child(render_tile_stack(tiles, &tab.tiles, tokens))
         .child(
             div()
                 .flex()
@@ -254,7 +413,7 @@ fn render_tab(
                 } else {
                     tokens.muted
                 })
-                .child(div().flex_none().child(tab.name))
+                .child(div().flex_none().child(tab.name.clone()))
                 .child(
                     div()
                         .min_w_0()
@@ -262,34 +421,46 @@ fn render_tab(
                         .text_ellipsis()
                         .font_weight(FontWeight::NORMAL)
                         .text_color(tokens.faint)
-                        .child(tab.directory),
+                        .child(tab.directory.clone()),
                 ),
         )
-        .child(
-            // 状态点和 × 占同一个位置：悬停时点让位给 ×（原型 `.tab:hover .dot`）。
-            div()
-                .relative()
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .size(CLOSE_BUTTON)
-                .children(
-                    render_status_dot(("tab-dot", id.0 as usize).into(), tab.dot, tokens).map(
-                        |dot| {
-                            div()
-                                .absolute()
-                                .size_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .group_hover("tab", |style| style.invisible())
-                                .child(dot)
-                        },
-                    ),
-                )
-                .child(render_close_button(id, target, tokens)),
-        )
+}
+
+/// 在前的标签（和拖动预览）的浮起阴影。
+fn raised(shadow: Hsla) -> Vec<BoxShadow> {
+    vec![
+        BoxShadow {
+            color: shadow,
+            offset: point(px(0.), px(1.)),
+            blur_radius: px(2.),
+            spread_radius: px(0.),
+            inset: false,
+        },
+        BoxShadow {
+            color: shadow,
+            offset: point(px(0.), px(2.)),
+            blur_radius: px(8.),
+            spread_radius: px(0.),
+            inset: false,
+        },
+    ]
+}
+
+/// 拖动时的插入线：竖在标签左边或右边的缝上（盖住竖线）。
+fn render_drop_line(edge: Edge, tokens: &Tokens) -> impl IntoElement {
+    div()
+        .id("tab-drop-line")
+        .test_support()
+        .absolute()
+        .top(px(4.))
+        .bottom(px(4.))
+        .w(px(2.))
+        .rounded(px(1.))
+        .bg(tokens.accent)
+        .map(|line| match edge {
+            Edge::Left => line.left(px(-1.5)),
+            Edge::Right => line.right(px(-1.5)),
+        })
 }
 
 /// 标签右端的 ×：只在悬停这个标签时出现，点了关闭整个标签。
@@ -326,4 +497,24 @@ fn render_separator(hidden: bool, tokens: &Tokens) -> impl IntoElement {
         .h(px(16.))
         .bg(tokens.separator)
         .when(hidden, |this| this.invisible())
+}
+
+/// 拖着的标签，和跟着鼠标的那块预览：标签本身的样子，浮起来。
+#[derive(Clone)]
+struct DraggedTab {
+    tab: TabSnapshot,
+}
+
+impl Render for DraggedTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let tokens = Tokens::current(cx);
+        let tab = TabSnapshot {
+            active: true,
+            ..self.tab.clone()
+        };
+        render_tab_face(&tab, ("tab-drag-tiles", tab.id.0 as usize).into(), &tokens)
+            .bg(tokens.tab_active)
+            .shadow(raised(tokens.shadow))
+            .opacity(0.92)
+    }
 }

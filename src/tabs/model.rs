@@ -1,5 +1,5 @@
 //! 标签列表的纯逻辑：按顺序放标签，记着哪个在前面。不依赖 gpui。
-//! 新建、关闭（02），上一个 / 下一个 / 第 n 个、关闭其他、关闭右侧（04）。
+//! 新建、关闭（02），上一个 / 下一个 / 第 n 个、关闭其他、关闭右侧（04），拖动排序（29）。
 
 /// 一个标签的 id：从 1 起递增，不复用。元素 id 写成 `("tab", id)`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -140,6 +140,21 @@ impl<T> TabList<T> {
         }
     }
 
+    /// 把 `id` 挪到第 `index` 个（从 0 数起，超出的放到最后），在前的标签不变（工单 29 拖动排序）。
+    /// 顺序变了返回 `true`；没有这个标签、或它本来就在那里时返回 `false`。
+    pub fn move_to(&mut self, id: TabId, index: usize) -> bool {
+        let Some(from) = self.index_of(id) else {
+            return false;
+        };
+        let to = index.min(self.tabs.len() - 1);
+        if from == to {
+            return false;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        true
+    }
+
     /// `id` 在第几个（从 0 数起）。
     pub fn position(&self, id: TabId) -> Option<usize> {
         self.index_of(id)
@@ -239,6 +254,31 @@ mod tests {
         assert!(tabs.right_of(TabId(4)).is_empty());
         assert!(tabs.right_of(TabId(9)).is_empty());
         assert!(tabs.others(TabId(9)).is_empty());
+    }
+
+    /// 拖动排序（工单 29）：挪到第 `index` 个（从 0 数起），超出的放到最后；在前的标签不变。
+    #[test]
+    fn moving_a_tab_puts_it_at_the_index_and_keeps_the_front_one() {
+        let mut tabs = list(&["a", "b", "c", "d"]);
+        tabs.activate(TabId(2));
+
+        assert!(tabs.move_to(TabId(4), 0));
+        assert_eq!(tabs.ids(), [TabId(4), TabId(1), TabId(2), TabId(3)]);
+        assert!(tabs.move_to(TabId(4), 2));
+        assert_eq!(tabs.ids(), [TabId(1), TabId(2), TabId(4), TabId(3)]);
+        assert!(tabs.move_to(TabId(1), 9));
+        assert_eq!(tabs.ids(), [TabId(2), TabId(4), TabId(3), TabId(1)]);
+        assert_eq!(tabs.active(), Some(TabId(2)));
+        assert_eq!(tabs.get(TabId(1)), Some(&"a"));
+    }
+
+    #[test]
+    fn moving_a_tab_to_where_it_is_or_a_tab_that_is_gone_changes_nothing() {
+        let mut tabs = list(&["a", "b", "c"]);
+        assert!(!tabs.move_to(TabId(2), 1));
+        assert!(!tabs.move_to(TabId(3), 7));
+        assert!(!tabs.move_to(TabId(9), 0));
+        assert_eq!(tabs.ids(), [TabId(1), TabId(2), TabId(3)]);
     }
 
     #[test]

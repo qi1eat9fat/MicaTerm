@@ -1,4 +1,4 @@
-//! 标签的处理器：新建（02），切换、三种关闭（04），关闭在前的整个标签（macOS 的 ⇧⌘W）。
+//! 标签的处理器：新建（02），切换、三种关闭（04），关闭在前的整个标签（macOS 的 ⇧⌘W），拖动排序（29）。
 
 use gpui_kit::*;
 use qishell_terminal::{LocalLaunch, LocalShell};
@@ -6,8 +6,8 @@ use qishell_terminal::{LocalLaunch, LocalShell};
 use gpui_kit::component::menu::PopupMenu;
 
 use crate::app::{
-    ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NewLocalTerminalTab,
-    NextTab, OpenTabMenu, PreviousTab, SwitchToTab,
+    ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, MoveTab,
+    NewLocalTerminalTab, NextTab, OpenTabMenu, PreviousTab, SwitchToTab,
 };
 use crate::editor::EditorTab;
 use crate::i18n::t;
@@ -97,6 +97,7 @@ pub(in crate::workspace) fn bind_tabs_actions(
         .on_action(cx.listener(Workspace::on_close_other_tabs))
         .on_action(cx.listener(Workspace::on_close_tabs_to_right))
         .on_action(cx.listener(Workspace::on_open_tab_menu))
+        .on_action(cx.listener(Workspace::on_move_tab))
 }
 
 impl Workspace {
@@ -235,6 +236,18 @@ impl Workspace {
         window.focus(&menu.focus_handle(cx), cx);
         self.tab_rail.open_menu(tab, position, menu, dismiss);
         cx.notify();
+    }
+
+    /// 拖动排序（工单 29）：只改顺序，在前的标签和焦点都不动。
+    fn on_move_tab(
+        &mut self,
+        &MoveTab { tab, to }: &MoveTab,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tabs.move_to(tab, to) {
+            cx.notify();
+        }
     }
 
     /// 让 `id` 到前面来并滚进视野，焦点给它的焦点卡片；没有这个标签时什么都不做。
