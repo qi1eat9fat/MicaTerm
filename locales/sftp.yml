@@ -1,6 +1,6 @@
 _version: 2
 
-# SFTP 引擎的错误和本机文件操作的错误（来自 shell-rs 的 locales/sftp.yml，只留用到的、只留简体中文）。
+# SFTP 引擎的错误和本机文件操作的错误（来自 since2006/shell-rs @ b2a307a: locales/sftp.yml，只留用到的、只留简体中文）。
 
 sftp.worker.disconnected:
   zh-CN: SFTP 已断开
@@ -182,3 +182,5 @@ sftp.error.not_found:
   zh-CN: 「%{name}」不存在
 sftp.error.item:
   zh-CN: 「%{name}」：%{error}
+sftp.worker.discard_offline:
+  zh-CN: 连不上主机，远程的半截文件和续传记录还留着，下次传同一个文件会问是否续传

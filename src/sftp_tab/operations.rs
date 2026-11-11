@@ -10,7 +10,7 @@ use anyhow::Result;
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::*;
 
-use super::{ConnectionState, NewEntryKind, SftpTab, SftpTabId};
+use super::{CardSide, ConnectionState, NewEntryKind, SftpTab, SftpTabId};
 use crate::app::{SftpAction, SftpDispatch as _, SftpTabCommand};
 use crate::backend::sftp::{
     LocalDirectoryProvider, PermissionEdit, RemoteOperation, RemotePath, SftpCommand,
@@ -127,7 +127,7 @@ impl FileOperation {
 
 /// 一个操作有结果时要做的事。
 struct PendingOperation {
-    remote: bool,
+    side: CardSide,
     /// 失败通知的标题。
     failure: fn() -> SharedString,
     select: Option<String>,
@@ -148,16 +148,16 @@ pub struct OperationState {
 #[derive(Clone)]
 pub(super) struct OperationSender {
     tab: SftpTabId,
-    remote: bool,
+    side: CardSide,
     generation: u64,
     dispatch: FocusHandle,
 }
 
 impl OperationSender {
     pub(super) fn send(&self, operation: FileOperation, window: &mut Window, cx: &mut App) {
-        let remote = self.remote;
-        let action = SftpAction::new(self.tab, SftpTabCommand::Operate { remote, operation });
-        let action = if remote {
+        let side = self.side;
+        let action = SftpAction::new(self.tab, SftpTabCommand::Operate { side, operation });
+        let action = if side.is_remote() {
             action.with_generation(self.generation)
         } else {
             action
@@ -167,24 +167,24 @@ impl OperationSender {
 }
 
 impl SftpTab {
-    pub(super) fn operation_sender(&self, remote: bool) -> OperationSender {
+    pub(super) fn operation_sender(&self, side: CardSide) -> OperationSender {
         OperationSender {
             tab: self.id(),
-            remote,
+            side,
             generation: self.generation(),
             dispatch: self.dispatch.clone(),
         }
     }
 
     /// 这一侧现在能改文件：够得着，而且没有别的操作在跑。
-    fn can_modify(&self, remote: bool, cx: &App) -> bool {
-        (!remote || self.state == ConnectionState::Connected)
-            && !self.card(remote).read(cx).is_busy()
+    fn can_modify(&self, side: CardSide, cx: &App) -> bool {
+        (!side.is_remote() || self.state == ConnectionState::Connected)
+            && !self.card(side).read(cx).is_busy()
     }
 
     /// 能开始问用户：这一侧能改文件，也没有别的操作框开着。
-    pub(super) fn can_start_operation(&self, remote: bool, window: &Window, cx: &App) -> bool {
-        self.can_modify(remote, cx)
+    pub(super) fn can_start_operation(&self, side: CardSide, window: &Window, cx: &App) -> bool {
+        self.can_modify(side, cx)
             && !self
                 .operations
                 .dialog
@@ -202,15 +202,15 @@ impl SftpTab {
     /// 做确认过的操作：远程的发给工作线程，本地的放到后台。
     pub(super) fn start_operation(
         &mut self,
-        remote: bool,
+        side: CardSide,
         operation: FileOperation,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.can_modify(remote, cx) {
+        if !self.can_modify(side, cx) {
             return;
         }
-        let card = self.card(remote).clone();
+        let card = self.card(side).clone();
         let directory = card.read(cx).path();
         self.operations.next_id += 1;
         let id = self.operations.next_id;
@@ -224,14 +224,14 @@ impl SftpTab {
         self.operations.pending.insert(
             id,
             PendingOperation {
-                remote,
+                side,
                 failure: operation.failure_title(),
                 select: operation.result_name(),
                 edit,
             },
         );
         card.update(cx, |card, cx| card.set_busy(true, cx));
-        if remote {
+        if side.is_remote() {
             match operation.to_remote(&directory) {
                 Ok(operation) => self.send(SftpCommand::Operate {
                     request_id: id,
@@ -271,7 +271,7 @@ impl SftpTab {
         let Some(pending) = self.operations.pending.remove(&request_id) else {
             return;
         };
-        let card = self.card(pending.remote).clone();
+        let card = self.card(pending.side).clone();
         card.update(cx, |card, cx| {
             card.set_busy(false, cx);
             if let (Ok(()), Some(name)) = (&result, pending.select) {
@@ -284,7 +284,7 @@ impl SftpTab {
             Ok(()) => {
                 if let Some(path) = pending.edit {
                     let command = SftpTabCommand::Edit {
-                        remote: pending.remote,
+                        side: pending.side,
                         path: Some(path),
                     };
                     self.dispatch.dispatch_sftp_action(
@@ -296,12 +296,14 @@ impl SftpTab {
             }
         }
         // 失败了也重读：删除可能已经删掉了一部分。
-        self.reload(pending.remote, window, cx);
+        self.reload(pending.side, window, cx);
     }
 
     /// 连接断了：等着工作线程回答的操作不会再有回答。
     pub(super) fn abandon_remote_operations(&mut self, cx: &mut Context<Self>) {
-        self.operations.pending.retain(|_, pending| !pending.remote);
+        self.operations
+            .pending
+            .retain(|_, pending| !pending.side.is_remote());
         self.remote()
             .clone()
             .update(cx, |card, cx| card.set_busy(false, cx));

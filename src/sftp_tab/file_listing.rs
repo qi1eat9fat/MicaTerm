@@ -241,7 +241,7 @@ impl FileListing {
 
     /// 一行的项目在它那一侧的路径。
     fn child_path(&self, name: &str) -> String {
-        child_path(&self.context.path, name, self.side == CardSide::Remote)
+        child_path(&self.context.path, name, self.side)
     }
 
     /// 让 `cell` 能把这一行拖到另一侧；这一行在选中项里时连选中的一起拖。
@@ -292,7 +292,7 @@ impl FileListing {
             return cell;
         };
         let tab = self.context.tab;
-        let remote = self.side == CardSide::Remote;
+        let side = self.side;
         cell.on_click({
             let name = name.to_string();
             let card = card.clone();
@@ -311,7 +311,7 @@ impl FileListing {
                 let _ = card.update(cx, |card, cx| card.click_row(&name, mode, cx));
                 if mode == ClickMode::Replace && event.click_count() == 2 {
                     dispatch.dispatch_sftp_action(
-                        &SftpAction::new(tab, SftpTabCommand::DoubleClick { remote }),
+                        &SftpAction::new(tab, SftpTabCommand::DoubleClick { side }),
                         window,
                         cx,
                     );

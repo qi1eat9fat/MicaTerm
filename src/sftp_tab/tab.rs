@@ -96,14 +96,13 @@ pub struct SftpTab {
     /// 归工单 22 的状态（`transfers.rs`）。
     pub(super) transfers: TransferState,
     /// 归工单 23、24 的状态（`file_open.rs`）。
-    #[allow(dead_code)]
     pub(super) file_open: FileOpenState,
     /// 问要不要重新连接的那个框，开着时不再叠一个。
     reconnect_dialog: Option<DialogLayer>,
     pub(super) dispatch: FocusHandle,
     focus_handle: FocusHandle,
-    /// 上次用的是远程那一侧：标签再到前面来时焦点回到那里。
-    last_remote: bool,
+    /// 上次用的是哪一侧：标签再到前面来时焦点回到那里。
+    last_side: CardSide,
     /// 用户把两张卡片之间的间隙拖到了哪、队列卡片上面的间隙拖到了哪。
     /// 存在实体里：元素状态在别的标签画出来的第一帧就没了，切回来比例就丢了。
     cards_split: Entity<ResizableState>,
@@ -209,10 +208,14 @@ impl SftpTab {
             // 焦点监听在画的时候跑，那时视图的 `notify` 不要下一帧：点列表空白处换一侧就看不出来。
             // 推到画完以后。
             cx.on_focus_in(&local_focus, window, |_, window, cx| {
-                cx.defer_in(window, |this, _, cx| this.set_current_card(false, cx))
+                cx.defer_in(window, |this, _, cx| {
+                    this.set_current_card(CardSide::Local, cx)
+                })
             }),
             cx.on_focus_in(&remote_focus, window, |_, window, cx| {
-                cx.defer_in(window, |this, _, cx| this.set_current_card(true, cx))
+                cx.defer_in(window, |this, _, cx| {
+                    this.set_current_card(CardSide::Remote, cx)
+                })
             }),
             cx.on_app_quit(|this, _| {
                 this.send(SftpCommand::Shutdown);
@@ -237,7 +240,7 @@ impl SftpTab {
             reconnect_dialog: None,
             dispatch,
             focus_handle: cx.focus_handle(),
-            last_remote: true,
+            last_side: CardSide::Remote,
             cards_split: cx.new(|_| ResizableState::default()),
             queue_split: cx.new(|_| ResizableState::default()),
             _subscriptions: subscriptions,
@@ -276,8 +279,11 @@ impl SftpTab {
         &self.remote
     }
 
-    pub fn card(&self, remote: bool) -> &Entity<FileCard> {
-        if remote { &self.remote } else { &self.local }
+    pub fn card(&self, side: CardSide) -> &Entity<FileCard> {
+        match side {
+            CardSide::Local => &self.local,
+            CardSide::Remote => &self.remote,
+        }
     }
 
     pub fn connection_state(&self) -> ConnectionState {
@@ -325,14 +331,16 @@ impl SftpTab {
 
     /// 标签到前面来时焦点给上次用的那一侧的文件列表，键盘马上能用。
     pub(crate) fn focus_target(&self, cx: &App) -> FocusHandle {
-        self.card(self.last_remote).read(cx).focus_handle(cx)
+        self.card(self.last_side).read(cx).focus_handle(cx)
     }
 
-    /// 能不能重新连接：正在连接、批次在跑或者停着（它有自己的「继续」）时不行。
+    /// 能不能重新连接：正在连接、批次在跑或者停着（它有自己的「继续」）时不行；
+    /// 正在写回时也不行，编辑器会以为写断了，其实还在写。
     pub fn can_reconnect(&self) -> bool {
         self.state != ConnectionState::Connecting
             && !self.transfers.engine_busy
             && !self.head_stopped()
+            && !self.writing_file()
     }
 
     /// 关掉标签：断开连接，工作线程退出。标签随后由窗口壳移走。
@@ -348,12 +356,13 @@ impl SftpTab {
     }
 
     /// 上次用的那一侧：边框亮着，标签再到前面来时焦点回到这里。
-    fn set_current_card(&mut self, remote: bool, cx: &mut Context<Self>) {
-        self.last_remote = remote;
+    fn set_current_card(&mut self, side: CardSide, cx: &mut Context<Self>) {
+        self.last_side = side;
         self.local
-            .update(cx, |card, cx| card.set_current(!remote, cx));
-        self.remote
-            .update(cx, |card, cx| card.set_current(remote, cx));
+            .update(cx, |card, cx| card.set_current(side == CardSide::Local, cx));
+        self.remote.update(cx, |card, cx| {
+            card.set_current(side == CardSide::Remote, cx)
+        });
     }
 
     /// 两张卡片跟上现在的连接状态。
@@ -386,7 +395,7 @@ impl SftpTab {
                 // 第一次连上去初始目录，读不出来静默退回主目录；重连就重读现在的目录。
                 match self.start_directory.take() {
                     Some(directory) => self.navigate(
-                        true,
+                        CardSide::Remote,
                         directory,
                         LoadIntent::Start {
                             fallback: vec![home],
@@ -394,7 +403,7 @@ impl SftpTab {
                         window,
                         cx,
                     ),
-                    None => self.reload(true, window, cx),
+                    None => self.reload(CardSide::Remote, window, cx),
                 }
                 self.start_next_if_idle(window, cx);
             }
@@ -415,7 +424,7 @@ impl SftpTab {
                     card.apply_listing(request_id, result, window, cx)
                 });
                 if let Some((path, intent)) = next {
-                    self.navigate(true, path, intent, window, cx);
+                    self.navigate(CardSide::Remote, path, intent, window, cx);
                 }
             }
             SftpEvent::Operated { request_id, result } => {
@@ -446,18 +455,18 @@ impl SftpTab {
     /// 去 `path`。远程没连着时没人回答，什么都不做。
     pub fn navigate(
         &mut self,
-        remote: bool,
+        side: CardSide,
         path: String,
         intent: LoadIntent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if remote && self.state != ConnectionState::Connected {
+        if side.is_remote() && self.state != ConnectionState::Connected {
             return;
         }
-        let card = self.card(remote).clone();
+        let card = self.card(side).clone();
         let path = card.read(cx).expanded_path(&path);
-        if remote {
+        if side.is_remote() {
             let id = card.update(cx, |card, cx| card.begin_load(intent, cx));
             match RemotePath::new(path) {
                 Ok(path) => self.send(SftpCommand::List {
@@ -469,7 +478,7 @@ impl SftpTab {
                         card.apply_listing(id, Err(describe_sftp_error(&error)), window, cx)
                     });
                     if let Some((path, intent)) = next {
-                        self.navigate(true, path, intent, window, cx);
+                        self.navigate(CardSide::Remote, path, intent, window, cx);
                     }
                 }
             }
@@ -482,9 +491,9 @@ impl SftpTab {
     }
 
     /// 重读这一侧当前的目录。
-    pub fn reload(&mut self, remote: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let path = self.card(remote).read(cx).path();
-        self.navigate(remote, path, LoadIntent::Visit, window, cx);
+    pub fn reload(&mut self, side: CardSide, window: &mut Window, cx: &mut Context<Self>) {
+        let path = self.card(side).read(cx).path();
+        self.navigate(side, path, LoadIntent::Visit, window, cx);
     }
 
     /// 做一条命令：菜单、拖放、对话框、按键都到这里。
@@ -502,32 +511,32 @@ impl SftpTab {
         }
         use SftpTabCommand as C;
         match command {
-            C::Navigate { remote, path } => {
-                self.navigate(*remote, path.clone(), LoadIntent::Visit, window, cx)
+            C::Navigate { side, path } => {
+                self.navigate(*side, path.clone(), LoadIntent::Visit, window, cx)
             }
-            C::EditPath { remote } => self
-                .card(*remote)
+            C::EditPath { side } => self
+                .card(*side)
                 .clone()
                 .update(cx, |card, cx| card.begin_path_edit(window, cx)),
-            C::SubmitPath { remote, text } => {
-                self.navigate(*remote, text.clone(), LoadIntent::PathBar, window, cx)
+            C::SubmitPath { side, text } => {
+                self.navigate(*side, text.clone(), LoadIntent::PathBar, window, cx)
             }
-            C::Up { remote } => {
-                let path = self.card(*remote).read(cx).parent_path();
-                self.navigate(*remote, path, LoadIntent::Visit, window, cx);
+            C::Up { side } => {
+                let path = self.card(*side).read(cx).parent_path();
+                self.navigate(*side, path, LoadIntent::Visit, window, cx);
             }
-            C::Refresh { remote } => self.reload(*remote, window, cx),
-            C::Open { remote } => self.open_cursor_entry(*remote, window, cx),
-            C::Edit { remote, path } => self.open_for_editing(*remote, path.clone(), window, cx),
-            C::Preview { remote, path } => self.open_for_preview(*remote, path.clone(), window, cx),
-            C::CopyPath { remote } => {
-                let path = self.card(*remote).read(cx).path();
+            C::Refresh { side } => self.reload(*side, window, cx),
+            C::Open { side } => self.open_cursor_entry(*side, window, cx),
+            C::Edit { side, path } => self.open_for_editing(*side, path.clone(), window, cx),
+            C::Preview { side, path } => self.open_for_preview(*side, path.clone(), window, cx),
+            C::CopyPath { side } => {
+                let path = self.card(*side).read(cx).path();
                 if !path.is_empty() {
                     cx.write_to_clipboard(ClipboardItem::new_string(path));
                 }
             }
-            C::CopySelectedPaths { remote } => {
-                let card = self.card(*remote).read(cx);
+            C::CopySelectedPaths { side } => {
+                let card = self.card(*side).read(cx);
                 let paths: Vec<String> = card
                     .selected_entries(cx)
                     .iter()
@@ -543,36 +552,36 @@ impl SftpTab {
                     cx.write_to_clipboard(ClipboardItem::new_string(paths.join("\n")));
                 }
             }
-            C::FocusCard { remote } => {
-                let focus = self.card(*remote).read(cx).focus_handle(cx);
+            C::FocusCard { side } => {
+                let focus = self.card(*side).read(cx).focus_handle(cx);
                 window.focus(&focus, cx);
             }
             C::MoveCursor {
-                remote,
+                side,
                 motion,
                 extend,
             } => self
-                .card(*remote)
+                .card(*side)
                 .clone()
                 .update(cx, |card, cx| card.move_cursor(*motion, *extend, cx)),
-            C::ToggleSelection { remote } => self
-                .card(*remote)
+            C::ToggleSelection { side } => self
+                .card(*side)
                 .clone()
                 .update(cx, |card, cx| card.toggle_selection(cx)),
-            C::SelectAll { remote } => self
-                .card(*remote)
+            C::SelectAll { side } => self
+                .card(*side)
                 .clone()
                 .update(cx, |card, cx| card.select_all(cx)),
             // 文件操作：工单 21（`operations.rs`）。
-            C::Delete { remote } => self.confirm_delete(*remote, window, cx),
-            C::Rename { remote } => self.open_rename(*remote, window, cx),
-            C::New { remote, kind } => self.open_new(*remote, *kind, window, cx),
-            C::Properties { remote } => self.open_properties(*remote, window, cx),
-            C::Operate { remote, operation } => {
-                self.start_operation(*remote, operation.clone(), window, cx)
+            C::Delete { side } => self.confirm_delete(*side, window, cx),
+            C::Rename { side } => self.open_rename(*side, window, cx),
+            C::New { side, kind } => self.open_new(*side, *kind, window, cx),
+            C::Properties { side } => self.open_properties(*side, window, cx),
+            C::Operate { side, operation } => {
+                self.start_operation(*side, operation.clone(), window, cx)
             }
             // 传输：工单 22（`transfers.rs`）。
-            C::Transfer { remote } => self.open_transfer(*remote, window, cx),
+            C::Transfer { side } => self.open_transfer(*side, window, cx),
             C::ChooseFiles => self.choose_files(window, cx),
             C::UploadPaths { paths, target } => {
                 self.open_upload(paths.clone(), target.clone(), window, cx)
@@ -594,7 +603,7 @@ impl SftpTab {
             C::RemoveQueueEntry => self.remove_queue_entry(window, cx),
             C::ClearFinishedTransfers => self.transfers.queue.clear_finished(),
             C::Reconnect => self.reconnect(cx),
-            C::DoubleClick { remote } => self.open_double_clicked(*remote, window, cx),
+            C::DoubleClick { side } => self.open_double_clicked(*side, window, cx),
         }
         self.sync_available(cx);
         cx.emit(SftpTabEvent::Changed);
@@ -604,11 +613,11 @@ impl SftpTab {
     /// 回车：进光标所在的目录；文件交给编辑器。
     pub(super) fn open_cursor_entry(
         &mut self,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let card = self.card(remote).clone();
+        let card = self.card(side).clone();
         let Some(entry) = card.read(cx).cursor_entry(cx) else {
             return;
         };
@@ -618,11 +627,11 @@ impl SftpTab {
             } else {
                 card.read(cx).child_path_of(&entry.name)
             };
-            self.navigate(remote, path, LoadIntent::Visit, window, cx);
+            self.navigate(side, path, LoadIntent::Visit, window, cx);
         } else {
             let path = Some(card.read(cx).child_path_of(&entry.name));
             self.dispatch.dispatch_sftp_action(
-                &SftpAction::new(self.id, SftpTabCommand::Edit { remote, path }),
+                &SftpAction::new(self.id, SftpTabCommand::Edit { side, path }),
                 window,
                 cx,
             );
@@ -845,20 +854,20 @@ fn start_chain(
 fn needs_connection(command: &SftpTabCommand) -> bool {
     use SftpTabCommand as C;
     match command {
-        C::Navigate { remote, .. }
-        | C::EditPath { remote }
-        | C::SubmitPath { remote, .. }
-        | C::Up { remote }
-        | C::Refresh { remote }
-        | C::Open { remote }
-        | C::DoubleClick { remote }
-        | C::Edit { remote, .. }
-        | C::Preview { remote, .. }
-        | C::Delete { remote }
-        | C::Rename { remote }
-        | C::New { remote, .. }
-        | C::Properties { remote }
-        | C::Operate { remote, .. } => *remote,
+        C::Navigate { side, .. }
+        | C::EditPath { side }
+        | C::SubmitPath { side, .. }
+        | C::Up { side }
+        | C::Refresh { side }
+        | C::Open { side }
+        | C::DoubleClick { side }
+        | C::Edit { side, .. }
+        | C::Preview { side, .. }
+        | C::Delete { side }
+        | C::Rename { side }
+        | C::New { side, .. }
+        | C::Properties { side }
+        | C::Operate { side, .. } => side.is_remote(),
         C::Transfer { .. }
         | C::ChooseFiles
         | C::UploadPaths { .. }
@@ -870,28 +879,34 @@ fn needs_connection(command: &SftpTabCommand) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{needs_connection, start_chain};
+    use super::{CardSide, needs_connection, start_chain};
     use crate::app::SftpTabCommand;
 
     #[test]
     fn the_remote_side_and_transfers_need_the_connection() {
-        assert!(needs_connection(&SftpTabCommand::Refresh { remote: true }));
-        assert!(!needs_connection(&SftpTabCommand::Refresh {
-            remote: false
+        assert!(needs_connection(&SftpTabCommand::Refresh {
+            side: CardSide::Remote
         }));
-        assert!(needs_connection(&SftpTabCommand::Delete { remote: true }));
-        assert!(!needs_connection(&SftpTabCommand::Delete { remote: false }));
+        assert!(!needs_connection(&SftpTabCommand::Refresh {
+            side: CardSide::Local
+        }));
+        assert!(needs_connection(&SftpTabCommand::Delete {
+            side: CardSide::Remote
+        }));
+        assert!(!needs_connection(&SftpTabCommand::Delete {
+            side: CardSide::Local
+        }));
         // 不管哪个方向都要走连接。
         assert!(needs_connection(&SftpTabCommand::Transfer {
-            remote: false
+            side: CardSide::Local
         }));
         assert!(needs_connection(&SftpTabCommand::ChooseFiles));
         // 选择、复制路径、重新连接本身不要。
         assert!(!needs_connection(&SftpTabCommand::SelectAll {
-            remote: true
+            side: CardSide::Remote
         }));
         assert!(!needs_connection(&SftpTabCommand::CopyPath {
-            remote: true
+            side: CardSide::Remote
         }));
         assert!(!needs_connection(&SftpTabCommand::Reconnect));
     }

@@ -11,13 +11,13 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::file_dialogs::{SMALL_DIALOG_WIDTH, dialog_footer, dialog_title};
-use super::{FileEntry, FileKind, FileOperation, SftpTab};
+use super::file_dialogs::SMALL_DIALOG_WIDTH;
+use super::{CardSide, FileEntry, FileKind, FileOperation, SftpTab};
 use crate::backend::sftp::PermissionEdit;
 use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
-use crate::ui::form::{FieldNote, form_field};
+use crate::ui::form::{FieldNote, dialog_footer, dialog_title, form_field};
 
 /// 九个 rwx 位，从所有者的读开始。
 const BITS: [u32; 9] = [
@@ -126,7 +126,7 @@ fn allowed_in_octal(text: &str) -> bool {
 struct PropertiesForm {
     items: Vec<FileEntry>,
     location: String,
-    remote: bool,
+    side: CardSide,
     draft: PermissionDraft,
     /// 链接没有自己的权限，只改别的；也可能服务器根本没给权限。
     editable: bool,
@@ -141,7 +141,7 @@ impl PropertiesForm {
     fn new(
         items: Vec<FileEntry>,
         location: String,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -170,7 +170,7 @@ impl PropertiesForm {
             editable: !modes.is_empty(),
             items,
             location,
-            remote,
+            side,
             draft,
             recursive: false,
             add_x_to_dirs: true,
@@ -362,7 +362,7 @@ impl Render for PropertiesForm {
                 Vec::new(),
                 &tokens,
             ))
-            .when(self.remote, |form| {
+            .when(self.side.is_remote(), |form| {
                 form.child(form_field(
                     Some(t!("sftp_files.properties.owner")),
                     div()
@@ -422,25 +422,25 @@ impl SftpTab {
     /// 属性（F9）。Windows 本地不支持改权限：菜单里没有这一项，按键说一声。
     pub(super) fn open_properties(
         &mut self,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let card = self.card(remote).read(cx);
+        let card = self.card(side).read(cx);
         let items = card.selected_entries(cx);
         let location = card.path();
         let list = card.focus_handle(cx);
-        if items.is_empty() || !self.can_start_operation(remote, window, cx) {
+        if items.is_empty() || !self.can_start_operation(side, window, cx) {
             return;
         }
-        if !remote && cfg!(windows) {
+        if !side.is_remote() && cfg!(windows) {
             window.push_notification(
                 Notification::info(t!("sftp_files.properties.unsupported")),
                 cx,
             );
             return;
         }
-        let place = if remote {
+        let place = if side.is_remote() {
             self.rail_name()
         } else {
             t!("sftp_tab.local_name")
@@ -458,13 +458,13 @@ impl SftpTab {
                 place = place
             )
         };
-        let form = cx.new(|cx| PropertiesForm::new(items, location, remote, window, cx));
+        let form = cx.new(|cx| PropertiesForm::new(items, location, side, window, cx));
         let (editable, octal) = {
             let form = form.read(cx);
             (form.editable, form.octal.clone())
         };
         let tokens = Tokens::current(cx);
-        let send = self.operation_sender(remote);
+        let send = self.operation_sender(side);
         let layer = DialogLayer::new();
         layer.open_dismissable(
             move |dialog, _, _| {
@@ -482,6 +482,7 @@ impl SftpTab {
                     .footer(dialog_footer(
                         "perm-commit",
                         t!("sftp_files.properties.commit"),
+                        t!("sftp_files.cancel"),
                     ))
                     .on_ok(move |_, window, cx| {
                         if let Some(operation) = form_ok.read(cx).operation() {

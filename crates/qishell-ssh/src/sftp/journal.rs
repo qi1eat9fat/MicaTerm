@@ -118,23 +118,28 @@ fn managed_backup_path(path: &RemotePath, target: &RemotePath) -> bool {
         && path.parent() == target.parent()
         && path != target
 }
+/// 上传的续传记录。`root` 是 `None` 时不记：没有地方放（取不到数据目录），也不写到别处（ADR 0003）。
 #[derive(Clone)]
 pub(crate) struct Journal {
-    root: PathBuf,
+    root: Option<PathBuf>,
 }
 impl Journal {
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self { root: Some(root) }
     }
-    fn path(&self, endpoint: &str, source: &Path, target: &RemotePath) -> PathBuf {
-        record_path(
-            &self.root,
+    /// 什么都不记。
+    pub fn disabled() -> Self {
+        Self { root: None }
+    }
+    fn path(&self, endpoint: &str, source: &Path, target: &RemotePath) -> Option<PathBuf> {
+        Some(record_path(
+            self.root.as_deref()?,
             [
                 endpoint.as_bytes(),
                 source.as_os_str().as_encoded_bytes(),
                 target.as_str().as_bytes(),
             ],
-        )
+        ))
     }
     pub async fn load(
         &self,
@@ -142,18 +147,25 @@ impl Journal {
         source: &Path,
         target: &RemotePath,
     ) -> Result<Option<ResumeRecord>> {
-        read_record(
-            &self.path(endpoint, source, target),
-            JournalError::UploadDamaged,
-        )
-        .await
+        let Some(path) = self.path(endpoint, source, target) else {
+            return Ok(None);
+        };
+        read_record(&path, JournalError::UploadDamaged).await
     }
     pub async fn save(&self, record: &ResumeRecord) -> Result<()> {
-        let path = self.path(&record.endpoint, &record.source, &record.target);
-        write_atomic(&self.root, &path, &serde_json::to_vec(record)?).await
+        let (Some(root), Some(path)) = (
+            self.root.as_deref(),
+            self.path(&record.endpoint, &record.source, &record.target),
+        ) else {
+            return Ok(());
+        };
+        write_atomic(root, &path, &serde_json::to_vec(record)?).await
     }
     pub async fn remove(&self, record: &ResumeRecord) -> Result<()> {
-        remove_if_present(&self.path(&record.endpoint, &record.source, &record.target)).await
+        match self.path(&record.endpoint, &record.source, &record.target) {
+            Some(path) => remove_if_present(&path).await,
+            None => Ok(()),
+        }
     }
 }
 
@@ -295,23 +307,28 @@ pub(crate) fn partial_path(target: &Path) -> PathBuf {
     target.with_file_name(name)
 }
 
+/// 下载的续传记录。`root` 是 `None` 时不记，同 [`Journal`]。
 #[derive(Clone)]
 pub(crate) struct DownloadJournal {
-    root: PathBuf,
+    root: Option<PathBuf>,
 }
 impl DownloadJournal {
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self { root: Some(root) }
     }
-    fn path(&self, endpoint: &str, source: &RemotePath, target: &Path) -> PathBuf {
-        record_path(
-            &self.root,
+    /// 什么都不记。
+    pub fn disabled() -> Self {
+        Self { root: None }
+    }
+    fn path(&self, endpoint: &str, source: &RemotePath, target: &Path) -> Option<PathBuf> {
+        Some(record_path(
+            self.root.as_deref()?,
             [
                 endpoint.as_bytes(),
                 source.as_str().as_bytes(),
                 target.as_os_str().as_encoded_bytes(),
             ],
-        )
+        ))
     }
     pub async fn load(
         &self,
@@ -319,18 +336,25 @@ impl DownloadJournal {
         source: &RemotePath,
         target: &Path,
     ) -> Result<Option<DownloadRecord>> {
-        read_record(
-            &self.path(endpoint, source, target),
-            JournalError::DownloadDamaged,
-        )
-        .await
+        let Some(path) = self.path(endpoint, source, target) else {
+            return Ok(None);
+        };
+        read_record(&path, JournalError::DownloadDamaged).await
     }
     pub async fn save(&self, record: &DownloadRecord) -> Result<()> {
-        let path = self.path(&record.endpoint, &record.source, &record.target);
-        write_atomic(&self.root, &path, &serde_json::to_vec(record)?).await
+        let (Some(root), Some(path)) = (
+            self.root.as_deref(),
+            self.path(&record.endpoint, &record.source, &record.target),
+        ) else {
+            return Ok(());
+        };
+        write_atomic(root, &path, &serde_json::to_vec(record)?).await
     }
     pub async fn remove(&self, record: &DownloadRecord) -> Result<()> {
-        remove_if_present(&self.path(&record.endpoint, &record.source, &record.target)).await
+        match self.path(&record.endpoint, &record.source, &record.target) {
+            Some(path) => remove_if_present(&path).await,
+            None => Ok(()),
+        }
     }
 }
 
@@ -351,7 +375,7 @@ mod tests {
             &target,
         );
         assert_eq!(
-            upload,
+            upload.unwrap(),
             root.join("57c7d5d6e5e211f62c4bb24b5c9631e6f4235d3ec6ee8748c1343ce71a0bed23.json")
         );
         let download = DownloadJournal::new(root.into()).path(
@@ -360,7 +384,7 @@ mod tests {
             Path::new("/home/me/index.html"),
         );
         assert_eq!(
-            download,
+            download.unwrap(),
             root.join("408f1db18c527479432101dee6562deee38dd802091cd972af239a93065b19d3.json")
         );
     }

@@ -46,6 +46,8 @@ pub struct FakeSftpProvider {
     pub writes: FakeWrites,
     /// 传输问题的回答：请求号和回答。
     pub answers: Arc<Mutex<Vec<(u64, TransferAnswer)>>>,
+    /// 写 `/hold-write` 下面的路径不回答：写回卡在半路，这里记着请求号，测试替它回答。
+    pub held_writes: Arc<Mutex<Vec<u64>>>,
 }
 
 // 工单 21–24 会用到其余的方法。
@@ -113,6 +115,7 @@ impl SftpTransportProvider for FakeSftpProvider {
             reads: self.reads.clone(),
             writes: self.writes.clone(),
             answers: self.answers.clone(),
+            held_writes: self.held_writes.clone(),
             home: if self.slow_home {
                 "/slow"
             } else {
@@ -135,6 +138,7 @@ pub struct FakeSftpTransport {
     pub reads: Arc<Mutex<Vec<String>>>,
     pub writes: FakeWrites,
     pub answers: Arc<Mutex<Vec<(u64, TransferAnswer)>>>,
+    pub held_writes: Arc<Mutex<Vec<u64>>>,
     pub home: &'static str,
 }
 
@@ -244,6 +248,10 @@ impl SftpTransport for FakeSftpTransport {
                         .lock()
                         .unwrap()
                         .push((path.to_string(), bytes.clone(), expected));
+                    if path.as_str().starts_with("/hold-write") {
+                        self.held_writes.lock().unwrap().push(request_id);
+                        continue;
+                    }
                     let mut files = self.files.lock().unwrap();
                     let now = files.get(path.as_str()).map(|(b, m)| fake_stamp(b, *m));
                     let result = if expected.is_some() && expected != now {

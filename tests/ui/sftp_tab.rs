@@ -401,19 +401,30 @@ fn the_two_cards_show_their_place_and_files(cx: &mut TestAppContext) {
 
 /// 焦点放进这一侧的文件列表。
 fn focus_list(cx: &mut TestAppContext, fixture: &Fixture, remote: bool) {
-    sftp_action(cx, fixture, SftpTabCommand::FocusCard { remote });
+    sftp_action(
+        cx,
+        fixture,
+        SftpTabCommand::FocusCard {
+            side: CardSide::from_remote(remote),
+        },
+    );
 }
 
 fn editing_path(cx: &mut TestAppContext, fixture: &Fixture, remote: bool) -> bool {
     let tab = active_sftp(cx, fixture).unwrap();
-    cx.update(|cx| tab.read(cx).card(remote).read(cx).is_editing_path())
+    cx.update(|cx| {
+        tab.read(cx)
+            .card(CardSide::from_remote(remote))
+            .read(cx)
+            .is_editing_path()
+    })
 }
 
 fn path_error(cx: &mut TestAppContext, fixture: &Fixture, remote: bool) -> Option<String> {
     let tab = active_sftp(cx, fixture).unwrap();
     cx.update(|cx| {
         tab.read(cx)
-            .card(remote)
+            .card(CardSide::from_remote(remote))
             .read(cx)
             .path_edit_error()
             .map(|error| error.to_string())
@@ -471,13 +482,19 @@ fn clicking_the_blank_of_the_path_bar_edits_and_escape_cancels(cx: &mut TestAppC
 fn a_directory_that_is_not_there_turns_the_path_bar_red_and_stays(cx: &mut TestAppContext) {
     let fixture = open(cx);
     open_tab(cx, &fixture);
-    sftp_action(cx, &fixture, SftpTabCommand::EditPath { remote: true });
+    sftp_action(
+        cx,
+        &fixture,
+        SftpTabCommand::EditPath {
+            side: CardSide::Remote,
+        },
+    );
 
     sftp_action(
         cx,
         &fixture,
         SftpTabCommand::SubmitPath {
-            remote: true,
+            side: CardSide::Remote,
             text: "/missing".into(),
         },
     );
@@ -513,13 +530,19 @@ fn the_path_bar_works_for_the_local_side_too(cx: &mut TestAppContext) {
         .unwrap()
         .push("/nowhere".into());
     open_tab(cx, &fixture);
-    sftp_action(cx, &fixture, SftpTabCommand::EditPath { remote: false });
+    sftp_action(
+        cx,
+        &fixture,
+        SftpTabCommand::EditPath {
+            side: CardSide::Local,
+        },
+    );
 
     sftp_action(
         cx,
         &fixture,
         SftpTabCommand::SubmitPath {
-            remote: false,
+            side: CardSide::Local,
             text: "/nowhere".into(),
         },
     );
@@ -539,12 +562,18 @@ fn the_path_bar_works_for_the_local_side_too(cx: &mut TestAppContext) {
 
     // 去得了的目录：切过去，路径栏变回分段。
     in_frame(cx, fixture.handle, |window, cx| window.press("escape", cx));
-    sftp_action(cx, &fixture, SftpTabCommand::EditPath { remote: false });
+    sftp_action(
+        cx,
+        &fixture,
+        SftpTabCommand::EditPath {
+            side: CardSide::Local,
+        },
+    );
     sftp_action(
         cx,
         &fixture,
         SftpTabCommand::SubmitPath {
-            remote: false,
+            side: CardSide::Local,
             text: "~".into(),
         },
     );
@@ -761,7 +790,7 @@ fn the_local_status_bar_counts_hidden_files(cx: &mut TestAppContext) {
         cx,
         &fixture,
         SftpTabCommand::Navigate {
-            remote: true,
+            side: CardSide::Remote,
             path: "/dotfiles".into(),
         },
     );
@@ -806,7 +835,7 @@ fn the_tab_rail_shows_a_folder_tile_the_host_and_the_remote_directory(cx: &mut T
         cx,
         &fixture,
         SftpTabCommand::Navigate {
-            remote: true,
+            side: CardSide::Remote,
             path: "/var/log".into(),
         },
     );
@@ -1022,7 +1051,13 @@ fn disconnected_a_remote_command_offers_to_reconnect(cx: &mut TestAppContext) {
             .is_some()
     }));
 
-    sftp_action(cx, &fixture, SftpTabCommand::Refresh { remote: true });
+    sftp_action(
+        cx,
+        &fixture,
+        SftpTabCommand::Refresh {
+            side: CardSide::Remote,
+        },
+    );
     assert!(visible(cx, fixture.handle, "sftp-reconnect"));
     // 本地一侧不受影响。
     in_frame(cx, fixture.handle, |window, cx| {

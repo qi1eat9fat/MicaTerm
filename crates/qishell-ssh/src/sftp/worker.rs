@@ -29,7 +29,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::sync::{RwLock, watch};
+use tokio::sync::{RwLock, mpsc, watch};
 
 /// The answer to a request that needs the connection while there is none.
 fn not_connected() -> Reason {
@@ -39,6 +39,9 @@ fn not_connected() -> Reason {
 /// How often the latency task looks for a connection to measure, and for
 /// the one it is measuring to be dropped.
 const LATENCY_POLL: Duration = Duration::from_millis(250);
+
+/// 断线后第几次重连之前等几秒。
+const RECONNECT_DELAYS: [u64; 3] = [1, 3, 10];
 
 /// One worker lifetime, run on the caller's runtime; see
 /// [`run`](Self::run).
@@ -64,6 +67,17 @@ impl SftpWorker {
             login,
             journal: Journal::new(resume_dir),
             download_journal: DownloadJournal::new(download_resume_dir),
+        }
+    }
+
+    /// 不记续传记录：没有地方放的时候（取不到数据目录）。传输照样能做，断了不能接着传。
+    pub fn without_resume_records(connector: SshConnector, login: HostLogin) -> Self {
+        Self {
+            connector,
+            endpoint: login.endpoint(),
+            login,
+            journal: Journal::disabled(),
+            download_journal: DownloadJournal::disabled(),
         }
     }
 }
@@ -106,12 +120,6 @@ impl TransferBatch {
             Self::Download(batch) => batch.run(client, control).await,
         }
     }
-    async fn discard(&self, client: &SftpClient) -> Result<()> {
-        match self {
-            Self::Upload(batch) => batch.discard(client).await,
-            Self::Download(batch) => batch.discard().await,
-        }
-    }
 }
 impl SftpWorker {
     async fn connect(
@@ -137,7 +145,23 @@ impl SftpWorker {
 
     /// Serve `commands` until `Shutdown`, or until they close, telling
     /// `events` what happens.
+    ///
+    /// 返回之前等写回都结束：写回是截断重写，调用方接着销毁运行时的话会中止它，文件就只剩一半。
+    /// 连接卡死时写回一直等到连接自己超时，这条线程就留到那时，不碍事。
     pub async fn run(self, commands: Receiver<SftpCommand>, events: EventSink) -> Result<()> {
+        // 每个写回拿着一个 sender，全放下了 `recv` 才返回。
+        let (writes, mut writes_done) = mpsc::channel::<()>(1);
+        let result = self.serve(commands, events, writes).await;
+        let _ = writes_done.recv().await;
+        result
+    }
+
+    async fn serve(
+        self,
+        commands: Receiver<SftpCommand>,
+        events: EventSink,
+        writes: mpsc::Sender<()>,
+    ) -> Result<()> {
         let (shutdown_tx, shutdown) = watch::channel(false);
         let (cancel_tx, cancel) = watch::channel(false);
         let (answers_tx, answers) = async_channel::unbounded();
@@ -149,13 +173,13 @@ impl SftpWorker {
         ));
         let client: Arc<RwLock<Option<Arc<SftpClient>>>> = Arc::new(RwLock::new(None));
         let busy = Arc::new(AtomicBool::new(false));
-        let router = {
+        let _router = {
             let prompts = prompts.clone();
             let events = events.clone();
             let client = client.clone();
             let busy = busy.clone();
             let cancel_tx = cancel_tx.clone();
-            tokio::spawn(async move {
+            AbortOnDrop(tokio::spawn(async move {
                 while let Ok(command) = commands.recv().await {
                     match command {
                         SftpCommand::PromptReply { request_id, reply } => {
@@ -285,7 +309,9 @@ impl SftpWorker {
                             let shared = client.clone();
                             let connected = client.read().await.clone();
                             let events = events.clone();
+                            let write = writes.clone();
                             tokio::spawn(async move {
+                                let _write = write;
                                 let result = match connected {
                                     Some(connected) => match edit::write_in_place(
                                         connected.as_ref(),
@@ -325,15 +351,27 @@ impl SftpWorker {
                 shutdown_tx.send_replace(true);
                 cancel_tx.send_replace(true);
                 prompts.cancel_all();
-            })
+            }))
         };
-        let latency = tokio::spawn(measure_latency(client.clone(), events.clone()));
+        let _latency = AbortOnDrop(tokio::spawn(measure_latency(
+            client.clone(),
+            events.clone(),
+        )));
         let control = TransferControl {
             events: events.clone(),
             cancel,
             answers,
         };
+        let link = Link {
+            prompts: &prompts,
+            events: &events,
+            shutdown: &shutdown,
+            client: &client,
+            control: &control,
+        };
         let mut batch: Option<TransferBatch> = None;
+        // 扫描没做完就停了或者断了的那一批：还没有 `batch`，「继续」按原来的请求重新扫描。
+        let mut unscanned: Option<SftpCommand> = None;
         match control
             .run(self.connect(prompts.clone(), &events, &shutdown, &client))
             .await
@@ -379,6 +417,15 @@ impl SftpWorker {
             // 不用连接：断开时移出队列也不该连上去。
             if matches!(operation, SftpCommand::Forget) {
                 batch = None;
+                unscanned = None;
+                busy.store(false, Ordering::Release);
+                events.send(EngineEvent::Idle).await?;
+                continue;
+            }
+            // 引擎这就不再留着这一批，不管清理成不成：否则之后的 `Resume` 会把丢弃的那批接着传。
+            if matches!(operation, SftpCommand::Discard) {
+                unscanned = None;
+                self.discard(batch.take(), &link).await?;
                 busy.store(false, Ordering::Release);
                 events.send(EngineEvent::Idle).await?;
                 continue;
@@ -395,140 +442,90 @@ impl SftpWorker {
                                 error.into(),
                             )))
                             .await?;
+                        // 新的一批连扫描都没开始：停着等「继续」，别在队列里一直显示在跑。
+                        if let Some(direction) = scan_direction(&operation) {
+                            batch = None;
+                            unscanned = Some(operation);
+                            events
+                                .send(EngineEvent::Progress(TransferProgress {
+                                    direction,
+                                    phase: TransferPhase::Stopped,
+                                    ..Default::default()
+                                }))
+                                .await?;
+                        }
                         events.send(EngineEvent::Idle).await?;
                         busy.store(false, Ordering::Release);
                         continue;
                     }
                 }
             }
-            let connected = client.read().await.clone().expect("connected above");
-            let direction = match &operation {
-                SftpCommand::Download(_) => TransferDirection::Download,
-                SftpCommand::Upload(_) => TransferDirection::Upload,
-                _ => batch
+            let operation = match (operation, unscanned.take()) {
+                (SftpCommand::Resume, Some(request)) => request,
+                (operation, _) => operation,
+            };
+            let direction = scan_direction(&operation).unwrap_or_else(|| {
+                batch
                     .as_ref()
                     .map(|batch| match batch {
                         TransferBatch::Upload(_) => TransferDirection::Upload,
                         TransferBatch::Download(_) => TransferDirection::Download,
                     })
-                    .unwrap_or_default(),
-            };
-            let prepared: Result<()> = async {
-                if let SftpCommand::Upload(request) = &operation {
-                    batch = None;
-                    events
-                        .send(EngineEvent::Progress(TransferProgress::default()))
-                        .await?;
-                    let request = if request.is_scp() {
-                        let destination = request.destination();
-                        let is_directory = destination.is_root()
-                            || control
-                                .run(connected.stat(destination))
-                                .await?
-                                .is_some_and(|metadata| metadata.kind() == EntryKind::Directory);
-                        let (directory, name) = scp_remote_target(destination, is_directory);
-                        // Some servers resolve a path that is not there, so
-                        // ask whether it is a directory too.
-                        let missing = || {
-                            anyhow!(SftpError::RemoteFolderMissing {
-                                path: directory.to_string()
-                            })
-                        };
-                        let resolved = control
-                            .run(connected.canonicalize(&directory))
+                    .unwrap_or_default()
+            });
+            let mut reconnects = 0;
+            let mut gave_up = false;
+            let prepared: Result<()> = loop {
+                let connected = client.read().await.clone();
+                let attempt = match connected {
+                    Some(connected) => {
+                        self.prepare(&operation, &mut batch, &connected, &link)
                             .await
-                            .map_err(|_| missing())?;
-                        if !control
-                            .run(connected.stat(&resolved))
-                            .await?
-                            .is_some_and(|metadata| metadata.kind() == EntryKind::Directory)
-                        {
-                            return Err(missing());
-                        }
-                        request.clone().resolved(resolved, name)
-                    } else {
-                        let target = control
-                            .run(connected.canonicalize(request.destination()))
-                            .await?;
-                        super::UploadRequest::new(request.sources().to_vec(), target)?
-                    };
-                    let upload = control
-                        .run(UploadBatch::scan(
-                            &request,
-                            &self.endpoint,
-                            connected.fingerprint(),
-                            self.journal.clone(),
-                            &control,
-                        ))
-                        .await?;
-                    batch = Some(TransferBatch::Upload(upload));
-                }
-                if let SftpCommand::Download(request) = &operation {
-                    batch = None;
-                    let request = &if request.is_scp() {
-                        let destination = request.destination();
-                        let is_directory = tokio::fs::metadata(destination)
-                            .await
-                            .is_ok_and(|metadata| metadata.is_dir());
-                        let (directory, name) = scp_local_target(destination, is_directory);
-                        if !tokio::fs::metadata(&directory)
-                            .await
-                            .is_ok_and(|metadata| metadata.is_dir())
-                        {
-                            anyhow::bail!(SftpError::LocalFolderMissing { path: directory });
-                        }
-                        request.clone().resolved(directory, name)
-                    } else {
-                        request.clone()
-                    };
-                    events
-                        .send(EngineEvent::Progress(TransferProgress {
-                            direction: TransferDirection::Download,
-                            ..TransferProgress::default()
-                        }))
-                        .await?;
-                    batch = Some(TransferBatch::Download(
-                        DownloadBatch::scan(
-                            request,
-                            &self.endpoint,
-                            connected.fingerprint(),
-                            self.download_journal.clone(),
-                            connected.as_ref(),
-                            &control,
-                        )
-                        .await?,
-                    ));
-                }
-                if let Some(batch) = &batch {
-                    batch.verify_host(connected.fingerprint())?;
-                }
-                if matches!(operation, SftpCommand::Discard) {
-                    if let Some(current) = &batch {
-                        current.discard(connected.as_ref()).await?;
                     }
-                    batch = None;
-                    events
-                        .send(EngineEvent::Progress(TransferProgress {
-                            direction,
-                            phase: TransferPhase::Completed,
-                            ..Default::default()
-                        }))
-                        .await?;
+                    None => Err(no_connection(&control)),
+                };
+                match attempt {
+                    // 扫描时断线和传的时候一样自己重连。
+                    Err(error)
+                        if scan_direction(&operation).is_some() && is_network_error(&error) =>
+                    {
+                        *client.write().await = None;
+                        events
+                            .send(EngineEvent::Disconnected(Disconnect::DroppedKept))
+                            .await?;
+                        if !self
+                            .reconnect(&mut reconnects, None, direction, &link)
+                            .await?
+                        {
+                            gave_up = true;
+                            break Err(error);
+                        }
+                    }
+                    other => break other,
                 }
-                Ok(())
-            }
-            .await;
+            };
             if let Err(error) = prepared {
+                let cancelled = error.is::<Cancelled>();
                 let reason = Reason::from(error);
-                events.send(EngineEvent::Notice(reason.clone())).await?;
+                // 用户自己停的不是出错；重连放弃了，`Disconnected` 已经说过了。
+                if !cancelled && !gave_up {
+                    events.send(EngineEvent::Notice(reason.clone())).await?;
+                }
                 if let Some(batch) = &mut batch {
                     batch.phase(TransferPhase::Stopped, &control);
                 } else {
+                    if scan_direction(&operation).is_some() {
+                        unscanned = Some(operation);
+                    }
                     events
                         .send(EngineEvent::Progress(TransferProgress {
                             direction,
                             phase: TransferPhase::Stopped,
-                            details: vec![TransferDetail::failed("", reason)],
+                            details: if cancelled {
+                                Vec::new()
+                            } else {
+                                vec![TransferDetail::failed("", reason)]
+                            },
                             ..Default::default()
                         }))
                         .await?;
@@ -538,25 +535,13 @@ impl SftpWorker {
                 busy.store(false, Ordering::Release);
                 continue;
             }
-            if !matches!(operation, SftpCommand::Discard)
-                && let Some(batch) = &mut batch
-            {
+            if let Some(batch) = &mut batch {
                 let mut reconnects = 0;
                 loop {
                     let connected = client.read().await.clone();
                     let result = match connected {
                         Some(connected) => batch.run(connected.as_ref(), &control).await,
-                        None => {
-                            if control.check().is_err() {
-                                Err(Cancelled.into())
-                            } else {
-                                Err(std::io::Error::new(
-                                    std::io::ErrorKind::NotConnected,
-                                    SftpError::NoConnection,
-                                )
-                                .into())
-                            }
-                        }
+                        None => Err(no_connection(&control)),
                     };
                     match result {
                         Ok(()) => break,
@@ -565,55 +550,10 @@ impl SftpWorker {
                             events
                                 .send(EngineEvent::Disconnected(Disconnect::DroppedKept))
                                 .await?;
-                            let mut recovered = false;
-                            while reconnects < 3 {
-                                batch.set_note(SftpError::ReconnectIn {
-                                    seconds: [1, 3, 10][reconnects],
-                                    attempt: reconnects + 1,
-                                });
-                                batch.phase(TransferPhase::Reconnecting, &control);
-                                let delay = Duration::from_secs([1, 3, 10][reconnects]);
-                                reconnects += 1;
-                                if control
-                                    .run(async {
-                                        tokio::time::sleep(delay).await;
-                                        Ok(())
-                                    })
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                                match control
-                                    .run(self.connect(prompts.clone(), &events, &shutdown, &client))
-                                    .await
-                                {
-                                    Ok(next) => match batch.verify_host(next.fingerprint()) {
-                                        Ok(()) => {
-                                            *client.write().await = Some(next);
-                                            recovered = true;
-                                            break;
-                                        }
-                                        Err(error) => {
-                                            events.send(EngineEvent::Notice(error.into())).await?;
-                                            break;
-                                        }
-                                    },
-                                    Err(error) => {
-                                        // Authentication/trust failures must require user action.
-                                        let give_up = !is_network_error(&error);
-                                        events
-                                            .send(EngineEvent::Disconnected(Disconnect::Failed(
-                                                error.into(),
-                                            )))
-                                            .await?;
-                                        if give_up {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            if recovered {
+                            if self
+                                .reconnect(&mut reconnects, Some(batch), direction, &link)
+                                .await?
+                            {
                                 continue;
                             }
                             batch.phase(TransferPhase::Stopped, &control);
@@ -635,10 +575,285 @@ impl SftpWorker {
             busy.store(false, Ordering::Release);
             events.send(EngineEvent::Idle).await?;
         }
-        router.abort();
-        latency.abort();
         *client.write().await = None;
         Ok(())
+    }
+
+    /// 上传、下载的准备：解析目标、扫描，做出 `batch`；别的命令只核对主机。
+    async fn prepare(
+        &self,
+        operation: &SftpCommand,
+        batch: &mut Option<TransferBatch>,
+        connected: &SftpClient,
+        link: &Link<'_>,
+    ) -> Result<()> {
+        let (events, control) = (link.events, link.control);
+        if let SftpCommand::Upload(request) = operation {
+            *batch = None;
+            events
+                .send(EngineEvent::Progress(TransferProgress::default()))
+                .await?;
+            let request = if request.is_scp() {
+                let destination = request.destination();
+                let is_directory = destination.is_root()
+                    || control
+                        .run(connected.stat(destination))
+                        .await?
+                        .is_some_and(|metadata| metadata.kind() == EntryKind::Directory);
+                let (directory, name) = scp_remote_target(destination, is_directory);
+                // Some servers resolve a path that is not there, so
+                // ask whether it is a directory too.
+                let missing = || {
+                    anyhow!(SftpError::RemoteFolderMissing {
+                        path: directory.to_string()
+                    })
+                };
+                let resolved = match control.run(connected.canonicalize(&directory)).await {
+                    Ok(resolved) => resolved,
+                    // 断线和停下不是「目录不存在」。
+                    Err(error) if error.is::<Cancelled>() || is_network_error(&error) => {
+                        return Err(error);
+                    }
+                    Err(_) => return Err(missing()),
+                };
+                if !control
+                    .run(connected.stat(&resolved))
+                    .await?
+                    .is_some_and(|metadata| metadata.kind() == EntryKind::Directory)
+                {
+                    return Err(missing());
+                }
+                request.clone().resolved(resolved, name)
+            } else {
+                let target = control
+                    .run(connected.canonicalize(request.destination()))
+                    .await?;
+                super::UploadRequest::new(request.sources().to_vec(), target)?
+            };
+            let upload = control
+                .run(UploadBatch::scan(
+                    &request,
+                    &self.endpoint,
+                    connected.fingerprint(),
+                    self.journal.clone(),
+                    control,
+                ))
+                .await?;
+            *batch = Some(TransferBatch::Upload(upload));
+        }
+        if let SftpCommand::Download(request) = operation {
+            *batch = None;
+            let request = &if request.is_scp() {
+                let destination = request.destination();
+                let is_directory = tokio::fs::metadata(destination)
+                    .await
+                    .is_ok_and(|metadata| metadata.is_dir());
+                let (directory, name) = scp_local_target(destination, is_directory);
+                if !tokio::fs::metadata(&directory)
+                    .await
+                    .is_ok_and(|metadata| metadata.is_dir())
+                {
+                    anyhow::bail!(SftpError::LocalFolderMissing { path: directory });
+                }
+                request.clone().resolved(directory, name)
+            } else {
+                request.clone()
+            };
+            events
+                .send(EngineEvent::Progress(TransferProgress {
+                    direction: TransferDirection::Download,
+                    ..TransferProgress::default()
+                }))
+                .await?;
+            *batch = Some(TransferBatch::Download(
+                DownloadBatch::scan(
+                    request,
+                    &self.endpoint,
+                    connected.fingerprint(),
+                    self.download_journal.clone(),
+                    connected,
+                    control,
+                )
+                .await?,
+            ));
+        }
+        if let Some(batch) = batch {
+            batch.verify_host(connected.fingerprint())?;
+        }
+        Ok(())
+    }
+
+    /// 丢弃续传进度。下载的半截在本机，不用连接；上传的在远程，连不上就留着（和移出队列一样，
+    /// 下次传同一个文件会问是否续传），告诉用户。答一条空的「结束」。
+    async fn discard(&self, batch: Option<TransferBatch>, link: &Link<'_>) -> Result<()> {
+        let direction = match &batch {
+            Some(TransferBatch::Download(_)) => TransferDirection::Download,
+            _ => TransferDirection::Upload,
+        };
+        let outcome = match &batch {
+            None => Ok(()),
+            Some(TransferBatch::Download(current)) => current.discard().await,
+            Some(TransferBatch::Upload(current)) => match self.connected(link).await? {
+                Some(connected) => current.discard(connected.as_ref()).await,
+                None => Err(SftpError::DiscardOffline.into()),
+            },
+        };
+        if let Err(error) = outcome {
+            link.events.send(EngineEvent::Notice(error.into())).await?;
+        }
+        link.events
+            .send(EngineEvent::Progress(TransferProgress {
+                direction,
+                phase: TransferPhase::Completed,
+                ..Default::default()
+            }))
+            .await
+    }
+
+    /// 现在的连接，没有就连一条；连不上是 `None`，已经说过 `Disconnected` 了。
+    async fn connected(&self, link: &Link<'_>) -> Result<Option<Arc<SftpClient>>> {
+        if let Some(connected) = link.client.read().await.clone() {
+            return Ok(Some(connected));
+        }
+        match link
+            .control
+            .run(self.connect(
+                link.prompts.clone(),
+                link.events,
+                link.shutdown,
+                link.client,
+            ))
+            .await
+        {
+            Ok(connected) => {
+                *link.client.write().await = Some(connected.clone());
+                Ok(Some(connected))
+            }
+            Err(error) => {
+                link.events
+                    .send(EngineEvent::Disconnected(Disconnect::LoginFailed(
+                        error.into(),
+                    )))
+                    .await?;
+                Ok(None)
+            }
+        }
+    }
+
+    /// 断线后重连，这一批最多试 3 次（等 1、3、10 秒）。`batch` 是已经扫描好的那批：进度记在它上面，
+    /// 新连接要是原来那台主机；还在扫描时没有批次，直接报进度。连上了返回 true；
+    /// 放弃了（试完了、用户停了、认证失败）返回 false。
+    async fn reconnect(
+        &self,
+        reconnects: &mut usize,
+        mut batch: Option<&mut TransferBatch>,
+        direction: TransferDirection,
+        link: &Link<'_>,
+    ) -> Result<bool> {
+        let (events, control) = (link.events, link.control);
+        while *reconnects < 3 {
+            let note = SftpError::ReconnectIn {
+                seconds: RECONNECT_DELAYS[*reconnects],
+                attempt: *reconnects + 1,
+            };
+            match batch.as_deref_mut() {
+                Some(batch) => {
+                    batch.set_note(note);
+                    batch.phase(TransferPhase::Reconnecting, control);
+                }
+                None => {
+                    events
+                        .send(EngineEvent::Progress(TransferProgress {
+                            direction,
+                            phase: TransferPhase::Reconnecting,
+                            note: Some(Reason::new(note)),
+                            ..Default::default()
+                        }))
+                        .await?;
+                }
+            }
+            let delay = Duration::from_secs(RECONNECT_DELAYS[*reconnects]);
+            *reconnects += 1;
+            if control
+                .run(async {
+                    tokio::time::sleep(delay).await;
+                    Ok(())
+                })
+                .await
+                .is_err()
+            {
+                return Ok(false);
+            }
+            match control
+                .run(self.connect(link.prompts.clone(), events, link.shutdown, link.client))
+                .await
+            {
+                Ok(next) => {
+                    let same_host = match batch.as_deref() {
+                        Some(batch) => batch.verify_host(next.fingerprint()),
+                        None => Ok(()),
+                    };
+                    return match same_host {
+                        Ok(()) => {
+                            *link.client.write().await = Some(next);
+                            Ok(true)
+                        }
+                        Err(error) => {
+                            events.send(EngineEvent::Notice(error.into())).await?;
+                            Ok(false)
+                        }
+                    };
+                }
+                Err(error) => {
+                    // Authentication/trust failures must require user action.
+                    let give_up = !is_network_error(&error);
+                    events
+                        .send(EngineEvent::Disconnected(Disconnect::Failed(error.into())))
+                        .await?;
+                    if give_up {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// 工作循环里到处要用的东西：连接和它的问答、事件、停止。
+struct Link<'a> {
+    prompts: &'a Arc<SshPrompts>,
+    events: &'a EventSink,
+    shutdown: &'a watch::Receiver<bool>,
+    client: &'a RwLock<Option<Arc<SftpClient>>>,
+    control: &'a TransferControl,
+}
+
+/// 离开作用域就中止任务。工作循环可能半路返回（没人听事件了）：路由任务要跟着走，
+/// 它手里的 `writes` 放下了 `run` 才等得到写回结束。
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// 这条命令要扫描（新的一批）：是哪个方向。
+fn scan_direction(operation: &SftpCommand) -> Option<TransferDirection> {
+    match operation {
+        SftpCommand::Upload(_) => Some(TransferDirection::Upload),
+        SftpCommand::Download(_) => Some(TransferDirection::Download),
+        _ => None,
+    }
+}
+
+/// 要用连接的时候没有连接：用户停了，或者网络断了。
+fn no_connection(control: &TransferControl) -> anyhow::Error {
+    if control.check().is_err() {
+        Cancelled.into()
+    } else {
+        std::io::Error::new(std::io::ErrorKind::NotConnected, SftpError::NoConnection).into()
     }
 }
 

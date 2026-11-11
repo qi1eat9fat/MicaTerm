@@ -106,6 +106,8 @@ pub enum SftpError {
     },
     /// Over the error a sync's delete failed with.
     DeleteFailed,
+    /// 丢弃续传进度时连不上：远程的半截文件和续传记录还在。
+    DiscardOffline,
 }
 
 impl fmt::Display for SftpError {
@@ -136,6 +138,7 @@ impl fmt::Display for SftpError {
                 write!(f, "reconnecting in {seconds} s ({attempt}/3)")
             }
             Self::DeleteFailed => f.write_str("couldn't delete"),
+            Self::DiscardOffline => f.write_str("couldn't reach the host to discard the progress"),
         }
     }
 }

@@ -9,16 +9,19 @@ use crate::app::{
     ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NewLocalTerminalTab,
     NextTab, OpenTabMenu, PreviousTab, SwitchToTab,
 };
+use crate::editor::EditorTab;
 use crate::i18n::t;
 use crate::tabs::{Tab, TabId, TerminalTab, build_tab_menu};
 use crate::ui::DialogLayer;
-use crate::ui::confirm::{Confirm, ConfirmLine, open_confirm_dialog};
+use crate::ui::confirm::{
+    Choice, ChoiceButton, Confirm, ConfirmLine, open_choice_dialog, open_confirm_dialog,
+};
 use crate::workspace::Workspace;
 
 /// 关闭标签前要问的事。
 struct CloseQuestion {
-    /// 还有传输没完成的 SFTP 标签：`(主机名, 几批)`。
-    transfers: Vec<(SharedString, usize)>,
+    /// 还有传输没完成的 SFTP 标签。
+    transfers: Vec<Unfinished>,
     /// 有未保存修改的文件。
     unsaved: Vec<SharedString>,
 }
@@ -33,8 +36,13 @@ impl CloseQuestion {
         let mut lines: Vec<_> = self
             .transfers
             .iter()
-            .map(|(name, count)| {
-                ConfirmLine::Text(t!("sftp_tab.close.transfers", name = name, count = count))
+            .map(|tab| {
+                ConfirmLine::Text(t!(
+                    "sftp_tab.close.transfers",
+                    name = tab.name,
+                    count = tab.count,
+                    detail = tab.detail
+                ))
             })
             .collect();
         if !self.transfers.is_empty() {
@@ -47,6 +55,32 @@ impl CloseQuestion {
         );
         lines
     }
+}
+
+/// 一个还有传输没完成的 SFTP 标签。
+struct Unfinished {
+    /// 主机名。
+    name: SharedString,
+    /// 几批。
+    count: usize,
+    /// 括号里的：正在传的文件和百分比（原型「关闭 SFTP 标签」）。
+    detail: SharedString,
+}
+
+/// 写回结束后接着做什么。
+#[derive(Clone)]
+enum AfterSaves {
+    Close {
+        ids: Vec<TabId>,
+        activate: Option<TabId>,
+    },
+    Quit,
+}
+
+/// 关标签或退出在等写回结束：写回是截断重写，中止了文件就只剩一半。开着一个只能「不等了」的框。
+pub(in crate::workspace) struct SaveWait {
+    then: AfterSaves,
+    layer: DialogLayer,
 }
 
 pub(in crate::workspace) fn bind_tabs_actions(
@@ -145,14 +179,14 @@ impl Workspace {
         }
     }
 
-    /// 只留下 `id`，它到前面来。
+    /// 只留下 `id`（和它所属的 SFTP 标签），它到前面来。
     fn on_close_other_tabs(
         &mut self,
         &CloseOtherTabs(id): &CloseOtherTabs,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let others = self.tabs.others(id);
+        let others = self.without_owner_of(id, self.tabs.others(id), cx);
         if others.is_empty() {
             return;
         }
@@ -166,7 +200,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let right = self.tabs.right_of(id);
+        let right = self.without_owner_of(id, self.tabs.right_of(id), cx);
         if right.is_empty() {
             return;
         }
@@ -255,6 +289,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let saving = self.saving_editors(&ids, cx);
+        if !saving.is_empty() {
+            self.wait_for_saves(AfterSaves::Close { ids, activate }, saving, window, cx);
+            return;
+        }
         let question = CloseQuestion {
             transfers: self.unfinished_transfers(&ids, cx),
             unsaved: self.unsaved_editors(&ids, cx),
@@ -315,6 +354,11 @@ impl Workspace {
     /// 用户同意时由框自己退出。
     pub fn ask_before_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let ids = self.tabs.ids();
+        let saving = self.saving_editors(&ids, cx);
+        if !saving.is_empty() {
+            self.wait_for_saves(AfterSaves::Quit, saving, window, cx);
+            return true;
+        }
         let transfers = self.unfinished_transfers(&ids, cx);
         let unsaved = self.unsaved_editors(&ids, cx);
         if transfers.is_empty() && unsaved.is_empty() {
@@ -330,8 +374,13 @@ impl Workspace {
         }
         let mut lines: Vec<_> = transfers
             .iter()
-            .map(|(name, count)| {
-                ConfirmLine::Text(t!("quit.transfers", name = name, count = count))
+            .map(|tab| {
+                ConfirmLine::Text(t!(
+                    "quit.transfers",
+                    name = tab.name,
+                    count = tab.count,
+                    detail = tab.detail
+                ))
             })
             .collect();
         if !transfers.is_empty() {
@@ -364,6 +413,95 @@ impl Workspace {
         true
     }
 
+    /// 写回结束了才接着做 `then`，这期间开着一个框说在等谁。已经在等就只换要做的事（退出盖过关标签）。
+    fn wait_for_saves(
+        &mut self,
+        then: AfterSaves,
+        saving: Vec<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(wait) = &mut self.save_wait
+            && wait.layer.is_open(window, cx)
+        {
+            if matches!(then, AfterSaves::Quit) {
+                wait.then = then;
+            }
+            return;
+        }
+        let mut lines: Vec<_> = saving
+            .iter()
+            .map(|name| ConfirmLine::Text(t!("save_wait.saving", name = name)))
+            .collect();
+        lines.push(ConfirmLine::Text(match then {
+            AfterSaves::Close { .. } => t!("save_wait.then_close"),
+            AfterSaves::Quit => t!("save_wait.then_quit"),
+        }));
+        let layer = DialogLayer::new();
+        self.save_wait = Some(SaveWait {
+            then,
+            layer: layer.clone(),
+        });
+        let workspace = cx.weak_entity();
+        let focus = window.focused(cx);
+        open_choice_dialog(
+            Choice {
+                id: "save-wait",
+                title: t!("save_wait.title"),
+                subtitle: None,
+                lines,
+                check: None,
+                buttons: vec![ChoiceButton::new("cancel", t!("save_wait.cancel"))],
+            },
+            layer,
+            Box::new(move |_, window, cx| {
+                if let Some(focus) = &focus {
+                    window.focus(focus, cx);
+                }
+                let _ = workspace.update(cx, |this, _| this.save_wait = None);
+            }),
+            window,
+            cx,
+        );
+    }
+
+    /// 一次写回结束了。等着的事接着走；写回失败就不走了：文件可能不完整，错误已经显示着，用户得看到。
+    pub(in crate::workspace) fn on_save_ended(
+        &mut self,
+        saved: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(wait) = &self.save_wait else {
+            return;
+        };
+        let scope = match &wait.then {
+            AfterSaves::Close { ids, .. } => ids.clone(),
+            AfterSaves::Quit => self.tabs.ids(),
+        };
+        if saved && !self.saving_editors(&scope, cx).is_empty() {
+            return;
+        }
+        let Some(SaveWait { then, layer }) = self.save_wait.take() else {
+            return;
+        };
+        layer.close(window, cx);
+        if !saved {
+            self.focus_active_tab(window, cx);
+            return;
+        }
+        match then {
+            AfterSaves::Close { ids, activate } => {
+                self.request_close_tabs(ids, activate, window, cx)
+            }
+            AfterSaves::Quit => {
+                if !self.ask_before_quit(window, cx) {
+                    cx.quit();
+                }
+            }
+        }
+    }
+
     fn close_tabs_now(
         &mut self,
         ids: Vec<TabId>,
@@ -379,13 +517,44 @@ impl Workspace {
         }
     }
 
-    /// 这些标签里还有传输没完成的 SFTP 标签：`(主机名, 几批)`。工单 22 填的是 `SftpTab::unfinished_transfers`。
-    fn unfinished_transfers(&self, ids: &[TabId], cx: &App) -> Vec<(SharedString, usize)> {
+    /// 这些标签里还有传输没完成的 SFTP 标签。工单 22 填的是 `SftpTab::unfinished_transfers`。
+    fn unfinished_transfers(&self, ids: &[TabId], cx: &App) -> Vec<Unfinished> {
         ids.iter()
             .filter_map(|id| self.tabs.get(*id)?.as_sftp())
             .map(|tab| tab.read(cx))
             .filter(|tab| tab.unfinished_transfers() > 0)
-            .map(|tab| (tab.rail_name(), tab.unfinished_transfers()))
+            .map(|tab| Unfinished {
+                name: tab.rail_name(),
+                count: tab.unfinished_transfers(),
+                detail: match tab.transfer_queue().unfinished_detail() {
+                    Some((file, Some(percent))) => {
+                        t!("sftp_tab.close.detail", file = file, percent = percent)
+                    }
+                    Some((file, None)) => t!("sftp_tab.close.detail_file", file = file),
+                    None => SharedString::default(),
+                },
+            })
+            .collect()
+    }
+
+    /// 留下 `kept` 时不能关的去掉：远程编辑器所属的 SFTP 标签，关了会把它连带关掉。
+    fn without_owner_of(&self, kept: TabId, ids: Vec<TabId>, cx: &App) -> Vec<TabId> {
+        let owner = self
+            .tabs
+            .get(kept)
+            .and_then(Tab::as_editor)
+            .and_then(|editor| editor.read(cx).sftp())
+            .map(|sftp| sftp.entity_id());
+        let Some(owner) = owner else {
+            return ids;
+        };
+        ids.into_iter()
+            .filter(|id| {
+                self.tabs
+                    .get(*id)
+                    .and_then(Tab::as_sftp)
+                    .is_none_or(|tab| tab.entity_id() != owner)
+            })
             .collect()
     }
 
@@ -396,6 +565,26 @@ impl Workspace {
         ids: &[TabId],
         cx: &App,
     ) -> Vec<SharedString> {
+        self.closing_editors(ids, cx)
+            .filter(|editor| editor.has_unsaved_changes())
+            .map(EditorTab::file_name)
+            .collect()
+    }
+
+    /// 关闭这些标签时跟着关、又正在写回的文件。
+    fn saving_editors(&self, ids: &[TabId], cx: &App) -> Vec<SharedString> {
+        self.closing_editors(ids, cx)
+            .filter(|editor| editor.is_saving())
+            .map(EditorTab::file_name)
+            .collect()
+    }
+
+    /// 关闭这些标签时跟着关的编辑器：它们自己，和这些 SFTP 标签打开的远程文件。
+    fn closing_editors<'a>(
+        &'a self,
+        ids: &'a [TabId],
+        cx: &'a App,
+    ) -> impl Iterator<Item = &'a EditorTab> {
         let closing_sftp: Vec<_> = ids
             .iter()
             .filter_map(|id| self.tabs.get(*id)?.as_sftp())
@@ -404,15 +593,13 @@ impl Workspace {
         self.tabs
             .iter()
             .filter_map(|(id, tab)| Some((id, tab.as_editor()?.read(cx))))
-            .filter(|(id, editor)| {
+            .filter(move |(id, editor)| {
                 ids.contains(id)
                     || editor
                         .sftp()
                         .is_some_and(|sftp| closing_sftp.contains(&sftp.entity_id()))
             })
-            .filter(|(_, editor)| editor.has_unsaved_changes())
-            .map(|(_, editor)| editor.file_name())
-            .collect()
+            .map(|(_, editor)| editor)
     }
 
     /// 关掉一个标签和它全部卡片的 shell；左边的标签到前面来，没有标签了就回到开始卡片。

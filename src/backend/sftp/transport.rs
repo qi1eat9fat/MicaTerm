@@ -72,8 +72,8 @@ pub type SharedSftpTransportProvider = Arc<dyn SftpTransportProvider>;
 /// 真的登录一条连接、只开 SFTP 子系统。
 pub struct SshSftpTransportProvider {
     connector: SshConnector,
-    resume_dir: PathBuf,
-    download_resume_dir: PathBuf,
+    /// 上传、下载的续传记录放在哪；`None` 是没有地方放，不记。
+    resume_dirs: Option<(PathBuf, PathBuf)>,
 }
 
 impl SshSftpTransportProvider {
@@ -81,20 +81,28 @@ impl SshSftpTransportProvider {
     pub fn new(connector: SshConnector, resume_dir: PathBuf, download_resume_dir: PathBuf) -> Self {
         Self {
             connector,
-            resume_dir,
-            download_resume_dir,
+            resume_dirs: Some((resume_dir, download_resume_dir)),
+        }
+    }
+
+    /// 不记续传记录：没有地方放的时候（取不到数据目录）。
+    pub fn without_resume_records(connector: SshConnector) -> Self {
+        Self {
+            connector,
+            resume_dirs: None,
         }
     }
 }
 
 impl SftpTransportProvider for SshSftpTransportProvider {
     fn create(&self, login: &HostLogin) -> Box<dyn SftpTransport> {
-        Box::new(SshSftpTransport(SftpWorker::new(
-            self.connector.clone(),
-            login.clone(),
-            self.resume_dir.clone(),
-            self.download_resume_dir.clone(),
-        )))
+        let connector = self.connector.clone();
+        Box::new(SshSftpTransport(match &self.resume_dirs {
+            Some((upload, download)) => {
+                SftpWorker::new(connector, login.clone(), upload.clone(), download.clone())
+            }
+            None => SftpWorker::without_resume_records(connector, login.clone()),
+        }))
     }
 }
 

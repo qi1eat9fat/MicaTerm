@@ -157,6 +157,7 @@ fn sftp(error: &SftpError, rest: &[Cause<'_>]) -> String {
         SftpError::ListFailed => t!("sftp.worker.list_failed", error = chain_text(rest)),
         SftpError::DeleteFailed => t!("sftp.sync.delete_failed", error = chain_text(rest)),
         SftpError::Busy => t!("sftp.worker.busy"),
+        SftpError::DiscardOffline => t!("sftp.worker.discard_offline"),
         SftpError::LocalFolderMissing { path } => {
             t!("sftp.worker.local_folder_missing", path = path.display())
         }

@@ -90,6 +90,7 @@ pub fn fake_services() -> WorkspaceServices {
         // SFTP 不连网络，本地目录不碰真实磁盘（工单 20）。
         sftp: Arc::new(FakeSftpProvider::default()),
         local_files: Arc::new(FakeLocalDirectory::default()),
+        sftp_problem: None,
     }
 }
 

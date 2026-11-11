@@ -3,18 +3,15 @@
 // 本地名称在 Windows 上多查一道非法字符。
 //! 删除的确认框，和重命名、新建共用的名称框。
 
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 
-use super::{FileOperation, NewEntryKind, SftpTab};
+use super::{CardSide, FileOperation, NewEntryKind, SftpTab};
 use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Confirm, ConfirmLine, open_confirm_dialog};
-use crate::ui::form::{FieldNote, form_field, text_input};
+use crate::ui::form::{FieldNote, dialog_footer, dialog_title, form_field, text_input};
 
 /// 小对话框的宽（原型 `.dlg.small`）。
 pub(super) const SMALL_DIALOG_WIDTH: Pixels = px(470.);
@@ -68,44 +65,6 @@ impl NewEntryKind {
             NewEntryKind::File => t!("sftp_files.new.file_name"),
         }
     }
-}
-
-/// 对话框的标题：粗体，后面可以跟灰字（原型 `.dh .s`）。
-pub(super) fn dialog_title(
-    title: SharedString,
-    subtitle: Option<SharedString>,
-    tokens: &Tokens,
-) -> impl IntoElement + use<> {
-    let faint = tokens.faint;
-    div()
-        .flex()
-        .items_baseline()
-        .gap(px(8.))
-        .min_w_0()
-        .child(div().flex_none().child(title))
-        .children(subtitle.map(|subtitle| {
-            div()
-                .min_w_0()
-                .truncate()
-                .text_size(px(12.))
-                .font_weight(FontWeight::NORMAL)
-                .text_color(faint)
-                .child(subtitle)
-        }))
-}
-
-/// 对话框的按钮：靠右，小号（原型 `.dlg .df`）。库的两个按钮外面都是撑满的盒子，要各包一层才不把宽度分掉。
-pub(super) fn dialog_footer(
-    commit_id: &'static str,
-    commit: SharedString,
-) -> impl IntoElement + use<> {
-    DialogFooter::new()
-        .child(div().flex_none().child(
-            DialogClose::new().trigger(|button| button.small().label(t!("sftp_files.cancel"))),
-        ))
-        .child(div().flex_none().child(
-            DialogAction::new().child(Button::new(commit_id).primary().small().label(commit)),
-        ))
 }
 
 /// 名称框是做什么的。
@@ -185,12 +144,12 @@ impl SftpTab {
     /// 问要不要删除这一侧选中的（Delete）。本地的进回收站，远程的就没了，框里写清楚。
     pub(super) fn confirm_delete(
         &mut self,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let names = self.card(remote).read(cx).selected_names(cx);
-        if names.is_empty() || !self.can_start_operation(remote, window, cx) {
+        let names = self.card(side).read(cx).selected_names(cx);
+        if names.is_empty() || !self.can_start_operation(side, window, cx) {
             return;
         }
         let question = if let [name] = names.as_slice() {
@@ -198,16 +157,16 @@ impl SftpTab {
         } else {
             t!("sftp_files.delete.question_many", count = names.len())
         };
-        let consequence = if remote {
+        let consequence = if side.is_remote() {
             t!("sftp_files.delete.remote")
         } else if cfg!(windows) {
             t!("sftp_files.delete.recycle_bin")
         } else {
             t!("sftp_files.delete.trash")
         };
-        let list = self.card(remote).read(cx).focus_handle(cx);
+        let list = self.card(side).read(cx).focus_handle(cx);
         let list_after_cancel = list.clone();
-        let send = self.operation_sender(remote);
+        let send = self.operation_sender(side);
         let layer = DialogLayer::new();
         open_confirm_dialog(
             Confirm {
@@ -233,38 +192,38 @@ impl SftpTab {
     /// 重命名（F2）：只选中一项时。
     pub(super) fn open_rename(
         &mut self,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let [name] = self.card(remote).read(cx).selected_names(cx).as_slice() {
+        if let [name] = self.card(side).read(cx).selected_names(cx).as_slice() {
             let intent = NameIntent::Rename(name.clone());
-            self.open_name_dialog(remote, intent, window, cx);
+            self.open_name_dialog(side, intent, window, cx);
         }
     }
 
     /// 新建文件夹或文件。
     pub(super) fn open_new(
         &mut self,
-        remote: bool,
+        side: CardSide,
         kind: NewEntryKind,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_name_dialog(remote, NameIntent::New(kind), window, cx);
+        self.open_name_dialog(side, NameIntent::New(kind), window, cx);
     }
 
     fn open_name_dialog(
         &mut self,
-        remote: bool,
+        side: CardSide,
         intent: NameIntent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.can_start_operation(remote, window, cx) {
+        if !self.can_start_operation(side, window, cx) {
             return;
         }
-        let card = self.card(remote).read(cx);
+        let card = self.card(side).read(cx);
         let existing: Vec<String> = card
             .listed_entries(cx)
             .iter()
@@ -299,7 +258,7 @@ impl SftpTab {
             NameForm {
                 intent,
                 existing,
-                windows_names: !remote && cfg!(windows),
+                windows_names: !side.is_remote() && cfg!(windows),
                 input: input.clone(),
                 label,
                 error: None,
@@ -307,7 +266,7 @@ impl SftpTab {
             }
         });
         let tokens = Tokens::current(cx);
-        let send = self.operation_sender(remote);
+        let send = self.operation_sender(side);
         let layer = DialogLayer::new();
         layer.open_dismissable(
             move |dialog, _, _| {
@@ -319,7 +278,11 @@ impl SftpTab {
                     // 只由按钮和 Esc 关，点旁边不关。
                     .overlay_closable(false)
                     .child(form.clone())
-                    .footer(dialog_footer("entry-name-commit", commit.clone()))
+                    .footer(dialog_footer(
+                        "entry-name-commit",
+                        commit.clone(),
+                        t!("sftp_files.cancel"),
+                    ))
                     .on_ok(move |_, window, cx| {
                         let operation = form_ok.update(cx, |form, cx| form.operation(cx));
                         match operation {

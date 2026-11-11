@@ -1,6 +1,7 @@
 _version: 2
 
 # 预览（工单 24）：对话框头部的工具、图片的说明，和预览不了的文件。
+# 部分文案来自 since2006/shell-rs @ b2a307a: locales/explorer.yml
 
 preview.info:
   zh-CN: "%{place} · %{size}"

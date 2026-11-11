@@ -1,6 +1,7 @@
 _version: 2
 
 # 编辑器标签（工单 23）：卡片头部、状态栏、冲突框、关闭确认、打不开的文件，和退出时的询问。
+# 部分文案来自 since2006/shell-rs @ b2a307a: locales/editor.yml、locales/explorer.yml
 
 editor.command.reload:
   zh-CN: 重新加载
@@ -21,11 +22,11 @@ editor.status.saving:
 editor.status.reloading:
   zh-CN: 正在重新加载…
 editor.changed.title_remote:
-  zh-CN: 文件在服务器上被改过
+  zh-CN: 文件在远程被改过
 editor.changed.title_local:
   zh-CN: 文件在磁盘上被改过
 editor.changed.lead_remote:
-  zh-CN: 打开之后，服务器上的这个文件被改过：
+  zh-CN: 打开之后，远程的这个文件被改过：
 editor.changed.lead_local:
   zh-CN: 打开之后，磁盘上的这个文件被改过：
 editor.changed.opened:
@@ -69,7 +70,7 @@ editor.save.failed:
 editor.save.interrupted_title:
   zh-CN: 「%{name}」没有写完
 editor.save.interrupted:
-  zh-CN: 服务器上的文件现在不完整，请再保存一次。%{message}
+  zh-CN: 远程的文件现在不完整，请再保存一次。%{message}
 editor.file.connecting:
   zh-CN: 正在连接 SFTP，连上以后再试
 editor.file.connection_lost:
@@ -93,7 +94,7 @@ editor.refused.download:
 quit.title:
   zh-CN: 退出 QiShell
 quit.transfers:
-  zh-CN: "%{name} 还有 %{count} 批传输没完成。"
+  zh-CN: "%{name} 还有 %{count} 批传输没完成%{detail}。"
 quit.transfers_note:
   zh-CN: 退出后队列清空；续传记录保留，下次传同一个文件会问是否续传。
 quit.unsaved:
@@ -102,3 +103,13 @@ quit.cancel:
   zh-CN: 取消
 quit.confirm:
   zh-CN: 仍要退出
+save_wait.title:
+  zh-CN: 正在保存
+save_wait.saving:
+  zh-CN: 「%{name}」正在写回，中途停下文件会不完整。
+save_wait.then_close:
+  zh-CN: 写完就关闭。
+save_wait.then_quit:
+  zh-CN: 写完就退出。
+save_wait.cancel:
+  zh-CN: 不等了，留在这里

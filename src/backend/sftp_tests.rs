@@ -3,8 +3,10 @@
 //! 下载、冲突、停下后续传、断线自动重连（工单 22）。
 //! 这台机器上没有 `sftp-server` 时跳过。路径当不透明的前缀用：Git 的 `sftp-server` 报的是 MSYS 风格。
 
+use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -23,13 +25,17 @@ use super::sftp::{
 };
 use super::tests::Secrets;
 
-const WAIT: Duration = Duration::from_secs(15);
+/// 只防挂死，不是引擎该多快。卡住的连接（没有 FIN 也没有 RST）要等一个 SFTP 请求超时（10 秒）
+/// 引擎才说断了；满载时再慢一些也不算错。
+const WAIT: Duration = Duration::from_secs(30);
 
 /// 一个登录好的 SFTP 工作线程。
 struct Session {
     commands: Sender<SftpCommand>,
     events: Receiver<SftpEvent>,
     home: RemotePath,
+    /// 工作线程：`Shutdown` 之后它结束，运行时也就没了。
+    worker: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
     /// 服务器和运行时都活到测试结束。
     _server: Arc<Served>,
 }
@@ -74,11 +80,12 @@ impl Session {
         let transport = provider.create(&login);
         let (commands, receiver) = async_channel::unbounded();
         let (sender, events) = async_channel::unbounded();
-        std::thread::spawn(move || transport.run(receiver, sender));
+        let worker = std::thread::spawn(move || transport.run(receiver, sender));
         let mut session = Self {
             commands,
             events,
             home: RemotePath::new("/").expect("path"),
+            worker: Some(worker),
             _server: server,
         };
         session.home = session.wait_connected();
@@ -207,6 +214,65 @@ impl Session {
     }
 }
 
+impl Session {
+    /// 关掉：和关 SFTP 标签发的一样，再等工作线程（和它的运行时）结束。
+    fn close_and_join(&mut self) {
+        self.send(SftpCommand::Disconnect);
+        self.send(SftpCommand::Shutdown);
+        let worker = self.worker.take().expect("still running");
+        let deadline = Instant::now() + WAIT * 4;
+        while !worker.is_finished() {
+            assert!(Instant::now() < deadline, "the worker did not finish");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let _ = worker.join();
+    }
+
+    /// 这一批再也不动：`Resume` 只是连上去，答一个 `Idle`。
+    fn resume_goes_nowhere(&self) {
+        self.send(SftpCommand::Resume);
+        loop {
+            match self.next() {
+                SftpEvent::Idle => return,
+                SftpEvent::Progress(progress) => panic!("it went on: {:?}", progress.phase()),
+                SftpEvent::Question(question) => panic!("it went on: {question:?}"),
+                SftpEvent::Prompt(prompt) => self.answer_prompt(&prompt),
+                _ => {}
+            }
+        }
+    }
+
+    /// 连接断了：引擎说 `Disconnected`。
+    fn wait_disconnected(&self) {
+        while !matches!(self.next(), SftpEvent::Disconnected(_)) {}
+    }
+
+    /// 传着的这一批断了线：引擎说 `Disconnected`（这时调用 `dropped`），自己重连，传完。
+    fn reconnect_and_finish(&self, mut dropped: impl FnMut()) {
+        let (mut was_dropped, mut reconnecting) = (false, false);
+        loop {
+            match self.next() {
+                SftpEvent::Disconnected(_) => {
+                    if !was_dropped {
+                        dropped();
+                    }
+                    was_dropped = true;
+                }
+                SftpEvent::Prompt(prompt) => self.answer_prompt(&prompt),
+                SftpEvent::Question(question) => panic!("unexpected question: {question:?}"),
+                SftpEvent::Progress(progress) => match progress.phase() {
+                    TransferPhase::Reconnecting => reconnecting = true,
+                    TransferPhase::Stopped => panic!("gave up: {:?}", progress.details()),
+                    TransferPhase::Completed => break,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        assert!(was_dropped && reconnecting, "the connection never dropped");
+    }
+}
+
 impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.commands.try_send(SftpCommand::Shutdown);
@@ -229,10 +295,13 @@ fn assert_same(path: &Path, expected: &[u8]) {
     assert!(actual == expected, "{} 的内容不对", path.display());
 }
 
-/// 在客户端和服务器之间转发 TCP：`kick` 掐断现在的连接，新连接照常转发。
+/// 在客户端和服务器之间转发 TCP：`kick` 掐断现在的连接，新连接照常转发；`refuse` 以后新连接一来就断，
+/// 像断了网；`pause` 以后连着的连接什么都收不到，像网卡住了。
 struct Relay {
     port: u16,
     connections: Arc<Mutex<Vec<TcpStream>>>,
+    refusing: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Relay {
@@ -241,20 +310,39 @@ impl Relay {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         let tracked = connections.clone();
+        let refusing = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
+        let (refused, held) = (refusing.clone(), paused.clone());
         std::thread::spawn(move || {
             for client in listener.incoming() {
                 let Ok(client) = client else { return };
+                if refused.load(Ordering::SeqCst) {
+                    continue;
+                }
                 let Ok(server) = TcpStream::connect(("127.0.0.1", target)) else {
                     return;
                 };
                 let _ = (client.set_nodelay(true), server.set_nodelay(true));
                 tracked.lock().unwrap().extend(client.try_clone());
                 tracked.lock().unwrap().extend(server.try_clone());
-                pump(&client, &server);
-                pump(&server, &client);
+                pump(&client, &server, held.clone());
+                pump(&server, &client, held.clone());
             }
         });
-        Self { port, connections }
+        Self {
+            port,
+            connections,
+            refusing,
+            paused,
+        }
+    }
+
+    fn refuse(&self, refusing: bool) {
+        self.refusing.store(refusing, Ordering::SeqCst);
+    }
+
+    fn pause(&self, paused: bool) {
+        self.paused.store(paused, Ordering::SeqCst);
     }
 
     fn kick(&self) {
@@ -264,13 +352,21 @@ impl Relay {
     }
 }
 
-/// 一个方向。一边断了就断另一边。
-fn pump(from: &TcpStream, to: &TcpStream) {
+/// 一个方向。一边断了就断另一边。卡住时读到的先拿着，放开了再转。
+fn pump(from: &TcpStream, to: &TcpStream, paused: Arc<AtomicBool>) {
     let (Ok(mut from), Ok(mut to)) = (from.try_clone(), to.try_clone()) else {
         return;
     };
     std::thread::spawn(move || {
-        let _ = std::io::copy(&mut from, &mut to);
+        let mut buffer = vec![0; 64 * 1024];
+        while let Ok(read) = from.read(&mut buffer) {
+            while paused.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            if read == 0 || to.write_all(&buffer[..read]).is_err() {
+                break;
+            }
+        }
         let _ = to.shutdown(std::net::Shutdown::Both);
     });
 }
@@ -501,22 +597,31 @@ fn a_dropped_connection_reconnects_on_its_own_and_the_upload_finishes() {
     session.upload(&source);
     session.wait_some_bytes();
     relay.kick();
-    let (mut dropped, mut reconnecting) = (false, false);
-    loop {
-        match session.next() {
-            SftpEvent::Disconnected(_) => dropped = true,
-            SftpEvent::Prompt(prompt) => session.answer_prompt(&prompt),
-            SftpEvent::Question(question) => panic!("unexpected question: {question:?}"),
-            SftpEvent::Progress(progress) => match progress.phase() {
-                TransferPhase::Reconnecting => reconnecting = true,
-                TransferPhase::Stopped => panic!("gave up: {:?}", progress.details()),
-                TransferPhase::Completed => break,
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-    assert!(dropped && reconnecting, "the connection never dropped");
+    session.reconnect_and_finish(|| {});
+    assert_same(&directory.path().join("up.bin"), &bytes);
+}
+
+/// 传的时候网卡住了（没有 FIN 也没有 RST）：一个 SFTP 请求超时后引擎说断了，自己重连，接着传完。
+/// 有的机器上往卡住的连接写，非阻塞的 `send` 也会挡住线程；引擎不能跟着停在那里一声不吭。
+#[test]
+fn a_connection_stuck_during_an_upload_is_given_up_and_the_upload_finishes() {
+    let Some((directory, state)) = directories() else {
+        return;
+    };
+    let source = state.path().join("up.bin");
+    let bytes = large_file(&source);
+    let served = serve(directory.path());
+    let relay = Relay::start(served.server.port);
+    let session = Session::attach(served.clone(), relay.port, state.path());
+
+    session.upload(&source);
+    session.wait_some_bytes();
+    relay.pause(true);
+    // 引擎说断了以后网才好：卡住的那条掐掉，新连接照常转发。
+    session.reconnect_and_finish(|| {
+        relay.kick();
+        relay.pause(false);
+    });
     assert_same(&directory.path().join("up.bin"), &bytes);
 }
 
@@ -607,4 +712,166 @@ fn a_save_over_someone_elses_change_is_refused_with_what_the_file_is_now() {
         }
     }
     assert_eq!(std::fs::read(&on_disk).unwrap(), b"\xEF\xBB\xBFmine 2\r\n");
+}
+
+/// 写回是截断重写：写到一半关标签（断开加 `Shutdown`），工作线程也要等它写完才结束，运行时才不会把它中止，
+/// 否则文件就只剩一半，还没人知道。
+#[test]
+fn closing_the_connection_during_a_save_lets_the_save_finish() {
+    let Some((served, state)) = directories() else {
+        return;
+    };
+    let on_disk = served.path().join("app.conf");
+    std::fs::write(&on_disk, vec![0u8; LARGE]).unwrap();
+    let mut session = Session::open(served.path(), state.path());
+    let bytes: Vec<u8> = (0..LARGE).map(|i| (i % 251) as u8).collect();
+
+    session.send(SftpCommand::WriteFile {
+        request_id: 1,
+        path: session.home.join("app.conf").unwrap(),
+        bytes: bytes.clone(),
+        expected: None,
+    });
+    // 文件已经截断了：从这里起中止写回就丢数据。
+    let deadline = Instant::now() + WAIT;
+    while std::fs::metadata(&on_disk).unwrap().len() >= LARGE as u64 {
+        assert!(Instant::now() < deadline, "the save never started");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    session.close_and_join();
+
+    assert_same(&on_disk, &bytes);
+}
+
+/// 断网时丢弃：连不上也算丢弃了，之后的「重新连接」（`Resume`）不能把它接着传。
+#[test]
+fn a_batch_discarded_while_offline_does_not_go_on_after_reconnecting() {
+    let Some((directory, state)) = directories() else {
+        return;
+    };
+    let source = state.path().join("up.bin");
+    large_file(&source);
+    let served = serve(directory.path());
+    let relay = Relay::start(served.server.port);
+    let session = Session::attach(served.clone(), relay.port, state.path());
+
+    session.upload(&source);
+    session.wait_some_bytes();
+    session.stop();
+    relay.refuse(true);
+    relay.kick();
+    session.wait_disconnected();
+
+    session.send(SftpCommand::Discard);
+    session.wait_idle();
+
+    relay.refuse(false);
+    session.resume_goes_nowhere();
+    assert!(!directory.path().join("up.bin").exists());
+}
+
+/// 下载的半截在本机：断网时丢弃也清得掉。
+#[test]
+fn a_download_discarded_while_offline_cleans_up_without_a_connection() {
+    let Some((directory, state)) = directories() else {
+        return;
+    };
+    large_file(&directory.path().join("down.bin"));
+    let target = state.path().join("in");
+    std::fs::create_dir(&target).unwrap();
+    let served = serve(directory.path());
+    let relay = Relay::start(served.server.port);
+    let session = Session::attach(served.clone(), relay.port, state.path());
+
+    session.download("down.bin", &target);
+    session.wait_some_bytes();
+    session.stop();
+    let part = target.join("down.bin.filepart");
+    assert!(part.exists(), "the part stays while stopped");
+    relay.refuse(true);
+    relay.kick();
+    session.wait_disconnected();
+
+    session.send(SftpCommand::Discard);
+    session.wait_idle();
+    assert!(!part.exists(), "the part is on this computer: it goes");
+
+    relay.refuse(false);
+    session.resume_goes_nowhere();
+    assert!(!target.join("down.bin").exists());
+}
+
+/// 扫描时停下：引擎手里还没有批次。「继续」按原来的请求重新扫描，一直传完。
+#[test]
+fn a_batch_stopped_while_scanning_scans_again_on_resume() {
+    let Some((directory, state)) = directories() else {
+        return;
+    };
+    let source = state.path().join("up.bin");
+    let bytes = large_file(&source);
+    let served = serve(directory.path());
+    let relay = Relay::start(served.server.port);
+    let session = Session::attach(served.clone(), relay.port, state.path());
+
+    // 网卡住了：扫描停在等服务器回答上。
+    relay.pause(true);
+    session.upload(&source);
+    session.send(SftpCommand::Cancel);
+    let stopped = loop {
+        if let SftpEvent::Progress(progress) = session.next()
+            && progress.phase() == TransferPhase::Stopped
+        {
+            break progress;
+        }
+    };
+    assert!(stopped.details().is_empty(), "stopping is not a failure");
+    session.wait_idle();
+    relay.pause(false);
+
+    session.send(SftpCommand::Resume);
+    session.wait_phase(TransferPhase::Completed, |question| {
+        panic!("unexpected question: {question:?}")
+    });
+    assert_same(&directory.path().join("up.bin"), &bytes);
+}
+
+/// 扫描时断线：和传的时候断线一样自己重连，接着扫描、传完。
+#[test]
+fn a_connection_dropped_while_scanning_reconnects_on_its_own() {
+    let Some((directory, state)) = directories() else {
+        return;
+    };
+    let source = state.path().join("up.bin");
+    std::fs::write(&source, "uploaded").unwrap();
+    let served = serve(directory.path());
+    let relay = Relay::start(served.server.port);
+    let session = Session::attach(served.clone(), relay.port, state.path());
+
+    relay.pause(true);
+    session.upload(&source);
+    // 第一条进度是扫描开始了，后面就在等服务器回答。
+    while !matches!(session.next(), SftpEvent::Progress(_)) {}
+    relay.kick();
+    relay.pause(false);
+
+    let (mut dropped, mut reconnecting) = (false, false);
+    loop {
+        match session.next() {
+            SftpEvent::Disconnected(_) => dropped = true,
+            SftpEvent::Prompt(prompt) => session.answer_prompt(&prompt),
+            SftpEvent::Question(question) => panic!("unexpected question: {question:?}"),
+            SftpEvent::Progress(progress) => match progress.phase() {
+                TransferPhase::Reconnecting => reconnecting = true,
+                TransferPhase::Stopped => panic!("gave up: {:?}", progress.details()),
+                TransferPhase::Completed => break,
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    assert!(dropped && reconnecting, "the connection never dropped");
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("up.bin")).unwrap(),
+        "uploaded"
+    );
 }

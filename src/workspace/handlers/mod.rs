@@ -42,7 +42,7 @@ pub(super) use remote::bind_remote_actions;
 pub(super) use settings::bind_settings_actions;
 pub(super) use sftp::bind_sftp_actions;
 pub(super) use snippets::bind_snippets_actions;
-pub(super) use tabs::bind_tabs_actions;
+pub(super) use tabs::{SaveWait, bind_tabs_actions};
 pub(super) use terminal::bind_terminal_actions;
 pub(super) use vault::bind_vault_actions;
 pub(super) use window::bind_window_actions;

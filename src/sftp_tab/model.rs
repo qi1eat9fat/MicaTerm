@@ -150,8 +150,8 @@ impl FileEntry {
 }
 
 /// `directory` 里叫 `name` 的项目在哪，按它那一侧的路径规则。
-pub fn child_path(directory: &str, name: &str, remote: bool) -> String {
-    if remote {
+pub fn child_path(directory: &str, name: &str, side: CardSide) -> String {
+    if side.is_remote() {
         format!("{}/{name}", directory.trim_end_matches('/'))
     } else {
         std::path::Path::new(directory)
@@ -162,12 +162,12 @@ pub fn child_path(directory: &str, name: &str, remote: bool) -> String {
 }
 
 /// 输入的目录按卡片解析：`~` 是主目录，相对路径从 `current` 算起，去掉末尾的分隔符。
-pub fn expand_path(text: &str, current: &str, home: &str, remote: bool) -> String {
+pub fn expand_path(text: &str, current: &str, home: &str, side: CardSide) -> String {
     let joined = if text == "~" {
         home.to_string()
     } else if let Some(rest) = text.strip_prefix("~/") {
         format!("{}/{rest}", home.trim_end_matches('/'))
-    } else if remote {
+    } else if side.is_remote() {
         if text.starts_with('/') {
             text.to_string()
         } else {
@@ -179,7 +179,7 @@ pub fn expand_path(text: &str, current: &str, home: &str, remote: bool) -> Strin
             .to_string_lossy()
             .into_owned()
     };
-    if remote {
+    if side.is_remote() {
         match joined.trim_end_matches('/') {
             "" => "/".into(),
             trimmed => trimmed.into(),
@@ -205,12 +205,12 @@ pub fn reported_directory(directory: &str) -> String {
 }
 
 /// 从根到 `path` 的每一级目录，`(名字, 路径)`。根的名字就是根自己（`/`、`C:\`）。
-pub fn path_ancestors(path: &str, remote: bool) -> Vec<(String, String)> {
+pub fn path_ancestors(path: &str, side: CardSide) -> Vec<(String, String)> {
     if path.is_empty() {
         return Vec::new();
     }
     let mut chain = Vec::new();
-    if remote {
+    if side.is_remote() {
         let Ok(mut current) = RemotePath::new(path) else {
             return chain;
         };
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn ancestors_run_from_the_root_down() {
         assert_eq!(
-            path_ancestors("/home/tester/目录", true),
+            path_ancestors("/home/tester/目录", CardSide::Remote),
             [
                 ("/".to_string(), "/".to_string()),
                 ("home".into(), "/home".into()),
@@ -410,15 +410,15 @@ mod tests {
             ]
         );
         assert_eq!(
-            path_ancestors("/", true),
+            path_ancestors("/", CardSide::Remote),
             [("/".to_string(), "/".to_string())]
         );
-        assert!(path_ancestors("", true).is_empty());
+        assert!(path_ancestors("", CardSide::Remote).is_empty());
     }
 
     #[test]
     fn typed_paths_resolve_against_the_card() {
-        let expand = |text| expand_path(text, "/srv/app", "/home/me", true);
+        let expand = |text| expand_path(text, "/srv/app", "/home/me", CardSide::Remote);
         assert_eq!(expand("~"), "/home/me");
         assert_eq!(expand("~/logs/"), "/home/me/logs");
         assert_eq!(expand("releases"), "/srv/app/releases");
@@ -430,11 +430,11 @@ mod tests {
     #[test]
     fn a_typed_drive_changes_drive() {
         assert_eq!(
-            expand_path(r"D:\", r"C:\Users\Qi", r"C:\Users\Qi", false),
+            expand_path(r"D:\", r"C:\Users\Qi", r"C:\Users\Qi", CardSide::Local),
             r"D:\"
         );
         assert_eq!(
-            expand_path("Downloads", r"C:\Users\Qi", r"C:\Users\Qi", false),
+            expand_path("Downloads", r"C:\Users\Qi", r"C:\Users\Qi", CardSide::Local),
             r"C:\Users\Qi\Downloads"
         );
     }

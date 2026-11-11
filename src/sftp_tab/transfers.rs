@@ -1,5 +1,6 @@
+// 参考 since2006/shell-rs @ b2a307a: src/explorer/explorer_panel.rs 改写
 //! 传输：把确认框、问题框和队列串起来。框的内容在 `transfer_dialog`，队列卡片在 `queue_card`，
-//! 排队的记账在 `transfer_queue`。上游参考 shell-rs 的 `src/explorer/explorer_panel.rs`。
+//! 排队的记账在 `transfer_queue`。
 //!
 //! 引擎一次跑一批（一批内的并发数是设置里的 `parallel`，`settings::apply` 设给引擎），标签把下一批交给它；
 //! 引擎说 `Idle` 才能交下一批。停着的一批占着队头，等「继续」「移出队列」或「丢弃续传进度」。
@@ -13,7 +14,7 @@ use gpui_kit::*;
 use super::transfer_dialog::{
     TransferForm, TransferSources, choice_of, open_form_dialog, question_choice,
 };
-use super::{ConnectionState, QueueState, Removal, SftpTab, TransferJob, TransferQueue};
+use super::{CardSide, ConnectionState, QueueState, Removal, SftpTab, TransferJob, TransferQueue};
 use crate::app::{SftpAction, SftpDispatch as _, SftpTabCommand};
 use crate::backend::sftp::{
     DownloadRequest, RemotePath, SftpCommand, TransferAnswer, TransferDirection, TransferPhase,
@@ -156,7 +157,11 @@ impl SftpTab {
         }
         if let Some(direction) = finished {
             // 刷新传到的那一侧。
-            self.reload(direction == TransferDirection::Upload, window, cx);
+            self.reload(
+                CardSide::from_remote(direction == TransferDirection::Upload),
+                window,
+                cx,
+            );
             let (done, skipped, failed) = summary;
             if skipped + failed > 0 {
                 let message = t!(
@@ -244,13 +249,13 @@ impl SftpTab {
     /// F5：问要不要上传本地选中的，或者下载远程选中的，目标是另一侧的当前目录。
     pub(super) fn open_transfer(
         &mut self,
-        remote: bool,
+        side: CardSide,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let target = self.card(!remote).read(cx).path();
-        if remote {
-            let card = self.card(true).read(cx);
+        let target = self.card(side.other()).read(cx).path();
+        if side.is_remote() {
+            let card = self.card(side).read(cx);
             let paths = card
                 .selected_entries(cx)
                 .iter()
@@ -259,7 +264,7 @@ impl SftpTab {
                 .collect();
             self.open_download(paths, target, window, cx);
         } else {
-            let paths = self.card(false).read(cx).upload_sources(cx);
+            let paths = self.card(side).read(cx).upload_sources(cx);
             self.open_upload(paths, target, window, cx);
         }
     }
@@ -276,7 +281,7 @@ impl SftpTab {
             return;
         }
         let sources = self.transfer_sources(
-            false,
+            CardSide::Local,
             paths.iter().map(|path| path.to_string_lossy().into_owned()),
             cx,
         );
@@ -298,7 +303,7 @@ impl SftpTab {
         if paths.is_empty() {
             return;
         }
-        let sources = self.transfer_sources(true, paths.iter().cloned(), cx);
+        let sources = self.transfer_sources(CardSide::Remote, paths.iter().cloned(), cx);
         let job = move |target| TransferJob::Download {
             paths: paths.clone(),
             target,
@@ -360,11 +365,11 @@ impl SftpTab {
     /// （从资源管理器拖来的、选择框挑的）看磁盘。
     fn transfer_sources(
         &self,
-        remote: bool,
+        side: CardSide,
         paths: impl Iterator<Item = String>,
         cx: &App,
     ) -> TransferSources {
-        let card = self.card(remote).read(cx);
+        let card = self.card(side).read(cx);
         let listed: std::collections::HashMap<String, bool> = card
             .listed_entries(cx)
             .iter()
@@ -377,8 +382,8 @@ impl SftpTab {
                     let is_dir = listed
                         .get(&path)
                         .copied()
-                        .unwrap_or_else(|| !remote && Path::new(&path).is_dir());
-                    (path, remote, is_dir)
+                        .unwrap_or_else(|| !side.is_remote() && Path::new(&path).is_dir());
+                    (path, side, is_dir)
                 })
                 .collect(),
         )
@@ -396,7 +401,7 @@ impl SftpTab {
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = choice.await {
                 let _ = this.update_in(cx, |this, window, cx| {
-                    let target = this.card(true).read(cx).path();
+                    let target = this.card(CardSide::Remote).read(cx).path();
                     this.open_upload(paths, target, window, cx);
                 });
             }
