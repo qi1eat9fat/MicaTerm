@@ -860,20 +860,29 @@ mod tests {
         );
     }
 
-    // 抓自真机的会话（工单 28）：WSL 里各发行版默认配置的 sshd，客户端 `TERM=xterm-256color`，
+    // 抓自真机的字节流（工单 28）：WSL 里各发行版的默认配置，`TERM=xterm-256color`、80×24，
     // 依次敲 `cd /etc`、`mkdir -p ~/src/a\ b && cd ~/src/a\ b`、`cd ~`、`sleep 1`、
     // `sudo -n true; FOO=1 ls -d /tmp`、`vim x.txt`（里面 `:verbose set title?`、`:q!`）、`vi y.txt`
     // （同样）、`exit`。从第一个提示符截到 `exit`；主机名换成 web-01，机器 ID、启动 ID、上下文 ID 换成假的。
+    // 普通用户的 bash 和 Ubuntu 的 oh-my-zsh 经 sshd 登录抓；root 和 Debian、Rocky 的 oh-my-zsh 在 pty 里
+    // 起 login shell 抓（`script`，环境照 sshd 给：`SSH_CLIENT`、`SSH_CONNECTION`、`SSH_TTY`）。
+    // 两种抓法抓 Ubuntu 普通用户的 bash 和 oh-my-zsh，字节完全一样。
     /// Ubuntu 26.04（systemd 259）的 bash，普通用户：OSC 3008 加 `user@host: 目录` 标题。
     const UBUNTU_BASH: &[u8] = include_bytes!("../testdata/remote/ubuntu-26.04-bash.bin");
+    /// Ubuntu 26.04 的 root：和普通用户一样，OSC 3008 加 `root@host: 目录` 标题。
+    const UBUNTU_ROOT_BASH: &[u8] = include_bytes!("../testdata/remote/ubuntu-26.04-root-bash.bin");
     /// Debian 13（systemd 257）的 bash，普通用户：只有 `user@host: 目录` 标题。
     const DEBIAN_BASH: &[u8] = include_bytes!("../testdata/remote/debian-13-bash.bin");
     /// Debian 13 的 root：什么都不发。
     const DEBIAN_ROOT_BASH: &[u8] = include_bytes!("../testdata/remote/debian-13-root-bash.bin");
     /// Rocky Linux 9（systemd 252）的 bash：`user@host:目录` 标题（冒号后没有空格）。
     const ROCKY_BASH: &[u8] = include_bytes!("../testdata/remote/rocky-9-bash.bin");
-    /// Ubuntu 26.04 上的 zsh 加 oh-my-zsh 默认配置：提示符下 `user@host:目录`，命令运行时是整行命令。
+    /// Rocky Linux 9 的 root：和普通用户一样，`root@host:目录` 标题。
+    const ROCKY_ROOT_BASH: &[u8] = include_bytes!("../testdata/remote/rocky-9-root-bash.bin");
+    /// zsh 加 oh-my-zsh 默认配置：提示符下 `user@host:目录`，命令运行时是整行命令。
     const OH_MY_ZSH: &[u8] = include_bytes!("../testdata/remote/ubuntu-26.04-oh-my-zsh.bin");
+    const DEBIAN_OH_MY_ZSH: &[u8] = include_bytes!("../testdata/remote/debian-13-oh-my-zsh.bin");
+    const ROCKY_OH_MY_ZSH: &[u8] = include_bytes!("../testdata/remote/rocky-9-oh-my-zsh.bin");
 
     /// 卡片在某一刻看到的。
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -883,11 +892,11 @@ mod tests {
         running: bool,
     }
 
-    /// 一个字节一个字节地喂一段会话（`uname -n` 是 web-01），记下卡片看到的每次变化。
-    fn replay(session: &[u8]) -> Vec<Seen> {
+    /// 一个字节一个字节地喂一段抓来的字节流（`uname -n` 是 web-01），记下卡片看到的每次变化。
+    fn replay(stream: &[u8]) -> Vec<Seen> {
         let mut remote = Remote::on(Some("web-01"));
         let mut seen: Vec<Seen> = Vec::new();
-        for byte in session {
+        for byte in stream {
             remote.feed(std::slice::from_ref(byte));
             let now = Seen {
                 program: remote.program().map(str::to_string),
@@ -918,22 +927,33 @@ mod tests {
 
     #[test]
     fn ubuntu_bash_reports_its_folder_by_osc_3008() {
-        let seen = replay(UBUNTU_BASH);
-        // 3008 的 `cwd=` 是绝对路径（标题里的 `~` 用不上），目录里的空格原样保留。
-        assert_eq!(
-            directories(&seen),
-            ["/home/qtest", "/etc", "/home/qtest/src/a b", "/home/qtest"]
-        );
-        // 3008 只说有命令在跑，不说是什么；vim 的 `'title'` 默认关着，标题一直是提示符设的。
-        assert_eq!(programs(&seen), Vec::<&str>::new());
-        assert!(seen.iter().any(|s| s.running));
-        assert!(!seen.last().unwrap().running);
+        for (stream, home, name) in [
+            (UBUNTU_BASH, "/home/qtest", "user"),
+            (UBUNTU_ROOT_BASH, "/root", "root"),
+        ] {
+            let seen = replay(stream);
+            // 3008 的 `cwd=` 是绝对路径（标题里的 `~` 用不上），目录里的空格原样保留。
+            let in_src = format!("{home}/src/a b");
+            assert_eq!(
+                directories(&seen),
+                [home, "/etc", in_src.as_str(), home],
+                "{name}"
+            );
+            // 3008 只说有命令在跑，不说是什么；vim 的 `'title'` 默认关着，标题一直是提示符设的。
+            assert_eq!(programs(&seen), Vec::<&str>::new(), "{name}");
+            assert!(seen.iter().any(|s| s.running), "{name}");
+            assert!(!seen.last().unwrap().running, "{name}");
+        }
     }
 
     #[test]
     fn debian_and_rocky_bash_titles_give_the_folder_for_show() {
-        for (session, name) in [(DEBIAN_BASH, "Debian"), (ROCKY_BASH, "Rocky")] {
-            let seen = replay(session);
+        for (stream, name) in [
+            (DEBIAN_BASH, "Debian"),
+            (ROCKY_BASH, "Rocky"),
+            (ROCKY_ROOT_BASH, "Rocky root"),
+        ] {
+            let seen = replay(stream);
             assert_eq!(
                 directories(&seen),
                 ["~", "/etc", "~/src/a b", "~"],
@@ -955,13 +975,25 @@ mod tests {
 
     #[test]
     fn oh_my_zsh_titles_give_each_command_and_the_folder() {
-        let seen = replay(OH_MY_ZSH);
-        assert_eq!(directories(&seen), ["~", "/etc", "~/src/a b", "~"]);
-        // 标题是整行命令（别名展开过），取第一个真正的命令；`;` 粘在词尾也认得出。
-        assert_eq!(
-            programs(&seen),
-            ["cd", "mkdir", "cd", "sleep", "true", "vim", "vi", "exit"]
-        );
+        // 三个发行版上一样：oh-my-zsh 在 SSH 登录里不发 OSC 7，只靠标题。
+        for (stream, name) in [
+            (OH_MY_ZSH, "Ubuntu"),
+            (DEBIAN_OH_MY_ZSH, "Debian"),
+            (ROCKY_OH_MY_ZSH, "Rocky"),
+        ] {
+            let seen = replay(stream);
+            assert_eq!(
+                directories(&seen),
+                ["~", "/etc", "~/src/a b", "~"],
+                "{name}"
+            );
+            // 标题是整行命令（别名展开过），取第一个真正的命令；`;` 粘在词尾也认得出。
+            assert_eq!(
+                programs(&seen),
+                ["cd", "mkdir", "cd", "sleep", "true", "vim", "vi", "exit"],
+                "{name}"
+            );
+        }
     }
 
     #[test]
