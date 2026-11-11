@@ -266,7 +266,7 @@ impl Workspace {
         cx.notify();
     }
 
-    /// 把标签加在最后、放到前面，焦点给它的焦点卡片。
+    /// 把标签加在最后、放到前面，焦点给它的焦点卡片（对话框开着时等它关了再给）。
     pub(in crate::workspace) fn open_tab(
         &mut self,
         tab: Tab,
@@ -275,7 +275,8 @@ impl Workspace {
     ) -> TabId {
         let focus = tab.focus_handle(cx);
         let id = self.tabs.push(tab);
-        window.focus(&focus, cx);
+        // 问答框、解锁框开着时不抢它们的焦点，框关了再给（工单 32）。
+        crate::ui::focus_after_dialogs(&focus, window, cx);
         cx.notify();
         id
     }

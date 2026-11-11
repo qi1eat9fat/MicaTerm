@@ -101,7 +101,8 @@ impl Workspace {
     }
 
     /// 用户答了解锁框（工单 33）：解开了（`unlocked`），等着的卡片各自在原地接着连；取消了，
-    /// 它们显示未连接、可以原地重连。关掉了、断开了的卡片不管。工单 32 在这里之后处理焦点。
+    /// 它们显示未连接、可以原地重连。关掉了、断开了的卡片不管。焦点不在这里动：解锁框开着时新开的
+    /// 卡片等框关了才拿焦点，连接接着弹的问答框也不被抢（工单 32，`ui::focus_after_dialogs`）。
     pub(in crate::workspace) fn vault_answered(
         &mut self,
         unlocked: bool,

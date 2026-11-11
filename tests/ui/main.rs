@@ -31,6 +31,7 @@
 //! - `preview`：预览（24）
 //! - `vault_waiting`：等待解锁保险库（33）
 //! - `probe`：系统探测可关、失败后自动停用（34）
+//! - `vault_prompt_focus`：解锁后不抢问答框的焦点（32）
 
 mod support;
 
@@ -59,5 +60,6 @@ mod tabs;
 mod terminal_card;
 mod terminal_input;
 mod vault;
+mod vault_prompt_focus;
 mod vault_waiting;
 mod window;

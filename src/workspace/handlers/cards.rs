@@ -12,6 +12,7 @@ use crate::app::{
 use crate::card::{CardEvent, CardId, TerminalCard};
 use crate::split::{Axis, Closed};
 use crate::tabs::{Tab, TabId, TerminalTab};
+use crate::ui::focus_after_dialogs;
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) fn bind_cards_actions(
@@ -220,7 +221,7 @@ impl Workspace {
         self.place_beside_focused_card(id, axis, card, window, cx);
     }
 
-    /// 把新卡片 `card` 放进标签 `tab`，在它焦点卡片的右边或下面，焦点给新卡片。
+    /// 把新卡片 `card` 放进标签 `tab`，在它焦点卡片的右边或下面，焦点给新卡片（对话框开着时等它关了再给）。
     /// 标签已经不在了（等解锁时关掉了）就关掉新卡片的 shell。
     pub(in crate::workspace) fn place_beside_focused_card(
         &mut self,
@@ -239,7 +240,8 @@ impl Workspace {
         if let Some(tab) = self.terminal_tab_mut(tab) {
             tab.split(axis, card, subscriptions, cx);
         }
-        window.focus(&focus, cx);
+        // 问答框、解锁框开着时不抢它们的焦点，框关了再给（工单 32）。
+        focus_after_dialogs(&focus, window, cx);
         cx.notify();
     }
 
