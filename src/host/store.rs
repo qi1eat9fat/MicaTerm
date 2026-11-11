@@ -103,6 +103,7 @@ impl HostStore {
         fn insert_snippet(draft: SnippetDraft) -> SnippetId;
         fn update_snippet(id: SnippetId, draft: SnippetDraft) -> bool;
         fn remove_snippet(id: SnippetId) -> bool;
+        fn set_host_probe(id: HostId, probe_os: bool) -> bool;
     }
 
     /// 复制一台主机，名字叫「<原名> 副本」，放在原主机后面。保险库里的密码按主机 id 存，

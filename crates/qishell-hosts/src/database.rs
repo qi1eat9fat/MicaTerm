@@ -37,7 +37,9 @@ fn from_sql(id: i64) -> u64 {
 /// QiShell 从 1 起步。以后改表要：升这个版本号，在 `migrate` 里加一步从上一个版本走过来的
 /// 迁移（一个事务，最后写新版本号），加测试；新列照 `a_column_added_later_matches_the_schema`
 /// 的规矩加在表的最后一列后面。
-pub const SCHEMA_VERSION: i64 = 1;
+///
+/// - 2（工单 34）：`hosts.probe_os`，登录后探不探测系统。
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// The whole schema, as a new database gets it.
 ///
@@ -60,6 +62,7 @@ pub const SCHEMA_VERSION: i64 = 1;
 ///     `proxy`, whose four columns are set exactly for a proxy route.
 ///   - `os` and `last_connected_at` are written by connections, not by the
 ///     host form.
+///   - `probe_os` 是登录后探不探测系统：主机表单写它，探测把连接弄断时连接也写它。
 /// - **host_jumps** lists a host's jump hosts in order. A deleted jump
 ///   host leaves its row behind with no `jump_id`, so the host fails to
 ///   connect rather than skip the hop.
@@ -93,6 +96,7 @@ CREATE TABLE hosts (
     notes             TEXT NOT NULL DEFAULT '',
     os                TEXT,
     last_connected_at INTEGER,
+    probe_os          INTEGER NOT NULL DEFAULT 1 CHECK (probe_os IN (0, 1)),
     CHECK ((auth = 'credential') = (credential_id IS NOT NULL)),
     CHECK ((auth = 'credential') = (username IS NULL)),
     CHECK ((route = 'proxy') = (proxy_kind IS NOT NULL)),
@@ -243,8 +247,8 @@ impl HostDatabase {
             .connection
             .prepare(
                 "SELECT id, sort_order, name, address, port, auth, username, credential_id, \
-                 route, proxy_kind, proxy_host, proxy_port, proxy_username, notes, os \
-                 FROM hosts ORDER BY sort_order, id",
+                 route, proxy_kind, proxy_host, proxy_port, proxy_username, notes, os, \
+                 probe_os FROM hosts ORDER BY sort_order, id",
             )?
             .query_map([], |row| {
                 let id: i64 = row.get(0)?;
@@ -261,6 +265,7 @@ impl HostDatabase {
                 let proxy_user: Option<String> = row.get(12)?;
                 let notes: String = row.get(13)?;
                 let os: Option<String> = row.get(14)?;
+                let probe_os: bool = row.get(15)?;
                 let mut host = Host::new(
                     HostId(from_sql(id)),
                     HostDraft::new(
@@ -270,7 +275,8 @@ impl HostDatabase {
                         user.unwrap_or_default(),
                         AuthKind::from_stored(&auth),
                     )
-                    .with_notes(notes),
+                    .with_notes(notes)
+                    .with_probe_os(probe_os),
                 );
                 host.sort_order = row.get(1)?;
                 host.credential = credential.map(|id| CredentialId(from_sql(id)));
@@ -389,8 +395,8 @@ impl HostDatabase {
             connection.execute(
                 "INSERT INTO hosts (id, sort_order, name, address, port, auth, username, \
                  credential_id, route, proxy_kind, proxy_host, proxy_port, proxy_username, \
-                 notes, os) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                 notes, os, probe_os) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
                     to_sql(host.id.0),
                     host.sort_order,
@@ -407,6 +413,7 @@ impl HostDatabase {
                     row.proxy_username,
                     host.notes.as_ref(),
                     host.os.map(HostOs::as_str),
+                    host.probe_os,
                 ],
             )?;
             write_jumps(connection, host)
@@ -423,8 +430,8 @@ impl HostDatabase {
             connection.execute(
                 "UPDATE hosts SET sort_order = ?2, name = ?3, address = ?4, port = ?5, \
                  auth = ?6, username = ?7, credential_id = ?8, route = ?9, proxy_kind = ?10, \
-                 proxy_host = ?11, proxy_port = ?12, proxy_username = ?13, notes = ?14 \
-                 WHERE id = ?1",
+                 proxy_host = ?11, proxy_port = ?12, proxy_username = ?13, notes = ?14, \
+                 probe_os = ?15 WHERE id = ?1",
                 params![
                     to_sql(host.id.0),
                     host.sort_order,
@@ -440,6 +447,7 @@ impl HostDatabase {
                     row.proxy_port,
                     row.proxy_username,
                     host.notes.as_ref(),
+                    host.probe_os,
                 ],
             )?;
             write_jumps(connection, host)
@@ -562,6 +570,15 @@ impl HostDatabase {
         Ok(())
     }
 
+    /// 记下登录后探不探测系统（探测把连接弄断时自动关掉，工单 34）。
+    pub fn set_host_probe(&self, id: HostId, probe_os: bool) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "UPDATE hosts SET probe_os = ?2 WHERE id = ?1",
+            params![to_sql(id.0), probe_os],
+        )?;
+        Ok(())
+    }
+
     /// Record that a host just connected, which is what orders the start
     /// card's recent list across launches.
     pub fn touch_connected(&self, id: HostId, at: u64) -> rusqlite::Result<()> {
@@ -639,7 +656,7 @@ fn write_jumps(connection: &Connection, host: &Host) -> rusqlite::Result<()> {
 /// what the newer version saved. That happens after going back to an older
 /// version by hand, the one way an update can be undone.
 ///
-/// v1 之后的第一次改表在这里加上从 1 走到 2 的那一步。
+/// 旧文件一个版本一个版本地走上来，每一步一个事务，最后写新的版本号。
 fn migrate(connection: &Connection) -> Result<(), OpenError> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version == 0 {
@@ -653,6 +670,16 @@ fn migrate(connection: &Connection) -> Result<(), OpenError> {
             version,
             supported: SCHEMA_VERSION,
         });
+    }
+    if version < 2 {
+        // 工单 34：登录后探不探测系统，升级前的主机照旧探测。
+        connection.execute_batch(
+            "BEGIN;
+             ALTER TABLE hosts ADD COLUMN
+                 probe_os INTEGER NOT NULL DEFAULT 1 CHECK (probe_os IN (0, 1));
+             PRAGMA user_version = 2;
+             COMMIT;",
+        )?;
     }
     Ok(())
 }
@@ -693,9 +720,9 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_database_is_empty_and_at_schema_one() {
+    fn a_fresh_database_is_empty_and_at_the_current_schema() {
         let db = HostDatabase::in_memory().unwrap();
-        assert_eq!(SCHEMA_VERSION, 1);
+        assert_eq!(SCHEMA_VERSION, 2);
         assert_eq!(version_of(&db.connection), SCHEMA_VERSION);
         let data = db.load().unwrap();
         assert!(data.hosts.is_empty());
@@ -1162,6 +1189,56 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
 
         db.set_host_os(host.id, None).unwrap();
         assert_eq!(db.load().unwrap().hosts[0].os, None);
+    }
+
+    #[test]
+    fn whether_to_probe_the_system_is_kept_and_the_form_can_turn_it_back_on() {
+        let db = HostDatabase::in_memory().unwrap();
+        let bastion = host(1, "bastion");
+        db.insert_host(&bastion).unwrap();
+        assert!(db.load().unwrap().hosts[0].probe_os, "新主机默认探测");
+
+        // 探测把连接弄断了：连接这边记下不再探测，主机表单没开过。
+        db.set_host_probe(bastion.id, false).unwrap();
+        assert!(!db.load().unwrap().hosts[0].probe_os);
+
+        // 用户在主机对话框里重新打开。
+        let mut edited = bastion.clone();
+        edited.probe_os = true;
+        db.update_host(&edited).unwrap();
+        assert!(db.load().unwrap().hosts[0].probe_os);
+
+        // 新建时就关掉的也记得住。
+        let mut quiet = host(2, "quiet");
+        quiet.probe_os = false;
+        db.insert_host(&quiet).unwrap();
+        assert!(!db.load().unwrap().hosts[1].probe_os);
+    }
+
+    #[test]
+    fn a_schema_one_file_is_brought_to_two_and_its_hosts_still_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("qishell.db");
+        drop(HostDatabase::open(&path).unwrap());
+        // 做出一个 schema 1 的文件：v2 加的列去掉，版本号退回 1，里面有一台主机。
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(
+                "ALTER TABLE hosts DROP COLUMN probe_os;\n\
+                 INSERT INTO hosts (id, name, address, port, auth, username) \
+                 VALUES (1, 'web', '10.0.0.1', 22, 'password', 'root');\n\
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        }
+
+        let db = HostDatabase::open(&path).unwrap();
+        assert_eq!(version_of(&db.connection), SCHEMA_VERSION);
+        let hosts = db.load().unwrap().hosts;
+        assert_eq!(hosts[0].name.as_ref(), "web");
+        assert!(hosts[0].probe_os, "升级前的主机照旧探测");
+        let fresh = HostDatabase::in_memory().unwrap();
+        assert_eq!(schema_of(&db.connection), schema_of(&fresh.connection));
     }
 
     #[test]
