@@ -141,6 +141,8 @@ pub enum SftpTabCommand {
     DoubleClick {
         side: CardSide,
     },
+    /// 用原生的文件夹选择框挑要上传的文件夹（工单 35）。
+    ChooseFolder,
 }
 
 /// 发给 `tab` 的命令。

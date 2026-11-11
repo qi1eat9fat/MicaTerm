@@ -54,7 +54,7 @@ impl CardMenuState {
     }
 }
 
-/// 行上的右键：编辑 / 预览 / 下载… / 复制路径 / 删除 / 重命名… / 属性…。
+/// 行上的右键：编辑 / 预览 / 下载…（本地是上传… / 上传文件夹…） / 复制路径 / 删除 / 重命名… / 属性…。
 pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
     let side = state.side;
     let none = state.targets.is_empty() || !state.can_modify;
@@ -87,6 +87,8 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
         state.action(SftpTabCommand::Transfer { side }),
         state.targets.is_empty() || !state.can_transfer,
     )
+    // 本地文件上的「上传…」后面跟着「上传文件夹…」（工单 35）；远程一侧是下载，没有它。
+    .when(!side.is_remote(), |menu| upload_folder_item(menu, state))
     .menu_with_disabled(
         t!("sftp_tab.menu.copy_path"),
         state.action(SftpTabCommand::CopySelectedPaths { side }),
@@ -112,7 +114,7 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
     })
 }
 
-/// 空白处的右键：新建文件夹… / 新建文件… / 上传… / 刷新 / 上级目录 / 复制路径 / 显示隐藏文件。
+/// 空白处的右键：新建文件夹… / 新建文件… / 上传… / 上传文件夹… / 刷新 / 上级目录 / 复制路径 / 显示隐藏文件。
 pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
     let side = state.side;
     // 远程一侧的「上传…」用原生选择框挑；本地一侧传的是选中的，没选中不能点。
@@ -146,6 +148,7 @@ pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMen
         state.action(upload),
         upload_disabled,
     )
+    .map(|menu| upload_folder_item(menu, state))
     .separator()
     .menu(
         t!("sftp_tab.menu.refresh"),
@@ -168,9 +171,81 @@ pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMen
     )
 }
 
+/// 「上传文件夹…」：用原生的文件夹选择框挑，传到远程当前目录，不看选中的（工单 35）。
+fn upload_folder_item(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
+    menu.menu_with_disabled(
+        t!("sftp_tab.menu.upload_folder"),
+        state.action(SftpTabCommand::ChooseFolder),
+        !state.can_transfer,
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CardMenuState, CardSide};
+    use gpui_kit::component::Root;
+    use gpui_kit::component::menu::PopupMenu;
+    use gpui_kit::test::TestWindowExt as _;
+    use gpui_kit::{AppContext as _, TestAppContext};
+
+    use super::{CardMenuState, CardSide, directory_menu, item_menu};
+
+    /// 菜单里各项的文字，从上到下（分隔线不算）。菜单直接画在一个窗口里读：卡片上真的右键菜单
+    /// （gpui-component 的 `context_menu`）关掉以后还留着菜单的句柄，UI 测试结束时会报泄漏。
+    fn labels(
+        cx: &mut TestAppContext,
+        build: impl Fn(PopupMenu) -> PopupMenu + 'static,
+    ) -> Vec<String> {
+        let handle = cx.add_window(|window, cx| {
+            let menu = PopupMenu::build(window, cx, move |menu, _, _| build(menu));
+            Root::new(menu, window, cx)
+        });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let popup = window.within("popup-menu");
+            (0..20_usize)
+                .filter_map(|item| popup.try_find(item))
+                .filter_map(|item| item.label().map(str::to_owned))
+                .collect()
+        })
+        .unwrap()
+    }
+
+    fn on_side(side: CardSide, file: Option<&str>) -> CardMenuState {
+        CardMenuState {
+            side,
+            ..state_on(file)
+        }
+    }
+
+    /// 「上传文件夹…」紧跟在「上传…」后面。
+    fn offers_a_folder(labels: &[String]) -> bool {
+        labels
+            .windows(2)
+            .any(|pair| pair[0] == "上传…" && pair[1] == "上传文件夹…")
+    }
+
+    /// 工单 35：本地卡片空白处和文件上、远程卡片空白处都有「上传文件夹…」；远程文件上是下载，没有它。
+    #[gpui_kit::test]
+    fn the_upload_menus_offer_a_folder(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cases = [
+            (CardSide::Local, None, true),
+            (CardSide::Remote, None, true),
+            (CardSide::Local, Some("/p/a.txt"), true),
+            (CardSide::Remote, Some("/p/a.txt"), false),
+        ];
+        for (side, file, offered) in cases {
+            let state = on_side(side, file);
+            let labels = labels(cx, move |menu| {
+                if state.targets.is_empty() {
+                    directory_menu(menu, &state)
+                } else {
+                    item_menu(menu, &state)
+                }
+            });
+            assert_eq!(offers_a_folder(&labels), offered, "{side:?} {file:?}: {labels:?}");
+        }
+    }
 
     fn state_on(file: Option<&str>) -> CardMenuState {
         CardMenuState {
