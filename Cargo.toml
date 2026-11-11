@@ -71,6 +71,18 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dirs = "6"
 trash = "5"
 
+# Mica 背景只在 Windows 11 22H2 及以上开（工单 26）：读系统 build 号；
+# 窗口的深色模式属性跟着应用外观（Mica 的底色看它），要窗口句柄。
+# 和 gpui-pre-windows 用同一版、它已经打开的 feature，不多编译东西。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Wdk_System_SystemServices",
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_System_SystemInformation",
+] }
+raw-window-handle = "0.6"
+
 # Windows 可执行文件里的图标与版本信息（build.rs）。
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

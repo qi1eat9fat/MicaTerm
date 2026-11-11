@@ -9,6 +9,7 @@
 //! - `remote/`：远程卡片（工单 12）：按主机建卡片、开标签、原地重连，连接表事件的分发和问答队列，
 //!   连接前取秘密的钩子（13 接保险库解锁）。
 //! - `quick_connect`：快速连接弹层的开关、位置和焦点（工单 18）。
+//! - `window_state`：记住窗口大小和位置（`window.json`），和下次启动窗口开在哪（工单 26）。
 //!
 //! 功能模块不依赖窗口壳；窗口壳持有它们、转发 action。
 
@@ -23,6 +24,8 @@ mod start_card;
 mod title_bar;
 mod view;
 mod window_buttons;
+mod window_state;
 
 pub use right_sidebar::{FilesButton, RightPanel};
 pub use view::{Workspace, WorkspaceServices, window_options};
+pub use window_state::{WindowState, default_window_size, window_placement};

@@ -1,7 +1,7 @@
 //! 设置对话框（spec 第 9 节）：一个大对话框，左边分类导航，右边是选中那一类的设置，正文可以滚动。
 //! 改动立即写进设置存储（`SettingsStore`），窗口壳观察它、马上应用。
 //!
-//! 分类是一张表（`CATEGORIES`）：以后加「应用」，只要往表里加一项、加一个页面函数。
+//! 分类是一张表（`CATEGORIES`）：加一类只要往表里加一项、加一个页面函数。
 
 use std::path::PathBuf;
 
@@ -36,7 +36,7 @@ struct Category {
 type Page =
     fn(&SettingsDialog, &Tokens, &mut Window, &mut Context<SettingsDialog>) -> Vec<AnyElement>;
 
-/// 左栏的分类，按显示的顺序（原型 `SETNAV`）。之后的工单按 spec 加「应用」。
+/// 左栏的分类，按显示的顺序（原型 `SETNAV`）：外观、终端、SFTP、安全、应用（spec 第 9 节的五类）。
 const CATEGORIES: &[Category] = &[
     Category {
         title: "settings.category.appearance",
@@ -58,7 +58,21 @@ const CATEGORIES: &[Category] = &[
         icon: CatalogIcon::Shield,
         page: super::security::security,
     },
+    Category {
+        title: "settings.category.app",
+        icon: CatalogIcon::AppWindow,
+        page: super::app_page::app,
+    },
 ];
+
+/// 设置对话框要显示的几个文件夹。
+#[derive(Clone, Debug, Default)]
+pub struct SettingsDialogPaths {
+    /// 「下载」文件夹：本地默认打开目录留空时用它，这里只用来显示。
+    pub downloads: PathBuf,
+    /// 数据目录（设置 › 应用显示它）；`None` 是这次运行没有数据目录。
+    pub data_dir: Option<PathBuf>,
+}
 
 /// 设置对话框的内容。每次打开新建一个。
 pub struct SettingsDialog {
@@ -72,6 +86,8 @@ pub struct SettingsDialog {
     pub(super) terminal_line_height: Entity<InputState>,
     pub(super) local_shell: Entity<LocalShellEditor>,
     pub(super) local_directory: Entity<LocalDirectoryEditor>,
+    /// 数据目录，设置 › 应用显示它。
+    pub(super) data_dir: Option<PathBuf>,
     /// 对话框是哪一层：关闭按钮只关自己。
     layer: DialogLayer,
     focus_handle: FocusHandle,
@@ -80,13 +96,16 @@ pub struct SettingsDialog {
 }
 
 impl SettingsDialog {
-    /// `downloads` 是「下载」文件夹：本地默认打开目录留空时用它，这里只用来显示。
     pub fn new(
         store: Entity<SettingsStore>,
-        downloads: PathBuf,
+        paths: SettingsDialogPaths,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let SettingsDialogPaths {
+            downloads,
+            data_dir,
+        } = paths;
         let local_shell = cx.new(|cx| LocalShellEditor::new(store.clone(), window, cx));
         let local_directory =
             cx.new(|cx| LocalDirectoryEditor::new(store.clone(), downloads, window, cx));
@@ -121,6 +140,7 @@ impl SettingsDialog {
             terminal_line_height,
             local_shell,
             local_directory,
+            data_dir,
             layer: DialogLayer::new(),
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
@@ -296,11 +316,11 @@ fn navigation(
 /// 打开设置对话框。对话框不点遮罩关闭，用右上角的按钮或 Esc 关。
 pub fn open_settings_dialog(
     store: Entity<SettingsStore>,
-    downloads: PathBuf,
+    paths: SettingsDialogPaths,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let view = cx.new(|cx| SettingsDialog::new(store, downloads, window, cx));
+    let view = cx.new(|cx| SettingsDialog::new(store, paths, window, cx));
     let layer = view.read(cx).layer.clone();
     layer.open(
         move |dialog, window, _| {

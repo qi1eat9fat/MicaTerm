@@ -91,6 +91,8 @@ pub fn fake_services() -> WorkspaceServices {
         sftp: Arc::new(FakeSftpProvider::default()),
         local_files: Arc::new(FakeLocalDirectory::default()),
         sftp_problem: None,
+        // 没有数据目录：不记窗口的大小和位置（工单 26 的测试给临时目录）。
+        data_dir: None,
     }
 }
 

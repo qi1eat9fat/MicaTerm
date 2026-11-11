@@ -111,3 +111,31 @@ settings.sftp.show_hidden_description:
   zh-CN: 名称以 . 开头的文件和目录
 settings.sftp.show_hidden_remote:
   zh-CN: 显示隐藏文件 · 远程
+settings.appearance.mica:
+  zh-CN: Mica 背景
+settings.appearance.mica_description:
+  zh-CN: 只在 Windows 11 22H2 及以上可用；关闭时用不透明的渐变背景
+settings.category.app:
+  zh-CN: 应用
+settings.app.window:
+  zh-CN: 窗口
+settings.app.remember_window:
+  zh-CN: 记住窗口大小和位置
+settings.app.remember_window_description:
+  zh-CN: 下次启动放回上次的大小、位置和最大化状态
+settings.app.data:
+  zh-CN: 数据
+settings.app.data_dir:
+  zh-CN: 数据目录
+settings.app.data_dir_contents:
+  zh-CN: 数据库、vault.json、known_hosts、settings.json 都在这里；拷走它就带走全部配置
+settings.app.no_data_dir:
+  zh-CN: 这次运行没有数据目录，改动不会保存
+settings.app.open_data_dir:
+  zh-CN: 打开文件夹
+settings.app.about:
+  zh-CN: 关于
+settings.app.about_description:
+  zh-CN: GPL-3.0 · 部分代码来自 shell-rs（MIT）
+settings.app.license:
+  zh-CN: 许可证

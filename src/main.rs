@@ -14,7 +14,12 @@ fn main() {
         qishell::init(cx);
         cx.activate(true);
 
-        let options = qishell::workspace::window_options(cx);
+        // 窗口开在上次的地方（设置 › 应用 › 记住窗口大小和位置）。
+        let saved = qishell::app::data_dir().ok().and_then(|dir| {
+            qishell::workspace::WindowState::load(&dir.join(qishell::app::WINDOW_STATE_FILE))
+        });
+        let options =
+            qishell::workspace::window_options(saved.as_ref(), settings.settings().window, cx);
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
                 window.activate_window();
@@ -30,7 +35,8 @@ fn main() {
                 if let Some(problem) = problem {
                     notify_once_open(Notification::error(problem.message()), window, cx);
                 }
-                cx.new(|cx| Root::new(workspace, window, cx))
+                // `Root` 自己不画底色：窗口壳的根节点画渐变，开了 Mica 时要透出去（工单 26）。
+                cx.new(|cx| Root::new(workspace, window, cx).bg(transparent_black()))
             })
             .expect("failed to open window");
         })

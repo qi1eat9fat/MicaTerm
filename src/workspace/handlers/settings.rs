@@ -4,7 +4,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 
 use crate::app::OpenSettings;
-use crate::settings::open_settings_dialog;
+use crate::settings::{SettingsDialogPaths, open_settings_dialog};
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) fn bind_settings_actions(
@@ -20,7 +20,10 @@ impl Workspace {
         if window.has_active_dialog(cx) {
             return;
         }
-        let downloads = self.services.local_files.downloads();
-        open_settings_dialog(self.settings.clone(), downloads, window, cx);
+        let paths = SettingsDialogPaths {
+            downloads: self.services.local_files.downloads(),
+            data_dir: self.services.data_dir.clone(),
+        };
+        open_settings_dialog(self.settings.clone(), paths, window, cx);
     }
 }
