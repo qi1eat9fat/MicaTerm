@@ -6,12 +6,15 @@
 //!
 //! 扩展点：
 //! - 工单 16（分屏复用连接）：`connection()` 是卡片所在的连接，分屏时据此复用；
+//! - 工单 33（等待解锁保险库）：`VaultHold` 是卡片在等保险库（`Waiting`）还是用户没解锁（`Declined`），
+//!   它压过终端的生命周期决定 `RemoteState`；`connecting_line` 是卡片正文里的「正在连接 …（经 …）」；
 //! - 工单 17（被动解析）：终端 crate 的 `ShellActivity` 把远程报告的目录、命令、窗口标题和
 //!   全屏状态合起来（优先级、主机名核对都在那里），结果放进 `RemoteActivity`；拿不到程序名时
 //!   图块用 `badge`。SFTP 标签和分屏回到原目录用 `RemoteActivity::start_directory`。
 
 use gpui_kit::SharedString;
 use qishell_hosts::{Host, HostOs, mark_color};
+use qishell_ssh::{JumpLogin, LoginRoute, ProxyKind};
 use qishell_terminal::{
     ReportedDirectory, SharedTerminalTransportFactory, ShellActivity, ShellCommand,
     TerminalLifecycle,
@@ -75,6 +78,17 @@ pub enum RemoteState {
     Connected,
     /// 断开了，带原因。
     Disconnected(SharedString),
+    /// 连接要用保险库里的秘密，保险库锁着：卡片建好了，等用户解锁再连（工单 33）。
+    WaitingForVault,
+}
+
+/// 远程卡片因为保险库停着没连（工单 33）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VaultHold {
+    /// 在等用户解锁：解开了在这张卡片里接着连。
+    Waiting,
+    /// 用户取消了解锁：卡片显示未连接，原地重连会再请用户解锁。
+    Declined,
 }
 
 pub(super) struct RemoteCard {
@@ -88,6 +102,8 @@ pub(super) struct RemoteCard {
     shell: ShellActivity,
     /// 用户点了「断开连接」：断开的原因就是它，不是 shell 退出。
     stopped: bool,
+    /// 因为保险库停着没连（工单 33）；`None` 是照常连。
+    vault_hold: Option<VaultHold>,
     /// 上次从 `shell` 取出的结果：变了才告诉窗口壳。
     pub(super) activity: RemoteActivity,
 }
@@ -103,6 +119,7 @@ impl RemoteCard {
             connection: None,
             shell: ShellActivity::default(),
             stopped: false,
+            vault_hold: None,
             activity: RemoteActivity::default(),
         }
     }
@@ -143,6 +160,7 @@ impl RemoteCard {
         self.shell = ShellActivity::default();
         self.activity = RemoteActivity::default();
         self.stopped = false;
+        self.vault_hold = None;
     }
 
     /// 这台主机不再探测系统（工单 34）：探测把连接弄断了。主机删了时重连按这里记着的来。
@@ -153,6 +171,15 @@ impl RemoteCard {
 
     pub(super) fn stopped(&mut self) {
         self.stopped = true;
+        self.vault_hold = None;
+    }
+
+    pub(super) fn vault_hold(&self) -> Option<VaultHold> {
+        self.vault_hold
+    }
+
+    pub(super) fn hold_for_vault(&mut self, hold: VaultHold) {
+        self.vault_hold = Some(hold);
     }
 
     /// 收下连接的事件；返回探测出的系统（窗口壳记进主机数据），其余是 `None`。
@@ -234,6 +261,14 @@ impl RemoteCard {
     }
 
     pub(super) fn state(&self, lifecycle: &TerminalLifecycle) -> RemoteState {
+        // 等保险库时终端是占位的，生命周期说明不了什么。
+        match self.vault_hold {
+            Some(VaultHold::Waiting) => return RemoteState::WaitingForVault,
+            Some(VaultHold::Declined) => {
+                return RemoteState::Disconnected(t!("card.remote.vault_not_unlocked"));
+            }
+            None => {}
+        }
         match lifecycle {
             TerminalLifecycle::Starting => RemoteState::Connecting,
             TerminalLifecycle::Running => RemoteState::Connected,
@@ -256,6 +291,19 @@ impl RemoteCard {
         format!("{}@{}:{}", login.user, login.host, login.port).into()
     }
 
+    /// 还没连上时卡片正文里的一行：「正在连接 user@地址:端口…」，走跳板或代理时加「（经 …）」。
+    pub(super) fn connecting_line(&self) -> SharedString {
+        let endpoint = self.endpoint();
+        match route_label(&self.target.login.route) {
+            Some(route) => t!(
+                "card.remote.connecting_via",
+                endpoint = endpoint,
+                route = route
+            ),
+            None => t!("card.remote.connecting_to", endpoint = endpoint),
+        }
+    }
+
     /// 状态栏上的延迟。
     pub(super) fn latency_label(&self) -> Option<SharedString> {
         self.latency.map(|latency| latency_label(latency).into())
@@ -273,6 +321,30 @@ impl RemoteCard {
     /// 底色按地址取（和主机栏的徽章一样）。
     pub(super) fn badge(&self) -> Program {
         host_badge(&self.host, self.os)
+    }
+}
+
+/// 路线怎么写：跳板写主机名（几台用「→」连起来，删掉了的不写），代理写类型和地址；直连是 `None`。
+fn route_label(route: &LoginRoute) -> Option<String> {
+    match route {
+        LoginRoute::Direct => None,
+        LoginRoute::Jump(jumps) => {
+            let names: Vec<&str> = jumps
+                .iter()
+                .filter_map(|jump| match jump {
+                    JumpLogin::Host { name, .. } => Some(name.as_str()),
+                    JumpLogin::Deleted => None,
+                })
+                .collect();
+            (!names.is_empty()).then(|| names.join(" → "))
+        }
+        LoginRoute::Proxy(proxy) => {
+            let kind = match proxy.kind {
+                ProxyKind::Http => "HTTP",
+                ProxyKind::Socks5 => "SOCKS5",
+            };
+            Some(format!("{kind} {}:{}", proxy.host, proxy.port))
+        }
     }
 }
 
@@ -456,5 +528,69 @@ mod tests {
             RemoteState::Disconnected("已断开连接".into())
         );
         assert_eq!(card.endpoint().as_ref(), "ubuntu@10.0.1.21:22");
+    }
+
+    #[test]
+    fn waiting_for_the_vault_wins_over_the_placeholder_terminal_until_reconnected() {
+        let mut card = card(None);
+        card.hold_for_vault(VaultHold::Waiting);
+        assert_eq!(
+            card.state(&TerminalLifecycle::Starting),
+            RemoteState::WaitingForVault
+        );
+        card.hold_for_vault(VaultHold::Declined);
+        assert_eq!(
+            card.state(&TerminalLifecycle::Exited {
+                code: 0,
+                signal: None
+            }),
+            RemoteState::Disconnected("保险库没有解锁".into())
+        );
+        let (host, target) = (card.host().clone(), card.target().clone());
+        card.reconnecting(host, target);
+        assert_eq!(card.vault_hold(), None);
+        assert_eq!(
+            card.state(&TerminalLifecycle::Starting),
+            RemoteState::Connecting
+        );
+    }
+
+    #[test]
+    fn the_connecting_line_names_the_jump_hosts_or_the_proxy() {
+        use qishell_ssh::ProxyLogin;
+
+        let mut card = card(None);
+        assert_eq!(
+            card.connecting_line().as_ref(),
+            "正在连接 ubuntu@10.0.1.21:22…"
+        );
+        let jump = |name: &str| JumpLogin::Host {
+            name: name.into(),
+            login: Box::new(HostLogin::new(
+                "10.0.0.1",
+                22,
+                "root",
+                qishell_ssh::LoginMethod::Agent,
+            )),
+        };
+        card.target.login.route = LoginRoute::Jump(vec![
+            jump("jp-gateway"),
+            JumpLogin::Deleted,
+            jump("hk-bastion"),
+        ]);
+        assert_eq!(
+            card.connecting_line().as_ref(),
+            "正在连接 ubuntu@10.0.1.21:22（经 jp-gateway → hk-bastion）…"
+        );
+        card.target.login.route = LoginRoute::Proxy(ProxyLogin {
+            kind: ProxyKind::Socks5,
+            host: "127.0.0.1".into(),
+            port: 1080,
+            user: None,
+        });
+        assert_eq!(
+            card.connecting_line().as_ref(),
+            "正在连接 ubuntu@10.0.1.21:22（经 SOCKS5 127.0.0.1:1080）…"
+        );
     }
 }

@@ -29,6 +29,7 @@
 //! - `sftp_transfer`：传输（22）
 //! - `editor`：编辑器标签（23）
 //! - `preview`：预览（24）
+//! - `vault_waiting`：等待解锁保险库（33）
 //! - `probe`：系统探测可关、失败后自动停用（34）
 
 mod support;
@@ -58,4 +59,5 @@ mod tabs;
 mod terminal_card;
 mod terminal_input;
 mod vault;
+mod vault_waiting;
 mod window;

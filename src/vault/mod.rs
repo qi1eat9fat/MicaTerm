@@ -8,7 +8,8 @@
 //! - `confirm`：重置保险库的确认、「在另一台电脑上创建」的确认；
 //! - `field`：存在保险库里的一条秘密的输入框（[`SecretField`]），主机、代理、凭据的密码和口令共用；
 //! - `flows`：写秘密之前（[`before_saving_secret`]）和连接用秘密之前（[`before_using_secrets`]）
-//!   要弹哪个框；
+//!   要弹哪个框；远程卡片等保险库（工单 33）用 [`asks_before_retrying`] 和 [`unlock_before_connecting`]，
+//!   能知道用户是解开了还是取消了；
 //! - `login`：一次登录要用到哪些秘密（无密码和 Agent 登录不用）。
 //!
 //! 功能模块不依赖窗口壳：按钮派发 `crate::app` 的保险库 action，由窗口壳交给这里。
@@ -24,6 +25,7 @@ mod unlock;
 
 pub use confirm::open_reset_dialog;
 pub use field::{ReadSecret, SecretChange, SecretField, locked_away};
+pub use flows::{asks_before_retrying, unlock_before_connecting};
 pub use flows::{
     asks_before_saving, asks_before_using, before_saving_secret, before_using_secrets,
 };

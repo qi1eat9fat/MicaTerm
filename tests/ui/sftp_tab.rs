@@ -935,7 +935,7 @@ fn a_locked_vault_is_unlocked_first_even_though_the_card_reuses_its_connection(
     assert_eq!(fixture.sftp.connections(), 0);
     assert!(active_sftp(cx, &fixture).is_none());
 
-    // 取消了也接着开，现场问密码（和卡片一样）。
+    // 取消了也接着开，现场问密码（卡片不一样：取消了就不连，见工单 33）。
     in_frame(cx, fixture.handle, |window, cx| {
         window.click("vault-unlock-cancel", cx)
     });

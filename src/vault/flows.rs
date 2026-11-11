@@ -5,6 +5,9 @@
 //! - 连接用秘密之前（[`before_using_secrets`]）：只有这次登录要用的秘密真在保险库里时才弹：
 //!   锁着弹解锁小卡片（每次运行最多一次，取消过就不再自动弹）；打不开就问一次要不要重置。
 //!   不管怎么答都接着连接，拿不到的秘密由连接现场询问。
+//! - 远程卡片连接之前（[`unlock_before_connecting`]，工单 33）：弹的框一样，只是把「解开了还是取消了」
+//!   告诉调用方：取消了卡片就不连，显示未连接。原地重连一张取消过的卡片用 [`asks_before_retrying`]，
+//!   这次运行取消过也再弹。
 
 use gpui_kit::*;
 
@@ -38,6 +41,17 @@ pub fn asks_before_using(secrets: &[SecretRef], cx: &App) -> bool {
         Some(VaultStatus::KeyLost) => !vault.key_lost_asked(),
         _ => false,
     }
+}
+
+/// 和 [`asks_before_using`] 一样，只是保险库锁着时不管这次运行取消过没有都算要弹：用户在一张
+/// 因为没解锁而没连的卡片上重连，就是要再试一次（工单 33）。
+pub fn asks_before_retrying(secrets: &[SecretRef], cx: &App) -> bool {
+    let Some(vault) = VaultStore::global(cx) else {
+        return false;
+    };
+    let store = vault.read(cx);
+    let saved = secrets.iter().any(|secret| store.contains(secret));
+    (saved && store.is_locked()) || asks_before_using(secrets, cx)
 }
 
 /// 要往保险库里写一条秘密：保险库收得下了再调 `then`，用户取消就不调。没有保险库
@@ -94,12 +108,33 @@ pub fn before_using_secrets(
     cx: &mut App,
     then: impl FnOnce(&mut Window, &mut App) + 'static,
 ) {
-    let Some(vault) = VaultStore::global(cx) else {
-        then(window, cx);
-        return;
-    };
     if !asks_before_using(secrets, cx) {
         then(window, cx);
+        return;
+    }
+    unlock_before_connecting(host, secrets, window, cx, move |_, window, cx| {
+        then(window, cx)
+    });
+}
+
+/// 连接主机 `host` 要用 `secrets`（工单 33）：保险库锁着就弹解锁小卡片（这次运行取消过也弹），
+/// 解开了 `answer(true)`，取消了 `answer(false)`（记下取消过，之后的新连接不再自动弹）；
+/// 打不开就问一次要不要重置，不管怎么答都 `answer(true)`（拿不到的秘密由连接现场询问）。
+/// 不用弹（[`asks_before_retrying`] 为 false）时立刻 `answer(true)`：调用方在自己的实体里时
+/// 先用它判断，同步回调会重入。
+pub fn unlock_before_connecting(
+    host: &str,
+    secrets: &[SecretRef],
+    window: &mut Window,
+    cx: &mut App,
+    answer: impl FnOnce(bool, &mut Window, &mut App) + 'static,
+) {
+    let Some(vault) = VaultStore::global(cx) else {
+        answer(true, window, cx);
+        return;
+    };
+    if !asks_before_retrying(secrets, cx) {
+        answer(true, window, cx);
         return;
     }
     let store = vault.read(cx);
@@ -116,7 +151,7 @@ pub fn before_using_secrets(
                     if !unlocked {
                         declined.update(cx, |vault, _| vault.decline_unlock());
                     }
-                    then(window, cx);
+                    answer(unlocked, window, cx);
                 },
                 window,
                 cx,
@@ -124,10 +159,10 @@ pub fn before_using_secrets(
         }
         Some(VaultStatus::KeyLost) => {
             vault.update(cx, |vault, _| vault.ask_about_lost_key());
-            let reply = Reply::new(move |_, window, cx| then(window, cx));
+            let reply = Reply::new(move |_, window, cx| answer(true, window, cx));
             open_confirm_dialog(vault, Confirm::KeyLostConnecting, reply, window, cx);
         }
-        _ => then(window, cx),
+        _ => answer(true, window, cx),
     }
 }
 
