@@ -6,13 +6,12 @@ use std::rc::Rc;
 use gpui_kit::component::{
     Sizable as _,
     input::{InputEvent, InputState, NumberInput},
-    switch::Switch,
 };
 use gpui_kit::*;
 
 use qishell_terminal::TerminalFontPreview;
 
-use super::controls::{dropdown, group, row, section_title, segmented};
+use super::controls::{dropdown, group, row, section_title, segmented, setting_switch};
 use super::dialog::SettingsDialog;
 use super::terminal_themes::terminal_theme_grid;
 use super::{
@@ -88,16 +87,13 @@ pub(super) fn appearance(
     };
 
     // Mica 背景（工单 26）：系统不支持时开关照样能开，只是不起作用。
-    let mica = {
-        let store = store.clone();
-        Switch::new("mica")
-            .checked(settings.interface.mica)
-            .accessibility_label(t!("settings.appearance.mica"))
-            .on_click(move |checked: &bool, _, cx| {
-                let checked = *checked;
-                write(&store, cx, |settings| settings.interface.mica = checked)
-            })
-    };
+    let mica = setting_switch(
+        "mica",
+        t!("settings.appearance.mica"),
+        settings.interface.mica,
+        &store,
+        |settings, checked| settings.interface.mica = checked,
+    );
 
     vec![
         section_title(t!("settings.appearance.general"), None, tokens).into_any_element(),
@@ -220,18 +216,13 @@ pub(super) fn terminal(
         )
     };
 
-    let copy_on_select = {
-        let store = store.clone();
-        Switch::new("copy-on-select")
-            .checked(settings.terminal_interaction.copy_on_select)
-            .accessibility_label(t!("settings.terminal.copy_on_select"))
-            .on_click(move |checked: &bool, _, cx| {
-                let checked = *checked;
-                write(&store, cx, |settings| {
-                    settings.terminal_interaction.copy_on_select = checked
-                })
-            })
-    };
+    let copy_on_select = setting_switch(
+        "copy-on-select",
+        t!("settings.terminal.copy_on_select"),
+        settings.terminal_interaction.copy_on_select,
+        &store,
+        |settings, checked| settings.terminal_interaction.copy_on_select = checked,
+    );
 
     let right_click = {
         let store = store.clone();

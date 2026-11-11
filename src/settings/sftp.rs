@@ -12,14 +12,15 @@ use gpui_kit::component::{
     ActiveTheme as _, Sizable as _,
     button::Button,
     input::{Input, InputEvent, InputState},
-    switch::Switch,
 };
 use gpui_kit::*;
 
 use qishell_ssh::sftp::PARALLEL_TRANSFERS_RANGE;
 
 use super::SettingsStore;
-use super::controls::{dropdown, group, row, row_with_note, section_title, segmented};
+use super::controls::{
+    dropdown, group, row, row_with_note, section_title, segmented, setting_switch,
+};
 use super::dialog::SettingsDialog;
 use super::pages::write;
 use crate::i18n::t;
@@ -177,17 +178,16 @@ fn hidden_switch(
     checked: bool,
     store: &Entity<SettingsStore>,
 ) -> impl IntoElement {
-    let store = store.clone();
-    Switch::new(id)
-        .checked(checked)
-        .accessibility_label(label)
-        .on_click(move |checked: &bool, _, cx| {
-            let checked = *checked;
-            write(&store, cx, |settings| match side {
-                CardSide::Local => settings.sftp.show_hidden.local = checked,
-                CardSide::Remote => settings.sftp.show_hidden.remote = checked,
-            })
-        })
+    setting_switch(
+        id,
+        label,
+        checked,
+        store,
+        move |settings, checked| match side {
+            CardSide::Local => settings.sftp.show_hidden.local = checked,
+            CardSide::Remote => settings.sftp.show_hidden.remote = checked,
+        },
+    )
 }
 
 /// 本地默认打开目录：一个输入框（留空是「下载」文件夹，灰字显示它的路径），和「选择…」按钮。
