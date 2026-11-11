@@ -243,7 +243,11 @@ mod tests {
                     item_menu(menu, &state)
                 }
             });
-            assert_eq!(offers_a_folder(&labels), offered, "{side:?} {file:?}: {labels:?}");
+            assert_eq!(
+                offers_a_folder(&labels),
+                offered,
+                "{side:?} {file:?}: {labels:?}"
+            );
         }
     }
 
