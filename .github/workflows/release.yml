@@ -1,0 +1,123 @@
+# 发布：推送和 Cargo.toml 版本号一致的标签 `v<版本号>`。
+#
+#   windows  构建 release 版，检查不依赖 VC++ 运行库，打包便携版 zip 和 SHA-256
+#   release  只在推送标签时运行：创建 GitHub Release 并上传产物；
+#            版本号带预发布后缀（如 0.2.0-beta.1）时标为预发布
+#
+# 在 Actions 页面手动运行（workflow_dispatch）时只构建打包，产物作为 artifact
+# 上传，不创建 Release，用来试跑流程。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: version
+        name: 版本号
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 和 Cargo.toml 的版本号 $version 不一致"
+            exit 1
+          fi
+          case "$version" in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      # 工具链版本由 rust-toolchain.toml 固定。
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      # aws-lc-sys（russh 的加密后端）在 Windows 上要 NASM。
+      - uses: ilammy/setup-nasm@v1
+
+      - name: 构建
+        run: cargo build --release --locked --bin micaterm
+
+      # C 运行库靠 .cargo/config.toml 的 +crt-static 静态链接进程序；
+      # 要是哪天失效了，LTSC 版和没装 VC++ 运行库的系统就启动不了，这里拦下来。
+      - name: 不依赖 VC++ 运行库
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products * -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" |
+            Select-Object -First 1
+          if (-not $dumpbin) { Write-Error "找不到 dumpbin.exe"; exit 1 }
+          $dlls = @(& $dumpbin /nologo /dependents target\release\micaterm.exe |
+            ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' })
+          if ($LASTEXITCODE -ne 0 -or $dlls.Count -eq 0) { Write-Error "dumpbin 读不了 micaterm.exe"; exit 1 }
+          Write-Host "依赖的 DLL：$($dlls -join ', ')"
+          $runtime = @($dlls | Where-Object { $_ -match '^(vcruntime|msvcp|concrt|vccorlib|ucrtbased)' })
+          if ($runtime.Count -gt 0) {
+            Write-Error "micaterm.exe 依赖 $($runtime -join ', ')，Windows 不自带"
+            exit 1
+          }
+
+      # 便携版：程序和一个空的 data/ 放在压缩包根目录，数据目录就在程序旁边（ADR 0003）。
+      # 7-Zip 会保留空文件夹，Compress-Archive 会把它丢掉。
+      - name: 打包便携版
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $folder = Join-Path $env:RUNNER_TEMP "portable"
+          New-Item -ItemType Directory -Force -Path (Join-Path $folder "data") | Out-Null
+          Copy-Item "target\release\micaterm.exe" $folder
+          Copy-Item "LICENSE" (Join-Path $folder "LICENSE.txt")
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $name = "MicaTerm-$env:VERSION-windows-x86_64-portable.zip"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist\$name"
+          Push-Location $folder
+          7z a -tzip -mx=9 $zip micaterm.exe LICENSE.txt data
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii -NoNewline "$zip.sha256"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: windows
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: dist
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.windows.outputs.version }}
+          PRERELEASE: ${{ needs.windows.outputs.prerelease }}
+        run: |
+          flags=()
+          [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "MicaTerm $VERSION" \
+            --generate-notes \
+            "${flags[@]}"
