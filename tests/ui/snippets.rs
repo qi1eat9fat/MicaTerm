@@ -1,14 +1,14 @@
 //! 命令片段（工单 19）的 UI 测试：右侧栏的面板、搜索、单击输入或执行、悬停的 ⚡ / ▶、右键菜单、
 //! 片段对话框，以及发不出去时（全屏程序、没有终端）面板说为什么。本地终端一律用假传输。
-// 用例参考 since2006/shell-rs @ b2a307a: tests/ui/snippets.rs，按 QiShell 的元素 id 改写（没有分类）。
+// 用例参考 since2006/shell-rs @ b2a307a: tests/ui/snippets.rs，按 MicaTerm 的元素 id 改写（没有分类）。
 
 use std::time::Duration;
 
 use gpui_kit::{ClipboardItem, InputEvent as _, Modifiers, MouseMoveEvent, Window};
-use qishell::app::{EditSnippet, ShowSnippets};
-use qishell::host::{SnippetDraft, SnippetId};
-use qishell::workspace::RightPanel;
-use qishell_terminal::TerminalLifecycle;
+use micaterm::app::{EditSnippet, ShowSnippets};
+use micaterm::host::{SnippetDraft, SnippetId};
+use micaterm::workspace::RightPanel;
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -161,8 +161,8 @@ fn the_panel_opens_beside_the_focused_card_and_says_where_snippets_go(cx: &mut T
     );
     in_frame(cx, handle, |window, _| {
         let panel = window.find("snippets").bounds();
-        // 宽约 290，在卡片和右侧栏之间。
-        assert_eq!(panel.size.width, px(290.));
+        // 宽 280（26 号停靠面板），在卡片和右侧栏之间。
+        assert_eq!(panel.size.width, px(280.));
         assert!(window.find(("card", 1usize)).bounds().right() <= panel.left());
         assert!(panel.right() <= window.find("right-sidebar").bounds().left());
         assert_eq!(window.find("snippets-target").label(), Some("→ pwsh"));
@@ -254,7 +254,7 @@ fn the_button_shown_on_hover_always_runs(cx: &mut TestAppContext) {
         let run = window.find(("snippet-run", DOCKER));
         assert!(run.visible());
         // 只输入的片段显示 ▶，点击就执行的显示 ⚡。
-        assert_eq!(run.label(), Some("点击只输入"));
+        assert_eq!(run.label(), Some("直接执行（单击这一行只输入）"));
         assert!(!window.find(("snippet-run", DISK)).visible());
         window.click(("snippet-run", DOCKER), cx);
     });
@@ -266,7 +266,7 @@ fn the_button_shown_on_hover_always_runs(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find(("snippet-run", DISK)).label(),
-            Some("点击就执行")
+            Some("直接执行（单击这一行也会执行）")
         );
     });
 }

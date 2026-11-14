@@ -3,14 +3,30 @@ card.close:
   zh-CN: 关闭卡片
 card.local.title:
   zh-CN: 本地终端
-card.split_right:
-  zh-CN: 向右分屏
-card.split_down:
-  zh-CN: 向下分屏
 card.zoom:
   zh-CN: 放大卡片
 card.restore:
   zh-CN: 还原卡片
+card.move_to_new_tab:
+  zh-CN: 移到新标签
+card.split_right:
+  zh-CN: 向右分屏
+card.split_down:
+  zh-CN: 向下分屏
+card.picker.title:
+  zh-CN: 新卡片
+card.picker.hint:
+  zh-CN: 选择要打开的终端
+card.picker.cancel:
+  zh-CN: 取消
+card.picker.search:
+  zh-CN: 搜索主机
+card.picker.duplicate:
+  zh-CN: 再开一个 %{name}
+card.picker.reuse_connection:
+  zh-CN: 复用连接
+card.picker.same_directory:
+  zh-CN: 同一目录
 card.dot.busy:
   zh-CN: 有输出
 card.dot.attention:
@@ -21,8 +37,6 @@ card.remote.connected:
   zh-CN: 已连接
 card.remote.disconnected:
   zh-CN: 已断开
-card.remote.unknown_os:
-  zh-CN: 未探测
 card.remote.exited:
   zh-CN: shell 已退出（退出码 %{code}）
 card.remote.exited_signal:
@@ -31,11 +45,11 @@ card.remote.stopped:
   zh-CN: 已断开连接
 card.remote.ended:
   zh-CN: 连接已断开
-card.remote.ended_label:
-  zh-CN: 连接已断开 · %{reason} · Enter 重新连接 · Space 关闭
-card.remote.reconnect_hint:
+card.remote.ended_press:
+  zh-CN: 按
+card.remote.ended_reconnect:
   zh-CN: 重新连接
-card.remote.close_hint:
+card.remote.ended_close:
   zh-CN: 关闭
 card.menu.copy_ip:
   zh-CN: 复制 IP

@@ -5,7 +5,7 @@
 //!   （连接表在 backend）；`open_remote_card_as(host, target, ..)` 按给定的快照和登录建；
 //! - 分屏（工单 16）：`split_remote_card` 用源卡片的快照和登录（复用它的连接），`split_open_host`
 //!   是主机右键「在右侧 / 下方分屏打开」，都经 `place_beside_focused_card` 放进标签；
-//!   `open_cards_by_host` 是主机栏的绿色数字；
+//!   `open_cards_by_host` 是主机栏那一行的状态（绿点、转圈、红 ×）；
 //! - `connect_host(host, ..)`：在新标签里连接一台主机，工单 18 的快速连接、最近连接直接调它
 //!   （或派发 `ConnectHost`）；
 //! - `remote_target(host, ..)`：主机怎么连（含凭据和跳板、代理的路线，`HostData::login_of`），工单 15 不用改这里；
@@ -20,13 +20,13 @@ mod secrets;
 use std::collections::HashMap;
 
 use gpui_kit::*;
-use qishell_terminal::SharedTerminalTransportFactory;
+use micaterm_terminal::SharedTerminalTransportFactory;
 
 pub(in crate::workspace) use prompts::PromptQueue;
 
 use crate::backend::{RemoteEvent, RemoteTarget, RemoteTerminalId};
-use crate::card::{CardId, RemoteLaunch, RemoteUpdate, TerminalCard, VaultHold};
-use crate::host::{Host, HostId};
+use crate::card::{CardId, RemoteLaunch, RemoteState, RemoteUpdate, TerminalCard, VaultHold};
+use crate::host::{Host, HostCards, HostId, HostLink};
 use crate::split::Axis;
 use crate::tabs::{Tab, TabId, TerminalTab};
 use crate::workspace::Workspace;
@@ -107,22 +107,6 @@ impl Workspace {
         });
     }
 
-    /// 远程卡片连上了（每次重连都算）：记进最近连接，失败的连接不算。工单 18 的最近连接据此排序。
-    pub(in crate::workspace) fn on_remote_card_connected(
-        &mut self,
-        card: &Entity<TerminalCard>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(host) = card.read(cx).remote_host() else {
-            return;
-        };
-        self.hosts.update(cx, |store, cx| {
-            if store.host(host).is_some() {
-                store.record_connection(host, cx);
-            }
-        });
-    }
-
     /// 主机 `host` 怎么连：主机数据在 UI 线程上解析好的登录（凭据、跳板、代理）。
     pub(in crate::workspace) fn remote_target(&self, host: &Host, cx: &App) -> RemoteTarget {
         RemoteTarget::new(host.id.0, self.hosts.read(cx).login_of(host))
@@ -155,11 +139,9 @@ impl Workspace {
     ) -> Entity<TerminalCard> {
         let id = CardId(self.next_card_id);
         self.next_card_id += 1;
-        let focus = self.focus_handle.clone();
         if self.waits_for_vault(&target, false, cx) {
-            let card = cx.new(|cx| {
-                TerminalCard::remote_waiting_for_vault(id, host, target, focus, window, cx)
-            });
+            let card =
+                cx.new(|cx| TerminalCard::remote_waiting_for_vault(id, host, target, window, cx));
             self.watch_notices(&card, window, cx);
             self.wait_for_vault(window, cx);
             return card;
@@ -170,7 +152,7 @@ impl Workspace {
             target,
             factory,
         };
-        let card = cx.new(|cx| TerminalCard::remote(id, launch, focus, window, cx));
+        let card = cx.new(|cx| TerminalCard::remote(id, launch, window, cx));
         // 终端的通知和响铃（工单 03）。
         self.watch_notices(&card, window, cx);
         card
@@ -199,48 +181,32 @@ impl Workspace {
         self.place_beside_focused_card(tab, axis, card, window, cx);
     }
 
-    /// 主机右键菜单「在右侧 / 下方分屏打开」（工单 16）：把主机 `host` 开在在前标签的焦点卡片旁边，
-    /// 本地卡片、远程卡片旁边都行；已经连着就复用连接。在前的不是终端标签（开始卡片、SFTP 标签、
-    /// 编辑器标签）时开在新标签里。
-    pub(in crate::workspace) fn split_open_host(
-        &mut self,
-        host: HostId,
-        axis: Axis,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(tab) = self
-            .tabs
-            .active()
-            .filter(|_| self.active_terminal_tab().is_some())
-        else {
-            self.connect_host(host, window, cx);
-            return;
-        };
-        let Some(card) = self.open_remote_card(host, window, cx) else {
-            return;
-        };
-        self.place_beside_focused_card(tab, axis, card, window, cx);
-    }
-
     /// 每台主机开着几张远程卡片（不管连没连着、走哪条连接），主机栏右侧的绿色数字。
-    pub(in crate::workspace) fn open_cards_by_host(&self, cx: &App) -> HashMap<HostId, usize> {
-        let mut counts = HashMap::new();
+    pub(in crate::workspace) fn open_cards_by_host(&self, cx: &App) -> HashMap<HostId, HostCards> {
+        let mut hosts: HashMap<HostId, HostCards> = HashMap::new();
         for tab in self.terminal_tabs() {
             for card in tab.cards() {
-                if let Some(host) = card.read(cx).remote_host() {
-                    *counts.entry(host).or_insert(0) += 1;
+                let card = card.read(cx);
+                if let Some(host) = card.remote_host() {
+                    let link = card.remote_state(cx).and_then(|state| match state {
+                        RemoteState::Connected => Some(HostLink::Connected),
+                        RemoteState::Connecting => Some(HostLink::Connecting),
+                        RemoteState::Disconnected(_) => Some(HostLink::Failed),
+                        // 等保险库解锁：还没开始连，徽章照常。
+                        RemoteState::WaitingForVault => None,
+                    });
+                    hosts.entry(host).or_default().add(link);
                 }
             }
         }
-        counts
+        hosts
     }
 
     /// 主机 `host` 开着几张远程卡片，测试用。
     pub fn open_cards_of(&self, host: HostId, cx: &App) -> usize {
         self.open_cards_by_host(cx)
             .get(&host)
-            .copied()
+            .map(|cards| cards.count)
             .unwrap_or_default()
     }
 

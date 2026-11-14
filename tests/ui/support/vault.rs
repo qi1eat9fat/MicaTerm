@@ -1,13 +1,13 @@
-//! 保险库界面（工单 13）的夹具：一个真的保险库（`qishell_hosts::Vault`），放在临时目录里，钥匙串是
+//! 保险库界面（工单 13）的夹具：一个真的保险库（`micaterm_hosts::Vault`），放在临时目录里，钥匙串是
 //! 进程内的（不碰系统钥匙串），Argon2 用最小开销。能直接造出未设、没设主密码、已锁定、已解锁、
 //! 打不开（另一台电脑上建的）几种状态。
 
 use std::sync::Arc;
 
-use qishell::workspace::WorkspaceServices;
-use qishell_hosts::SecretStore as _;
-pub use qishell_hosts::vault::InMemoryDataKeyStore;
-pub use qishell_hosts::{KdfParams, SecretRef, Vault, VaultStatus};
+use micaterm::workspace::WorkspaceServices;
+use micaterm_hosts::SecretStore as _;
+pub use micaterm_hosts::vault::InMemoryDataKeyStore;
+pub use micaterm_hosts::{KdfParams, SecretRef, Vault, VaultStatus};
 use tempfile::TempDir;
 
 use super::fake_services;

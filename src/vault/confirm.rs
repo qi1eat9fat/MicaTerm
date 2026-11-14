@@ -78,7 +78,7 @@ pub(super) fn open_confirm_dialog(
                         vault.update(cx, |_, cx| cx.emit(VaultStoreEvent::Failed(message)));
                     }
                     // 钥匙串里的旧密钥删不掉时，保险库照样已经重置。
-                    let reset = vault.read(cx).status() == Some(qishell_hosts::VaultStatus::Absent);
+                    let reset = vault.read(cx).status() == Some(micaterm_hosts::VaultStatus::Absent);
                     layer.close(window, cx);
                     reply.send(reset, window, cx);
                 });
@@ -93,7 +93,7 @@ pub(super) fn open_confirm_dialog(
 /// 设置 › 安全「重置保险库…」：先确认。还没建保险库时什么都不做。
 pub fn open_reset_dialog(vault: Entity<VaultStore>, window: &mut Window, cx: &mut App) {
     match vault.read(cx).status() {
-        None | Some(qishell_hosts::VaultStatus::Absent) => {}
+        None | Some(micaterm_hosts::VaultStatus::Absent) => {}
         Some(_) => open_confirm_dialog(vault, Confirm::Reset, Reply::ignored(), window, cx),
     }
 }

@@ -2,22 +2,26 @@
 // 改造：走 `DialogLayer`；内容照原型 `sftpprops`（位置、所有者、3×3、八进制、递归）；
 // 不一致的位画成「混合」，八进制的那一位写 `?`（原型 `7?5`），而不是整个清空。
 //! 属性：选中项的 rwx 权限，3×3 复选框和八进制数字同步。多选时不一致的位保持每项原样，除非用户改了它。
+//! 样子是共用的 `ui::modal` 弹窗（26 号）：头部锁图标 + 「属性」+ 淡字「文件名 · 主机」，
+//! 勾选框 12 见方，底部「取消 Esc」「应用 Enter」。
 
-use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, notification::Notification,
-};
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::{Icon, WindowExt as _, notification::Notification};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::file_dialogs::SMALL_DIALOG_WIDTH;
+use super::operations::OperationSender;
 use super::{CardSide, FileEntry, FileKind, FileOperation, SftpTab};
+use crate::app::CatalogIcon;
 use crate::backend::sftp::PermissionEdit;
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{MONO_FONT_FAMILY, Tokens, size};
 use crate::ui::DialogLayer;
-use crate::ui::form::{FieldNote, dialog_footer, dialog_title, form_field};
+use crate::ui::form::{FieldNote, form_field, form_group};
+use crate::ui::modal::{
+    ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button, modal_checkbox,
+    modal_dialog, modal_input, modal_input_disabled, render_modal,
+};
 
 /// 九个 rwx 位，从所有者的读开始。
 const BITS: [u32; 9] = [
@@ -28,6 +32,8 @@ const BITS: [u32; 9] = [
 const GRID_COLUMN: Pixels = px(70.);
 /// 第一列（所有者、组、其他）的宽。
 const GRID_LABEL: Pixels = px(56.);
+/// 八进制框的宽：三位数字。
+const OCTAL_WIDTH: Pixels = px(90.);
 
 /// 一项或多项的权限草稿。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,14 +140,25 @@ struct PropertiesForm {
     recursive: bool,
     add_x_to_dirs: bool,
     octal: Entity<InputState>,
+    head: ModalHead,
+    send: OperationSender,
+    /// 对话框是哪一层：应用、取消时只关自己。
+    layer: DialogLayer,
+    /// 关了以后焦点回到文件列表。
+    list: FocusHandle,
+    focus_handle: FocusHandle,
     _subscription: Subscription,
 }
 
 impl PropertiesForm {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         items: Vec<FileEntry>,
         location: String,
         side: CardSide,
+        head: ModalHead,
+        send: OperationSender,
+        list: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -156,15 +173,22 @@ impl PropertiesForm {
                 .validate(|text, _| allowed_in_octal(text))
                 .default_value(draft.octal())
         });
-        // `set_value`（点复选框时）不发 `Change`：这里只收用户打的字。
-        let subscription = cx.subscribe_in(&octal, window, |this, input, event, _, cx| {
-            if let InputEvent::Change = event
-                && let Some(typed) = parse_octal(input.read(cx).value().as_ref())
-            {
-                this.draft.apply_octal(typed);
-                cx.notify();
-            }
-        });
+        // `set_value`（点复选框时）不发 `Change`：这里只收用户打的字。回车就是「应用」。
+        let subscription =
+            cx.subscribe_in(
+                &octal,
+                window,
+                |this, input, event, window, cx| match event {
+                    InputEvent::Change => {
+                        if let Some(typed) = parse_octal(input.read(cx).value().as_ref()) {
+                            this.draft.apply_octal(typed);
+                            cx.notify();
+                        }
+                    }
+                    InputEvent::PressEnter { .. } => this.commit(window, cx),
+                    _ => {}
+                },
+            );
         Self {
             has_dirs: items.iter().any(|item| item.kind == FileKind::Dir),
             editable: !modes.is_empty(),
@@ -175,8 +199,27 @@ impl PropertiesForm {
             recursive: false,
             add_x_to_dirs: true,
             octal,
+            head,
+            send,
+            layer: DialogLayer::new(),
+            list,
+            focus_handle: cx.focus_handle(),
             _subscription: subscription,
         }
+    }
+
+    /// 「应用」（回车也是）：关掉对话框；改了什么才发操作，什么都没改就不跑一趟。
+    fn commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let operation = self.operation();
+        self.close(window, cx);
+        if let Some(operation) = operation {
+            self.send.send(operation, window, cx);
+        }
+    }
+
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.layer.close(window, cx);
+        window.focus(&self.list, cx);
     }
 
     /// 各项都一样就是那个值，否则说不一致。
@@ -221,34 +264,56 @@ impl PropertiesForm {
         cx.notify();
     }
 
-    /// 一个权限位：复选框，不一致时是原型的「混合」（强调色底、白色短横），点了就勾上。
+    /// 一个权限位：12 见方的勾选框（同 `modal_checkbox`），勾上是正文色底、白勾；不一致时是「混合」
+    /// （正文色底、白色短横），点了就勾上。改不了时淡掉一半、点不动。
     fn render_bit(&self, index: usize, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
         let bit = BITS[index];
-        if self.draft.is_mixed(bit) && self.editable {
-            let box_ = div()
-                .id(("perm", index))
-                .test_support()
-                .aria_label(t!("sftp_files.properties.mixed"))
-                .flex()
-                .items_center()
-                .justify_center()
-                .size(px(16.))
-                .rounded(px(5.))
-                .bg(tokens.accent)
-                .cursor_pointer()
-                .on_click(
-                    cx.listener(move |this, _, window, cx| this.set_bit(bit, true, window, cx)),
-                )
-                .child(div().w(px(8.)).h(px(2.)).rounded(px(1.)).bg(white()));
-            return box_.into_any_element();
-        }
-        Checkbox::new(("perm", index))
-            .small()
-            .checked(self.draft.is_checked(bit))
-            .disabled(!self.editable)
-            .on_click(cx.listener(move |this, checked: &bool, window, cx| {
-                this.set_bit(bit, *checked, window, cx)
-            }))
+        let mixed = self.draft.is_mixed(bit) && self.editable;
+        let checked = self.draft.is_checked(bit);
+        let editable = self.editable;
+        div()
+            .id(("perm", index))
+            .test_support()
+            .aria_label(if mixed {
+                t!("sftp_files.properties.mixed")
+            } else {
+                SharedString::default()
+            })
+            .role(Role::CheckBox)
+            .aria_toggled(if mixed {
+                Toggled::Mixed
+            } else if checked {
+                Toggled::True
+            } else {
+                Toggled::False
+            })
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(size::CHECKBOX)
+            .rounded(px(3.))
+            .map(|box_| {
+                if mixed {
+                    box_.bg(tokens.text)
+                        .child(div().w(px(6.)).h(px(1.5)).bg(tokens.content))
+                } else if checked {
+                    box_.bg(tokens.text)
+                        .text_color(tokens.content)
+                        .child(Icon::new(CatalogIcon::Check).size(px(10.)))
+                } else {
+                    box_.border_1().border_color(tokens.line_strong)
+                }
+            })
+            .when(!editable, |box_| box_.opacity(0.5))
+            .when(editable, |box_| {
+                box_.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        // 混合的位点了就勾上；其余的反过来。
+                        let on = mixed || !this.draft.is_checked(bit);
+                        this.set_bit(bit, on, window, cx)
+                    }))
+            })
             .into_any_element()
     }
 
@@ -259,8 +324,7 @@ impl PropertiesForm {
         let header = div()
             .flex()
             .items_center()
-            .text_size(px(11.5))
-            .text_color(tokens.faint)
+            .text_color(tokens.st_dim)
             .child(label(SharedString::default()))
             .children(
                 [
@@ -284,6 +348,7 @@ impl PropertiesForm {
                 div()
                     .flex()
                     .items_center()
+                    .h(px(20.))
                     .child(label(class))
                     .children(bits),
             );
@@ -291,18 +356,21 @@ impl PropertiesForm {
         div()
             .flex()
             .flex_col()
-            .gap(px(8.))
-            .pt(px(7.))
-            .text_size(px(12.5))
+            .gap(px(6.))
             .child(header)
             .children(rows)
     }
 }
 
+impl Focusable for PropertiesForm {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
 impl Render for PropertiesForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
-        let mono = cx.theme().mono_font_family.clone();
         let owner = t!(
             "sftp_files.properties.owner_group",
             owner = Self::shared(self.items.iter().map(|item| item.owner.clone())),
@@ -315,6 +383,29 @@ impl Render for PropertiesForm {
         } else {
             vec![FieldNote::Hint(t!("sftp_files.properties.no_rights"))]
         };
+        let octal_label = t!("sftp_files.properties.octal");
+        let octal = if self.editable {
+            modal_input(
+                "perm-octal",
+                octal_label.clone(),
+                &self.octal,
+                ModalInputKind::Mono,
+                false,
+                &tokens,
+                window,
+                cx,
+            )
+        } else {
+            modal_input_disabled(
+                "perm-octal",
+                octal_label.clone(),
+                &self.octal,
+                ModalInputKind::Mono,
+                &tokens,
+                window,
+                cx,
+            )
+        };
         let rights = div()
             .flex()
             .flex_col()
@@ -325,96 +416,116 @@ impl Render for PropertiesForm {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(
-                        div()
-                            .text_size(px(12.5))
-                            .text_color(tokens.muted)
-                            .child(t!("sftp_files.properties.octal")),
-                    )
-                    .child(
-                        div().flex_none().w(px(90.)).child(
-                            Input::new(&self.octal)
-                                .id("perm-octal")
-                                .aria_label(t!("sftp_files.properties.octal"))
-                                .small()
-                                .font_family(mono.clone())
-                                .disabled(!self.editable),
-                        ),
-                    ),
+                    .child(div().text_color(tokens.text2).child(octal_label))
+                    .child(div().flex_none().w(OCTAL_WIDTH).child(octal)),
             );
-        div()
-            .id("file-properties")
-            .test_support()
-            .flex()
-            .flex_col()
-            .text_size(px(12.5))
-            .child(form_field(
-                Some(t!("sftp_files.properties.location")),
-                div()
-                    .id("file-properties-location")
-                    .test_support()
-                    .aria_label(self.location.clone())
-                    .min_h(px(30.))
-                    .flex()
-                    .items_center()
-                    .font_family(mono)
-                    .child(self.location.clone()),
+        let value = |id: &'static str, text: SharedString| {
+            div()
+                .id(id)
+                .test_support()
+                .aria_label(text.clone())
+                .min_w_0()
+                .truncate()
+                .text_color(tokens.text2)
+                .child(text)
+        };
+        let mut rows = vec![form_field(
+            Some(t!("sftp_files.properties.location")),
+            value("file-properties-location", self.location.clone().into())
+                .font_family(MONO_FONT_FAMILY),
+            Vec::new(),
+            &tokens,
+        )];
+        if self.side.is_remote() {
+            rows.push(form_field(
+                Some(t!("sftp_files.properties.owner")),
+                value("file-properties-owner", owner),
                 Vec::new(),
                 &tokens,
-            ))
-            .when(self.side.is_remote(), |form| {
-                form.child(form_field(
-                    Some(t!("sftp_files.properties.owner")),
-                    div()
-                        .id("file-properties-owner")
-                        .test_support()
-                        .aria_label(owner.clone())
-                        .min_h(px(30.))
-                        .flex()
-                        .items_center()
-                        .child(owner.clone()),
-                    Vec::new(),
-                    &tokens,
-                ))
-            })
-            .child(form_field(
-                Some(t!("sftp_files.properties.rights")),
-                rights,
-                notes,
+            ));
+        }
+        rows.push(form_field(
+            Some(t!("sftp_files.properties.rights")),
+            rights,
+            notes,
+            &tokens,
+        ));
+        if self.has_dirs && self.editable {
+            let recursive = self.recursive;
+            rows.push(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .child(modal_checkbox(
+                        "perm-recursive",
+                        recursive,
+                        t!("sftp_files.properties.recursive"),
+                        None,
+                        Box::new(cx.listener(|this, _, _, cx| {
+                            this.recursive = !this.recursive;
+                            cx.notify();
+                        })),
+                        &tokens,
+                    ))
+                    // 「目录加 x」只在递归时算数：不递归时淡掉、点不动。
+                    .child(
+                        div()
+                            .when(!recursive, |row| row.opacity(0.5))
+                            .child(modal_checkbox(
+                                "perm-dir-x",
+                                self.add_x_to_dirs,
+                                t!("sftp_files.properties.dir_x"),
+                                None,
+                                Box::new(cx.listener(|this, _, _, cx| {
+                                    if this.recursive {
+                                        this.add_x_to_dirs = !this.add_x_to_dirs;
+                                        cx.notify();
+                                    }
+                                })),
+                                &tokens,
+                            )),
+                    )
+                    .into_any_element(),
+            );
+        }
+        let cancel: OnClick = Box::new(cx.listener(|this, _, window, cx| this.close(window, cx)));
+        let footer = div()
+            .flex()
+            .gap(px(6.))
+            .child(modal_button(
+                "perm-cancel",
+                t!("sftp_files.cancel"),
+                Some("Esc"),
+                ModalButtonTone::Plain,
+                Some(cancel),
                 &tokens,
+                window,
+                cx,
             ))
-            .when(self.has_dirs && self.editable, |form| {
-                form.child(form_field(
-                    None,
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .child(
-                            Checkbox::new("perm-recursive")
-                                .label(t!("sftp_files.properties.recursive"))
-                                .small()
-                                .checked(self.recursive)
-                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                    this.recursive = *checked;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Checkbox::new("perm-dir-x")
-                                .label(t!("sftp_files.properties.dir_x"))
-                                .small()
-                                .checked(self.add_x_to_dirs)
-                                .disabled(!self.recursive)
-                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                    this.add_x_to_dirs = *checked;
-                                    cx.notify();
-                                })),
-                        ),
-                    Vec::new(),
-                    &tokens,
-                ))
-            })
+            .child(modal_button(
+                "perm-commit",
+                t!("sftp_files.properties.commit"),
+                Some("Enter"),
+                ModalButtonTone::Primary,
+                Some(Box::new(
+                    cx.listener(|this, _, window, cx| this.commit(window, cx)),
+                )),
+                &tokens,
+                window,
+                cx,
+            ));
+        render_modal(
+            Some(self.head.clone()),
+            form_group(rows),
+            footer,
+            &tokens,
+            window,
+            cx,
+        )
+        .id("file-properties")
+        .test_support()
+        .track_focus(&self.focus_handle)
     }
 }
 
@@ -458,39 +569,28 @@ impl SftpTab {
                 place = place
             )
         };
-        let form = cx.new(|cx| PropertiesForm::new(items, location, side, window, cx));
-        let (editable, octal) = {
-            let form = form.read(cx);
-            (form.editable, form.octal.clone())
+        let head = ModalHead {
+            icon: CatalogIcon::Lock,
+            title: t!("sftp_files.properties.title"),
+            detail: Some(subtitle),
         };
-        let tokens = Tokens::current(cx);
         let send = self.operation_sender(side);
-        let layer = DialogLayer::new();
+        let form = cx.new(|cx| {
+            PropertiesForm::new(items, location, side, head, send, list.clone(), window, cx)
+        });
+        let (editable, octal, layer) = {
+            let form = form.read(cx);
+            (form.editable, form.octal.clone(), form.layer.clone())
+        };
+        let focus = form.read(cx).focus_handle.clone();
         layer.open_dismissable(
             move |dialog, _, _| {
-                let (form_ok, send) = (form.clone(), send.clone());
-                dialog
-                    .title(dialog_title(
-                        t!("sftp_files.properties.title"),
-                        Some(subtitle.clone()),
-                        &tokens,
-                    ))
-                    .w(SMALL_DIALOG_WIDTH)
-                    .rounded(px(14.))
-                    .overlay_closable(false)
+                modal_dialog(dialog)
+                    // 回车由八进制框自己处理；框改不了时 gpui-component 的 `Confirm` 也不关框。
+                    .on_ok(|_, _, _| false)
                     .child(form.clone())
-                    .footer(dialog_footer(
-                        "perm-commit",
-                        t!("sftp_files.properties.commit"),
-                        t!("sftp_files.cancel"),
-                    ))
-                    .on_ok(move |_, window, cx| {
-                        if let Some(operation) = form_ok.read(cx).operation() {
-                            send.send(operation, window, cx);
-                        }
-                        true
-                    })
             },
+            // Esc 关掉的：焦点回到文件列表。
             move |window, cx| window.focus(&list, cx),
             window,
             cx,
@@ -500,6 +600,8 @@ impl SftpTab {
                 input.focus(window, cx);
                 input.select_all(window, cx);
             });
+        } else {
+            window.focus(&focus, cx);
         }
         self.operations.dialog = Some(layer);
     }

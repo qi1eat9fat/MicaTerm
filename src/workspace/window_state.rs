@@ -154,7 +154,7 @@ fn is_minimized(_: &Window) -> bool {
 /// 记窗口的位置只是方便：写不进去只记日志，不打扰用户。
 fn write(state: &WindowState, path: &Path) {
     if let Err(error) = state.save(path) {
-        eprintln!("qishell: cannot save the window's place: {error}");
+        eprintln!("micaterm: cannot save the window's place: {error}");
     }
 }
 

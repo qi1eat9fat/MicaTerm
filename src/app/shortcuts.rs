@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate, NoAction};
 
-use qishell_terminal::actions::*;
+use micaterm_terminal::actions::*;
 
 use super::actions::*;
 use crate::sftp_tab::{CardSide, CursorMotion, NewEntryKind};
@@ -57,12 +57,6 @@ pub const WINDOW_KEYS: &[Shortcut] = &[
         keys: "ctrl-shift-n",
         mac: "cmd-n",
         action: || Box::new(NewHost),
-        context: None,
-    },
-    Shortcut {
-        keys: "ctrl-shift-o",
-        mac: "cmd-shift-o",
-        action: || Box::new(QuickConnect),
         context: None,
     },
     Shortcut {
@@ -274,7 +268,7 @@ pub const CARD_KEYS: &[Shortcut] = &[
 ];
 
 /// 只在终端里生效。
-const IN_TERMINAL: Option<&str> = Some(qishell_terminal::TERMINAL_KEY_CONTEXT);
+const IN_TERMINAL: Option<&str> = Some(micaterm_terminal::TERMINAL_KEY_CONTEXT);
 /// 在终端里和它的查找条里都生效：查找条和终端是兄弟节点，不在同一条键上下文路径上。
 const IN_TERMINAL_OR_FIND: Option<&str> = Some("Terminal || TerminalFind");
 
@@ -327,7 +321,7 @@ pub const TERMINAL_KEYS: &[Shortcut] = &[
         keys: "escape",
         mac: "escape",
         action: || Box::new(DismissTerminalFind),
-        context: Some(qishell_terminal::TERMINAL_FIND_KEY_CONTEXT),
+        context: Some(micaterm_terminal::TERMINAL_FIND_KEY_CONTEXT),
     },
     Shortcut {
         keys: "ctrl-=",
@@ -355,10 +349,9 @@ pub const LOCAL_FILE_LIST_CONTEXT: &str = "LocalFileList";
 pub const REMOTE_FILE_LIST_CONTEXT: &str = "RemoteFileList";
 
 /// 一侧文件列表的按键（spec 第 8 节，照 shell-rs，去掉 Ctrl+H、Ctrl+F、Ctrl+D、Alt+方向键、Ctrl+\）。
-/// 方向键和 Tab 绑在 `> DataTable` 这一层：DataTable 和 Root 自己也绑了它们。
 // 参考 since2006/shell-rs @ b2a307a: src/app/shortcuts.rs 的 `explorer_shortcuts`
 macro_rules! file_list_keys {
-    ($side:expr, $list:literal, $table:literal) => {
+    ($side:expr, $list:literal) => {
         &[
             file_list_key!("enter", "enter", $list, Open { side: $side }),
             file_list_key!("f4", "f4", $list, Edit { side: $side, path: None }),
@@ -375,39 +368,26 @@ macro_rules! file_list_keys {
             file_list_key!("ctrl-a", "cmd-a", $list, SelectAll { side: $side }),
             file_list_key!("space", "space", $list, ToggleSelection { side: $side }),
             file_list_key!("insert", "insert", $list, ToggleSelection { side: $side }),
-            file_list_key!("tab", "tab", $table, FocusCard { side: $side.other() }),
-            file_list_key!("shift-tab", "shift-tab", $table, FocusCard { side: $side.other() }),
-            file_list_key!("up", "up", $table, MoveCursor { side: $side, motion: CursorMotion::Up, extend: false }),
-            file_list_key!("down", "down", $table, MoveCursor { side: $side, motion: CursorMotion::Down, extend: false }),
-            file_list_key!("pageup", "pageup", $table, MoveCursor { side: $side, motion: CursorMotion::PageUp, extend: false }),
-            file_list_key!("pagedown", "pagedown", $table, MoveCursor { side: $side, motion: CursorMotion::PageDown, extend: false }),
-            file_list_key!("home", "home", $table, MoveCursor { side: $side, motion: CursorMotion::Home, extend: false }),
-            file_list_key!("end", "end", $table, MoveCursor { side: $side, motion: CursorMotion::End, extend: false }),
-            file_list_key!("shift-up", "shift-up", $table, MoveCursor { side: $side, motion: CursorMotion::Up, extend: true }),
-            file_list_key!("shift-down", "shift-down", $table, MoveCursor { side: $side, motion: CursorMotion::Down, extend: true }),
-            file_list_key!("shift-pageup", "shift-pageup", $table, MoveCursor { side: $side, motion: CursorMotion::PageUp, extend: true }),
-            file_list_key!("shift-pagedown", "shift-pagedown", $table, MoveCursor { side: $side, motion: CursorMotion::PageDown, extend: true }),
-            file_list_key!("shift-home", "shift-home", $table, MoveCursor { side: $side, motion: CursorMotion::Home, extend: true }),
-            file_list_key!("shift-end", "shift-end", $table, MoveCursor { side: $side, motion: CursorMotion::End, extend: true }),
+            file_list_key!("tab", "tab", $list, FocusCard { side: $side.other() }),
+            file_list_key!("shift-tab", "shift-tab", $list, FocusCard { side: $side.other() }),
+            file_list_key!("up", "up", $list, MoveCursor { side: $side, motion: CursorMotion::Up, extend: false }),
+            file_list_key!("down", "down", $list, MoveCursor { side: $side, motion: CursorMotion::Down, extend: false }),
+            file_list_key!("pageup", "pageup", $list, MoveCursor { side: $side, motion: CursorMotion::PageUp, extend: false }),
+            file_list_key!("pagedown", "pagedown", $list, MoveCursor { side: $side, motion: CursorMotion::PageDown, extend: false }),
+            file_list_key!("home", "home", $list, MoveCursor { side: $side, motion: CursorMotion::Home, extend: false }),
+            file_list_key!("end", "end", $list, MoveCursor { side: $side, motion: CursorMotion::End, extend: false }),
+            file_list_key!("shift-up", "shift-up", $list, MoveCursor { side: $side, motion: CursorMotion::Up, extend: true }),
+            file_list_key!("shift-down", "shift-down", $list, MoveCursor { side: $side, motion: CursorMotion::Down, extend: true }),
+            file_list_key!("shift-pageup", "shift-pageup", $list, MoveCursor { side: $side, motion: CursorMotion::PageUp, extend: true }),
+            file_list_key!("shift-pagedown", "shift-pagedown", $list, MoveCursor { side: $side, motion: CursorMotion::PageDown, extend: true }),
+            file_list_key!("shift-home", "shift-home", $list, MoveCursor { side: $side, motion: CursorMotion::Home, extend: true }),
+            file_list_key!("shift-end", "shift-end", $list, MoveCursor { side: $side, motion: CursorMotion::End, extend: true }),
             // 显示隐藏文件：WinSCP 的 Ctrl+Alt+H，访达的 ⌘⇧.（macOS 报成 ⌘>）。
             Shortcut {
                 keys: "ctrl-alt-h",
                 mac: "cmd->",
                 action: || Box::new(ToggleHiddenFiles($side)),
                 context: Some($list),
-            },
-            // 左右键不让表格拿去换列。
-            Shortcut {
-                keys: "left",
-                mac: "left",
-                action: || Box::new(NoAction {}),
-                context: Some($table),
-            },
-            Shortcut {
-                keys: "right",
-                mac: "right",
-                action: || Box::new(NoAction {}),
-                context: Some($table),
             },
         ]
     };
@@ -425,28 +405,50 @@ macro_rules! file_list_key {
 }
 
 /// 本地文件列表的按键。
-pub const LOCAL_FILE_KEYS: &[Shortcut] = file_list_keys!(
-    CardSide::Local,
-    "LocalFileList",
-    "LocalFileList > DataTable"
-);
+pub const LOCAL_FILE_KEYS: &[Shortcut] = file_list_keys!(CardSide::Local, "LocalFileList");
 /// 远程文件列表的按键。
-pub const REMOTE_FILE_KEYS: &[Shortcut] = file_list_keys!(
-    CardSide::Remote,
-    "RemoteFileList",
-    "RemoteFileList > DataTable"
-);
+pub const REMOTE_FILE_KEYS: &[Shortcut] = file_list_keys!(CardSide::Remote, "RemoteFileList");
 
 /// 编辑器标签的键上下文。
 pub const EDITOR_CONTEXT: &str = "EditorTab";
 
-/// 编辑器标签的按键（工单 23）。Ctrl+F、Ctrl+H 是编辑器自带的查找替换。
-pub const EDITOR_KEYS: &[Shortcut] = &[Shortcut {
-    keys: "ctrl-s",
-    mac: "cmd-s",
-    action: || Box::new(SaveEditor),
-    context: Some(EDITOR_CONTEXT),
-}];
+/// 编辑器查找浮卡的键上下文（UI 重做工单 11）。
+pub const EDITOR_FIND_CONTEXT: &str = "EditorFind";
+
+/// 编辑器标签的按键（工单 23）。Ctrl+F、Ctrl+H 是编辑器自带的绑定（`Search`、`Replace`），
+/// 编辑器标签截下来开自己的查找浮卡；Enter / Shift+Enter 由浮卡的输入框自己处理。
+pub const EDITOR_KEYS: &[Shortcut] = &[
+    Shortcut {
+        keys: "ctrl-s",
+        mac: "cmd-s",
+        action: || Box::new(SaveEditor),
+        context: Some(EDITOR_CONTEXT),
+    },
+    Shortcut {
+        keys: "f3",
+        mac: "cmd-g",
+        action: || Box::new(FindNextInEditor),
+        context: Some(EDITOR_CONTEXT),
+    },
+    Shortcut {
+        keys: "shift-f3",
+        mac: "cmd-shift-g",
+        action: || Box::new(FindPreviousInEditor),
+        context: Some(EDITOR_CONTEXT),
+    },
+    Shortcut {
+        keys: "escape",
+        mac: "escape",
+        action: || Box::new(DismissEditorFind),
+        context: Some(EDITOR_FIND_CONTEXT),
+    },
+    Shortcut {
+        keys: "ctrl-alt-enter",
+        mac: "cmd-alt-enter",
+        action: || Box::new(ReplaceAllInEditor),
+        context: Some(EDITOR_FIND_CONTEXT),
+    },
+];
 
 /// 预览里图片的键上下文。
 pub const IMAGE_PREVIEW_CONTEXT: &str = "ImagePreview";
@@ -525,7 +527,7 @@ pub fn bind(cx: &mut App) {
         .collect::<Vec<_>>();
     cx.bind_keys(bindings);
     // 终端里的 Tab 和 Shift+Tab 发给 shell，不让焦点跳走（终端 crate 自带的绑定）。
-    cx.bind_keys(qishell_terminal::terminal_key_bindings());
+    cx.bind_keys(micaterm_terminal::terminal_key_bindings());
     cx.bind_keys(shell_keys_in_terminal());
 }
 
@@ -539,7 +541,7 @@ fn shell_keys_in_terminal() -> Vec<KeyBinding> {
             KeyBinding::new(
                 &format!("ctrl-{letter}"),
                 NoAction {},
-                Some(qishell_terminal::TERMINAL_KEY_CONTEXT),
+                Some(micaterm_terminal::TERMINAL_KEY_CONTEXT),
             )
         })
         .collect()
@@ -584,7 +586,7 @@ mod tests {
             .iter()
             .find(|shortcut| shortcut.mac == "cmd-shift-w")
             .expect("⇧⌘W is bound");
-        assert_eq!((close_tab.action)().name(), "qishell::CloseActiveTab");
+        assert_eq!((close_tab.action)().name(), "micaterm::CloseActiveTab");
         assert_eq!(close_tab.keys, "");
         assert_eq!(close_tab.context, None);
     }

@@ -1,26 +1,23 @@
-//! 设置对话框各类的页面：外观、终端。每个页面返回从上到下的分组标题和分组。
+//! 设置标签各类的页面：外观、终端（26 号「设置」）。每个页面返回从上到下的分组标题和设置行。
 
-use std::ops::RangeInclusive;
 use std::rc::Rc;
 
-use gpui_kit::component::{
-    Sizable as _,
-    input::{InputEvent, InputState, NumberInput},
-};
 use gpui_kit::*;
 
-use qishell_terminal::TerminalFontPreview;
+use micaterm_terminal::TerminalFontPreview;
 
-use super::controls::{dropdown, group, row, section_title, segmented, setting_switch};
-use super::dialog::SettingsDialog;
+use super::controls::{
+    CONTROL_HEIGHT, dropdown, field_box, note_with_keys, reset_if, row, row_with_note, section,
+    segmented_with_height, setting_switch,
+};
+use super::tab::SettingsTab;
 use super::terminal_themes::terminal_theme_grid;
 use super::{
-    AppSettings, Appearance, DEFAULT_INTERFACE_FONT_SIZE, DEFAULT_TERMINAL_FONT_FAMILY,
-    INTERFACE_FONT_SIZE_RANGE, RightClick, SettingsStore, TERMINAL_FONT_SIZE_RANGE,
-    TERMINAL_LINE_HEIGHT_RANGE,
+    AppSettings, Appearance, DEFAULT_TERMINAL_FONT_FAMILY, RightClick, SettingsStore,
+    TERMINAL_FONT_SIZE_RANGE, TERMINAL_LINE_HEIGHT_RANGE,
 };
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, TypeScale};
 
 /// 改一项设置，写进存储（存储再写文件、通知窗口壳去应用）。
 pub(super) fn write(
@@ -31,22 +28,28 @@ pub(super) fn write(
     store.update(cx, |store, cx| store.update(change, cx));
 }
 
-/// 应用外观的三个选项，按分段按钮从左到右。
+/// 应用外观的三个选项，按切换按钮从左到右。
 const APPEARANCES: [Appearance; 3] = [Appearance::System, Appearance::Light, Appearance::Dark];
 
-/// 外观：常规（应用外观、界面字号、Mica 背景）、终端主题。
+/// 数字下拉框的宽（26 号 `.stg-dd`）。
+const NUMBER_WIDTH: Pixels = px(96.);
+/// 长一些的下拉框、输入框的宽（字体、右键行为、Shell、本地目录）。
+pub(super) const WIDE_WIDTH: Pixels = px(240.);
+
+/// 外观：常规（应用外观、Mica 背景）、终端主题。
 pub(super) fn appearance(
-    dialog: &SettingsDialog,
+    tab: &SettingsTab,
     tokens: &Tokens,
     _: &mut Window,
-    cx: &mut Context<SettingsDialog>,
+    cx: &mut Context<SettingsTab>,
 ) -> Vec<AnyElement> {
-    let store = dialog.store.clone();
+    let store = tab.store.clone();
     let settings = store.read(cx).settings();
+    let default = AppSettings::default();
 
     let mode = {
         let store = store.clone();
-        segmented(
+        segmented_with_height(
             "appearance",
             vec![
                 t!("settings.appearance.system"),
@@ -62,27 +65,8 @@ pub(super) fn appearance(
                     settings.appearance = APPEARANCES[index]
                 })
             }),
+            CONTROL_HEIGHT,
             tokens,
-        )
-    };
-
-    let sizes: Vec<f32> = interface_font_sizes().collect();
-    let font_size = {
-        let store = store.clone();
-        let chosen = sizes
-            .iter()
-            .position(|size| *size == settings.interface.font_size);
-        let sizes_for_menu = sizes.clone();
-        dropdown(
-            "interface-font-size",
-            number_text(settings.interface.font_size).into(),
-            sizes.iter().map(|size| number_text(*size).into()).collect(),
-            chosen,
-            Rc::new(move |index, _, cx| {
-                let size = sizes_for_menu[index];
-                write(&store, cx, |settings| settings.interface.font_size = size)
-            }),
-            px(90.),
         )
     };
 
@@ -96,55 +80,59 @@ pub(super) fn appearance(
     );
 
     vec![
-        section_title(t!("settings.appearance.general"), None, tokens).into_any_element(),
-        group(
-            [
-                row(
-                    t!("settings.appearance.mode"),
-                    Some(t!("settings.appearance.mode_description")),
-                    mode,
-                    tokens,
-                ),
-                row(
-                    t!("settings.appearance.font_size"),
-                    Some(t!(
-                        "settings.appearance.font_size_description",
-                        size = number_text(DEFAULT_INTERFACE_FONT_SIZE)
-                    )),
-                    font_size,
-                    tokens,
-                ),
-                row(
-                    t!("settings.appearance.mica"),
-                    Some(t!("settings.appearance.mica_description")),
-                    mica,
-                    tokens,
-                ),
-            ],
+        section(t!("settings.appearance.general"), None, true, tokens),
+        row(
+            t!("settings.appearance.mode"),
+            Some(t!("settings.appearance.mode_description")),
+            reset_if(
+                settings.appearance != default.appearance,
+                "appearance",
+                &store,
+                move |settings| settings.appearance = AppSettings::default().appearance,
+                tokens,
+            ),
+            mode,
             tokens,
-        )
-        .into_any_element(),
-        section_title(
+        ),
+        row(
+            t!("settings.appearance.mica"),
+            Some(t!("settings.appearance.mica_description")),
+            reset_if(
+                settings.interface.mica != default.interface.mica,
+                "mica",
+                &store,
+                move |settings| settings.interface.mica = AppSettings::default().interface.mica,
+                tokens,
+            ),
+            mica,
+            tokens,
+        ),
+        section(
             t!("settings.appearance.terminal_theme"),
             Some(t!("settings.appearance.terminal_theme_description")),
+            false,
             tokens,
-        )
-        .into_any_element(),
-        group(
-            [terminal_theme_grid(&store, tokens, cx).into_any_element()],
-            tokens,
-        )
-        .into_any_element(),
+        ),
+        terminal_theme_grid(&store, tokens, cx).into_any_element(),
     ]
 }
 
-/// 界面字号能选的值：范围内的每个整数像素。
-fn interface_font_sizes() -> impl Iterator<Item = f32> {
+/// 终端字号能选的值：10–28 的每个整数像素。
+fn terminal_font_sizes() -> impl Iterator<Item = f32> {
     let (start, end) = (
-        *INTERFACE_FONT_SIZE_RANGE.start() as u32,
-        *INTERFACE_FONT_SIZE_RANGE.end() as u32,
+        *TERMINAL_FONT_SIZE_RANGE.start() as u32,
+        *TERMINAL_FONT_SIZE_RANGE.end() as u32,
     );
     (start..=end).map(|size| size as f32)
+}
+
+/// 终端行高能选的值：1.0–2.0，每档 0.1。
+fn terminal_line_heights() -> impl Iterator<Item = f32> {
+    let (start, end) = (
+        (*TERMINAL_LINE_HEIGHT_RANGE.start() * 10.).round() as u32,
+        (*TERMINAL_LINE_HEIGHT_RANGE.end() * 10.).round() as u32,
+    );
+    (start..=end).map(|tenths| tenths as f32 / 10.)
 }
 
 /// 数字的显示：不带多余的 0（`14`、`11.6`、`1.45`）。
@@ -153,12 +141,60 @@ fn number_text(value: f32) -> String {
     format!("{rounded}")
 }
 
-/// 字体预览里的几行：字母、容易混的字符、中文（一个字占两格）、制表符和一行命令。
+/// 行高的显示：至少一位小数（`1.0`、`1.6`、`1.65`）。
+fn line_height_text(value: f32) -> String {
+    let text = number_text(value);
+    if text.contains('.') {
+        text
+    } else {
+        format!("{text}.0")
+    }
+}
+
+/// 数字下拉框：`values` 里的每个数一项；设置里的数不在里面（比如在终端里按 Ctrl+= 调出来的半档）时
+/// 框上照样显示它，菜单里没有打勾的。
+fn number_dropdown(
+    id: &'static str,
+    current: f32,
+    values: Vec<f32>,
+    store: &Entity<SettingsStore>,
+    set: fn(&mut AppSettings, f32),
+    tokens: &Tokens,
+) -> impl IntoElement + use<> {
+    number_dropdown_shown(id, current, values, number_text, store, set, tokens)
+}
+
+fn number_dropdown_shown(
+    id: &'static str,
+    current: f32,
+    values: Vec<f32>,
+    show: fn(f32) -> String,
+    store: &Entity<SettingsStore>,
+    set: fn(&mut AppSettings, f32),
+    tokens: &Tokens,
+) -> impl IntoElement + use<> {
+    let store = store.clone();
+    let chosen = values
+        .iter()
+        .position(|value| (value - current).abs() < 0.001);
+    let labels = values.iter().map(|value| show(*value).into()).collect();
+    dropdown(
+        id,
+        show(current).into(),
+        labels,
+        chosen,
+        Rc::new(move |index, _, cx| {
+            let value = values[index];
+            write(&store, cx, |settings| set(settings, value))
+        }),
+        NUMBER_WIDTH,
+        tokens,
+    )
+}
+
+/// 字体预览那一行（26 号 `.stg-pv`）：命令、容易混的字符、中文（一个字占两格）、制表符。
 const PREVIEW_LINES: &[&str] = &[
-    "qi@web-01:~$ ls -la",
-    "0O 1lI {}[]() ,.;:'\"`",
-    "中文对齐：你好，世界", // i18n: keep（看两格宽的字怎么对齐）
-    "┌─┬─┐ ▁▂▃▅▇ ←↑→↓",
+    "qi@web-01:~$ ls -la   0O 1lI {}[]()   中文对齐   ┌─┬─┐ ▁▂▃▅▇", // i18n: keep（看两格宽的字怎么对齐）
 ];
 
 /// 右键行为的四个选项，按菜单从上到下。
@@ -172,22 +208,22 @@ const RIGHT_CLICKS: [(RightClick, &str); 4] = [
     (RightClick::Nothing, "settings.right_click.nothing"),
 ];
 
-/// 终端：字体（字体、字号、行高、预览）、交互（选中即复制、右键行为）、本地终端（shell）。
+/// 终端：字体（字体、字号、行高、预览）、交互（选中即复制、右键行为）、本地终端（Shell）。
 pub(super) fn terminal(
-    dialog: &SettingsDialog,
+    tab: &SettingsTab,
     tokens: &Tokens,
-    _: &mut Window,
-    cx: &mut Context<SettingsDialog>,
+    window: &mut Window,
+    cx: &mut Context<SettingsTab>,
 ) -> Vec<AnyElement> {
-    let store = dialog.store.clone();
+    let store = tab.store.clone();
     let settings = store.read(cx).settings();
+    let default = AppSettings::default();
 
-    // 默认字体随包附带，总在最前；其余是本机装了的等宽字体。
+    // 默认字体总在最前；其余是本机装了的等宽字体。
     let families: Vec<SharedString> =
         std::iter::once(SharedString::from(DEFAULT_TERMINAL_FONT_FAMILY))
             .chain(
-                dialog
-                    .font_families
+                tab.font_families
                     .iter()
                     .filter(|family| family.as_ref() != DEFAULT_TERMINAL_FONT_FAMILY)
                     .cloned(),
@@ -212,9 +248,28 @@ pub(super) fn terminal(
                         (family != DEFAULT_TERMINAL_FONT_FAMILY).then_some(family)
                 })
             }),
-            px(220.),
+            WIDE_WIDTH,
+            tokens,
         )
     };
+
+    let font_size = number_dropdown(
+        "terminal-font-size",
+        settings.terminal_font.size,
+        terminal_font_sizes().collect(),
+        &store,
+        |settings, size| settings.terminal_font.size = size,
+        tokens,
+    );
+    let line_height = number_dropdown_shown(
+        "terminal-line-height",
+        settings.terminal_font.line_height,
+        terminal_line_heights().collect(),
+        line_height_text,
+        &store,
+        |settings, line_height| settings.terminal_font.line_height = line_height,
+        tokens,
+    );
 
     let copy_on_select = setting_switch(
         "copy-on-select",
@@ -239,227 +294,148 @@ pub(super) fn terminal(
                     settings.terminal_interaction.right_click = RIGHT_CLICKS[index].0
                 })
             }),
-            px(260.),
+            WIDE_WIDTH,
+            tokens,
         )
     };
 
-    let range =
-        |range: &RangeInclusive<f32>| (number_text(*range.start()), number_text(*range.end()));
-    let (size_min, size_max) = range(&TERMINAL_FONT_SIZE_RANGE);
-    let (line_min, line_max) = range(&TERMINAL_LINE_HEIGHT_RANGE);
+    let preview = field_box(div(), tokens)
+        .h_auto()
+        .mt(px(12.))
+        .mb(px(2.))
+        .px(px(12.))
+        .py(px(10.))
+        .overflow_hidden()
+        .child(TerminalFontPreview::new(
+            "terminal-font-preview",
+            PREVIEW_LINES,
+        ))
+        .into_any_element();
+
+    let (size_min, size_max) = (
+        number_text(*TERMINAL_FONT_SIZE_RANGE.start()),
+        number_text(*TERMINAL_FONT_SIZE_RANGE.end()),
+    );
+    let (line_min, line_max) = (
+        line_height_text(*TERMINAL_LINE_HEIGHT_RANGE.start()),
+        line_height_text(*TERMINAL_LINE_HEIGHT_RANGE.end()),
+    );
+    let font = settings.terminal_font.clone();
+    let interaction = settings.terminal_interaction;
 
     vec![
-        section_title(t!("settings.terminal.font"), None, tokens).into_any_element(),
-        group(
-            [
-                row(
-                    t!("settings.terminal.family"),
-                    Some(t!("settings.terminal.family_description")),
-                    family_field,
-                    tokens,
-                ),
-                row(
-                    t!("settings.terminal.size"),
-                    Some(t!(
-                        "settings.terminal.size_description",
-                        min = size_min,
-                        max = size_max
-                    )),
-                    number_input("terminal-font-size", &dialog.terminal_font_size),
-                    tokens,
-                ),
-                row(
-                    t!("settings.terminal.line_height"),
-                    Some(t!(
-                        "settings.terminal.line_height_description",
-                        min = line_min,
-                        max = line_max
-                    )),
-                    number_input("terminal-line-height", &dialog.terminal_line_height),
-                    tokens,
-                ),
-                div()
-                    .px(px(14.))
-                    .pb(px(12.))
-                    .pt(px(2.))
-                    .child(
-                        div()
-                            .px(px(12.))
-                            .py(px(10.))
-                            .rounded(px(9.))
-                            .bg(qishell_terminal::TerminalColors::current(cx).background())
-                            .overflow_hidden()
-                            .child(TerminalFontPreview::new(
-                                "terminal-font-preview",
-                                PREVIEW_LINES,
-                            )),
-                    )
-                    .into_any_element(),
-            ],
-            tokens,
-        )
-        .into_any_element(),
-        section_title(t!("settings.terminal.interaction"), None, tokens).into_any_element(),
-        group(
-            [
-                row(
-                    t!("settings.terminal.copy_on_select"),
-                    Some(t!("settings.terminal.copy_on_select_description")),
-                    copy_on_select,
-                    tokens,
-                ),
-                row(
-                    t!("settings.terminal.right_click"),
-                    None,
-                    right_click,
-                    tokens,
-                ),
-            ],
-            tokens,
-        )
-        .into_any_element(),
-        section_title(t!("settings.local_terminal.title"), None, tokens).into_any_element(),
-        group(
-            [row(
-                t!("settings.local_terminal.shell"),
-                Some(t!("settings.local_terminal.shell_description")),
-                dialog.local_shell.clone(),
+        section(t!("settings.terminal.font"), None, true, tokens),
+        row(
+            t!("settings.terminal.family"),
+            Some(t!("settings.terminal.family_description")),
+            reset_if(
+                font.family != default.terminal_font.family,
+                "terminal-font-family",
+                &store,
+                |settings| settings.terminal_font.family = None,
                 tokens,
-            )],
+            ),
+            family_field,
             tokens,
-        )
-        .into_any_element(),
+        ),
+        row_with_note(
+            t!("settings.terminal.size"),
+            Some(note_with_keys(
+                &t!(
+                    "settings.terminal.size_description",
+                    min = size_min,
+                    max = size_max
+                ),
+                TypeScale::current(cx),
+                tokens,
+                window,
+            )),
+            reset_if(
+                font.size != default.terminal_font.size,
+                "terminal-font-size",
+                &store,
+                move |settings| {
+                    settings.terminal_font.size = AppSettings::default().terminal_font.size
+                },
+                tokens,
+            ),
+            font_size,
+            tokens,
+        ),
+        row(
+            t!("settings.terminal.line_height"),
+            Some(t!(
+                "settings.terminal.line_height_description",
+                min = line_min,
+                max = line_max
+            )),
+            reset_if(
+                font.line_height != default.terminal_font.line_height,
+                "terminal-line-height",
+                &store,
+                move |settings| {
+                    settings.terminal_font.line_height =
+                        AppSettings::default().terminal_font.line_height
+                },
+                tokens,
+            ),
+            line_height,
+            tokens,
+        ),
+        preview,
+        section(t!("settings.terminal.interaction"), None, false, tokens),
+        row(
+            t!("settings.terminal.copy_on_select"),
+            Some(t!("settings.terminal.copy_on_select_description")),
+            reset_if(
+                interaction.copy_on_select != default.terminal_interaction.copy_on_select,
+                "copy-on-select",
+                &store,
+                move |settings| {
+                    settings.terminal_interaction.copy_on_select =
+                        AppSettings::default().terminal_interaction.copy_on_select
+                },
+                tokens,
+            ),
+            copy_on_select,
+            tokens,
+        ),
+        row(
+            t!("settings.terminal.right_click"),
+            Some(t!("settings.terminal.right_click_description")),
+            reset_if(
+                interaction.right_click != default.terminal_interaction.right_click,
+                "right-click",
+                &store,
+                move |settings| {
+                    settings.terminal_interaction.right_click =
+                        AppSettings::default().terminal_interaction.right_click
+                },
+                tokens,
+            ),
+            right_click,
+            tokens,
+        ),
+        section(t!("settings.local_terminal.title"), None, false, tokens),
+        row(
+            t!("settings.local_terminal.shell"),
+            Some(t!("settings.local_terminal.shell_description")),
+            reset_if(
+                settings.local_terminal.shell.is_some(),
+                "local-shell",
+                &store,
+                |settings| settings.local_terminal.shell = None,
+                tokens,
+            ),
+            tab.local_shell.clone(),
+            tokens,
+        ),
     ]
-}
-
-/// 数字输入框，套在带 id 的容器里：测试点容器的中间就点到了输入框。
-fn number_input(id: &'static str, state: &Entity<InputState>) -> impl IntoElement {
-    div()
-        .id(id)
-        .test_support()
-        .w(px(120.))
-        .child(NumberInput::new(state).small())
-}
-
-/// 一个数字设置的输入框，和它的订阅：输入的数在范围内就写进设置（打字打到一半的不写），
-/// 点 ± 按 `step` 加减；失焦或回车时显示回设置里的值；设置在别处变了也跟着显示。
-struct NumberField {
-    read: fn(&AppSettings) -> f32,
-    write: fn(&mut AppSettings, f32),
-    range: RangeInclusive<f32>,
-    step: f32,
-}
-
-impl NumberField {
-    fn build(
-        self,
-        store: &Entity<SettingsStore>,
-        window: &mut Window,
-        cx: &mut Context<SettingsDialog>,
-    ) -> (Entity<InputState>, Vec<Subscription>) {
-        let NumberField {
-            read,
-            write: store_value,
-            range,
-            step,
-        } = self;
-        let value = read(&store.read(cx).settings());
-        // ± 由输入框自己按 `step` 加减、收进范围，再发 `Change`，和打字走同一条路。
-        let input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .default_value(number_text(value))
-                .step(f64::from(step))
-                .min(f64::from(*range.start()))
-                .max(f64::from(*range.end()))
-        });
-        let set = {
-            let store = store.clone();
-            move |value: f32, cx: &mut App| {
-                write(&store, cx, |settings| store_value(settings, value));
-            }
-        };
-        let show_stored = {
-            let store = store.clone();
-            move |input: &Entity<InputState>, window: &mut Window, cx: &mut App| {
-                let stored = read(&store.read(cx).settings());
-                let shown = input.read(cx).value().trim().parse::<f32>().ok();
-                if shown != Some(stored) {
-                    input.update(cx, |input, cx| {
-                        input.set_value(number_text(stored), window, cx)
-                    });
-                }
-            }
-        };
-        let subscriptions = vec![
-            cx.subscribe_in(&input, window, {
-                move |_, input, event: &InputEvent, window, cx| match event {
-                    InputEvent::Change => {
-                        if let Ok(value) = input.read(cx).value().trim().parse::<f32>()
-                            && range.contains(&value)
-                        {
-                            set(value, cx);
-                        }
-                    }
-                    InputEvent::Blur | InputEvent::PressEnter { .. } => {
-                        show_stored(input, window, cx)
-                    }
-                    InputEvent::Focus => {}
-                }
-            }),
-            // 设置在别处变了（比如在终端里按 Ctrl+=）：没在输入时显示新值。
-            cx.observe_in(store, window, {
-                let input = input.clone();
-                move |_, store, window, cx| {
-                    if input.read(cx).focus_handle(cx).is_focused(window) {
-                        return;
-                    }
-                    let stored = read(&store.read(cx).settings());
-                    let shown = input.read(cx).value().trim().parse::<f32>().ok();
-                    if shown != Some(stored) {
-                        input.update(cx, |input, cx| {
-                            input.set_value(number_text(stored), window, cx)
-                        });
-                    }
-                }
-            }),
-        ];
-        (input, subscriptions)
-    }
-}
-
-/// 终端字号的输入框：每按一下 ± 变 0.5。
-pub(super) fn terminal_font_size_field(
-    store: &Entity<SettingsStore>,
-    window: &mut Window,
-    cx: &mut Context<SettingsDialog>,
-) -> (Entity<InputState>, Vec<Subscription>) {
-    NumberField {
-        read: |settings| settings.terminal_font.size,
-        write: |settings, size| settings.terminal_font.size = size,
-        range: TERMINAL_FONT_SIZE_RANGE,
-        step: 0.5,
-    }
-    .build(store, window, cx)
-}
-
-/// 终端行高的输入框：每按一下 ± 变 0.05。
-pub(super) fn terminal_line_height_field(
-    store: &Entity<SettingsStore>,
-    window: &mut Window,
-    cx: &mut Context<SettingsDialog>,
-) -> (Entity<InputState>, Vec<Subscription>) {
-    NumberField {
-        read: |settings| settings.terminal_font.line_height,
-        write: |settings, line_height| settings.terminal_font.line_height = line_height,
-        range: TERMINAL_LINE_HEIGHT_RANGE,
-        step: 0.05,
-    }
-    .build(store, window, cx)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{interface_font_sizes, number_text};
+    use super::{line_height_text, number_text, terminal_font_sizes, terminal_line_heights};
 
     #[test]
     fn numbers_show_without_trailing_zeros() {
@@ -470,10 +446,21 @@ mod tests {
     }
 
     #[test]
-    fn the_interface_font_size_offers_every_pixel_from_12_to_20() {
+    fn line_heights_keep_one_decimal() {
+        assert_eq!(line_height_text(1.), "1.0");
+        assert_eq!(line_height_text(1.6), "1.6");
+        assert_eq!(line_height_text(1.65), "1.65");
+    }
+
+    #[test]
+    fn the_terminal_font_offers_whole_sizes_and_tenths_of_line_height() {
+        let sizes: Vec<f32> = terminal_font_sizes().collect();
         assert_eq!(
-            interface_font_sizes().collect::<Vec<_>>(),
-            [12., 13., 14., 15., 16., 17., 18., 19., 20.]
+            (sizes[0], sizes[sizes.len() - 1], sizes.len()),
+            (10., 28., 19)
         );
+        let heights: Vec<f32> = terminal_line_heights().collect();
+        assert_eq!(heights.len(), 11);
+        assert_eq!((heights[0], heights[6], heights[10]), (1., 1.6, 2.));
     }
 }

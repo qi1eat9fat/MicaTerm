@@ -5,12 +5,12 @@ settings.store.unsaved:
   zh-CN: 无法保存设置，本次运行的改动不会被保存：%{error}
 settings.store.save_failed:
   zh-CN: 无法保存设置：%{error}
-settings.dialog.title:
+settings.tab.title:
   zh-CN: 设置
-settings.dialog.subtitle:
-  zh-CN: 改动立即生效 · 存在数据目录的 settings.json
-settings.dialog.close:
-  zh-CN: 关闭设置
+settings.tab.applies_at_once:
+  zh-CN: 改动立即生效
+settings.reset:
+  zh-CN: 恢复默认
 settings.category.appearance:
   zh-CN: 外观
 settings.category.terminal:
@@ -20,21 +20,17 @@ settings.appearance.general:
 settings.appearance.mode:
   zh-CN: 应用外观
 settings.appearance.mode_description:
-  zh-CN: 跟随系统时随系统的深浅色切换
+  zh-CN: 跟随系统时随 Windows 的深浅色切换
 settings.appearance.system:
   zh-CN: 跟随系统
 settings.appearance.light:
   zh-CN: 浅色
 settings.appearance.dark:
   zh-CN: 深色
-settings.appearance.font_size:
-  zh-CN: 界面字号
-settings.appearance.font_size_description:
-  zh-CN: 默认 %{size}；终端字号在「终端」里单独设
 settings.appearance.terminal_theme:
   zh-CN: 终端主题
 settings.appearance.terminal_theme_description:
-  zh-CN: 左栏浅色、右栏深色，各选一套；同一行是同一主题的浅色版和深色版
+  zh-CN: 浅色、深色各选一套，同一行是同一套主题；背景跟随界面
 settings.appearance.theme_chosen:
   zh-CN: "%{name}，已选"
 settings.terminal.font:
@@ -59,6 +55,8 @@ settings.terminal.copy_on_select_description:
   zh-CN: 松开鼠标就复制到剪贴板
 settings.terminal.right_click:
   zh-CN: 右键行为
+settings.terminal.right_click_description:
+  zh-CN: 显示菜单 / 粘贴 / 有选中文字就复制，否则粘贴 / 无动作
 settings.right_click.menu:
   zh-CN: 显示菜单
 settings.right_click.paste:
@@ -72,7 +70,7 @@ settings.local_terminal.title:
 settings.local_terminal.shell:
   zh-CN: Shell
 settings.local_terminal.shell_description:
-  zh-CN: 新开的本地终端运行它，可以带参数；留空则自动检测
+  zh-CN: 留空自动检测：优先 PowerShell 7，其次 Windows PowerShell，最后 cmd.exe
 settings.local_terminal.automatic:
   zh-CN: 自动检测（%{shell}）
 settings.local_terminal.automatic_unknown:
@@ -92,29 +90,25 @@ settings.sftp.file_list:
 settings.sftp.local_directory:
   zh-CN: 本地默认打开目录
 settings.sftp.local_directory_description:
-  zh-CN: 新开 SFTP 标签时本地一侧停在这里；留空是「下载」文件夹
+  zh-CN: 新开 SFTP 标签时本机一侧停在这里
 settings.sftp.local_directory_label:
   zh-CN: 本地默认打开目录，默认 %{path}
 settings.sftp.choose:
   zh-CN: 选择…
 settings.sftp.choose_prompt:
   zh-CN: 选择本地默认打开目录
-settings.sftp.icon_style:
-  zh-CN: 图标风格
-settings.sftp.icon_color:
-  zh-CN: 彩色
-settings.sftp.icon_monochrome:
-  zh-CN: 单色
 settings.sftp.show_hidden_local:
-  zh-CN: 显示隐藏文件 · 本地
+  zh-CN: 显示隐藏文件 · 本机
 settings.sftp.show_hidden_description:
   zh-CN: 名称以 . 开头的文件和目录
 settings.sftp.show_hidden_remote:
   zh-CN: 显示隐藏文件 · 远程
+settings.sftp.show_hidden_remote_description:
+  zh-CN: 名称以 . 开头的文件和目录，显示时变淡
 settings.appearance.mica:
   zh-CN: Mica 背景
 settings.appearance.mica_description:
-  zh-CN: 只在 Windows 11 22H2 及以上可用；关闭时用不透明的渐变背景
+  zh-CN: 只在 Windows 11 22H2 及以上可用；关闭时侧栏用不透明底色
 settings.category.app:
   zh-CN: 应用
 settings.app.window:
@@ -128,7 +122,9 @@ settings.app.data:
 settings.app.data_dir:
   zh-CN: 数据目录
 settings.app.data_dir_contents:
-  zh-CN: 数据库、vault.json、known_hosts、settings.json 都在这里；拷走它就带走全部配置
+  zh-CN: ：数据库、vault.json、known_hosts、settings.json
+settings.app.data_dir_beside_exe:
+  zh-CN: exe 旁的 data/
 settings.app.no_data_dir:
   zh-CN: 这次运行没有数据目录，改动不会保存
 settings.app.open_data_dir:

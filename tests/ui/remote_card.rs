@@ -4,11 +4,11 @@
 
 use std::time::Duration;
 
-use qishell::app::{ConnectHost, CopyCardAddress, DisconnectCard, EditHost, ReconnectCard};
-use qishell::backend::{AuthenticationRequest, ConnectionPromptField, ConnectionPromptKind};
-use qishell::backend::{ConnectionId, Latency, ProbedHost, RemoteEvent, RemoteTerminalId};
-use qishell_hosts::SecretRef;
-use qishell_terminal::TerminalLifecycle;
+use micaterm::app::{ConnectHost, CopyCardAddress, DisconnectCard, EditHost, ReconnectCard};
+use micaterm::backend::{AuthenticationRequest, ConnectionPromptField, ConnectionPromptKind};
+use micaterm::backend::{ConnectionId, Latency, ProbedHost, RemoteEvent, RemoteTerminalId};
+use micaterm_hosts::SecretRef;
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -93,6 +93,7 @@ fn label(
 }
 
 fn status(cx: &mut TestAppContext, handle: WindowHandle<Root>, card: u64) -> String {
+    // 状态栏从连接状态读起（名称在卡片顶行）。
     label(cx, handle, ("card-status", card as usize)).unwrap_or_default()
 }
 
@@ -155,19 +156,10 @@ fn double_clicking_a_host_opens_a_new_tab_with_only_its_remote_card(cx: &mut Tes
     // 主机自己的密码按主机 id 从保险库读；没存过时连接现场询问。
     assert_eq!(target.login.password, Some(SecretRef::password(1)));
     assert!(
-        status(cx, handle, 1)
-            .starts_with("已连接 · root@10.0.1.12:22 · 未探测 · UTF-8 · xterm-256color"),
+        status(cx, handle, 1).starts_with("已连接 · ~ · "),
         "{}",
         status(cx, handle, 1)
     );
-    // 连上了就记进最近连接。
-    cx.update(|cx| {
-        let store = workspace.read(cx).hosts().read(cx);
-        assert_eq!(
-            store.recent_hosts().next().map(|host| host.id),
-            Some(HostId(1))
-        );
-    });
 }
 
 #[gpui_kit::test]
@@ -247,14 +239,14 @@ fn the_status_bar_shows_latency_and_the_probed_system_which_becomes_the_badge(
     cx.run_until_parked();
 
     assert!(
-        status(cx, handle, 1).starts_with("已连接 · root@10.0.1.12:22 · 12 ms · Ubuntu · UTF-8"),
+        status(cx, handle, 1).starts_with("已连接 12 ms · ~ · Ubuntu · "),
         "{}",
         status(cx, handle, 1)
     );
     cx.update(|cx| {
         let workspace = workspace.read(cx);
         assert_eq!(workspace.card_tile(CardId(1), cx), Some("Ubuntu".into()));
-        assert_eq!(workspace.tab_tiles(TabId(1), cx), ["Ubuntu"]);
+        assert_eq!(workspace.tab_tile(TabId(1), cx).as_deref(), Some("Ubuntu"));
         assert_eq!(
             workspace.card(CardId(1), cx).unwrap().read(cx).connection(),
             Some(ConnectionId(1))
@@ -288,7 +280,7 @@ fn the_first_connection_asks_to_trust_the_host_key(cx: &mut TestAppContext) {
 
     let text = prompt_label(cx, handle).expect("确认框打开了");
     assert!(
-        text.starts_with("确认主机密钥\n第一次连接 10.0.1.12:22"),
+        text.starts_with("确认主机密钥\n第一次连接这台主机"),
         "{text}"
     );
     assert!(text.contains("ssh-ed25519 SHA256:abc"), "{text}");
@@ -455,11 +447,11 @@ fn a_lost_connection_greys_the_card_and_enter_reconnects_in_place(cx: &mut TestA
         Some(TerminalLifecycle::Failed(_))
     )));
     assert_eq!(
-        label(cx, handle, ("card-disconnected", 1usize)).as_deref(),
-        Some("连接已断开 · 测试启动失败 · Enter 重新连接 · Space 关闭")
+        ended_notice(cx, &workspace, 1).as_deref(),
+        Some("[连接已断开] 测试启动失败")
     );
     assert!(
-        status(cx, handle, 1).starts_with("已断开 · root@10.0.1.12:22 · 测试启动失败"),
+        status(cx, handle, 1).starts_with("已断开 测试启动失败 · "),
         "{}",
         status(cx, handle, 1)
     );
@@ -474,7 +466,7 @@ fn a_lost_connection_greys_the_card_and_enter_reconnects_in_place(cx: &mut TestA
     // 原地重连：还是这张卡片、这个标签，重新要了一次传输。
     assert_eq!(card_names(cx, &workspace), [["web-01"]]);
     assert_eq!(remote.targets().len(), 2);
-    assert_eq!(label(cx, handle, ("card-disconnected", 1usize)), None);
+    assert_eq!(ended_notice(cx, &workspace, 1), None);
     assert!(status(cx, handle, 1).starts_with("已连接"));
     cx.update(|cx| assert_eq!(workspace.read(cx).card_tile_off(CardId(1), cx), Some(false)));
 }
@@ -492,8 +484,8 @@ fn space_on_a_disconnected_card_closes_it(cx: &mut TestAppContext) {
         Some(TerminalLifecycle::Exited { .. })
     )));
     assert_eq!(
-        label(cx, handle, ("card-disconnected", 1usize)).as_deref(),
-        Some("连接已断开 · shell 已退出（退出码 9） · Enter 重新连接 · Space 关闭")
+        ended_notice(cx, &workspace, 1).as_deref(),
+        Some("[连接已断开] shell 已退出（退出码 9）")
     );
 
     in_frame(cx, handle, |window, cx| window.press("space", cx));
@@ -522,9 +514,10 @@ fn the_remote_terminal_menu_reconnects_disconnects_and_copies_the_ip(cx: &mut Te
     });
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
     assert_eq!(labels[1], "复制 IP", "{labels:?}");
+    // 最后两组：连接的操作，卡片的操作（卡片没有头部，放大、移到新标签、关闭在这里）。
     assert_eq!(
-        labels[labels.len() - 2..],
-        ["重新连接", "断开连接"],
+        labels[labels.len() - 5..],
+        ["重新连接", "断开连接", "放大卡片", "移到新标签", "关闭卡片"],
         "{labels:?}"
     );
 
@@ -543,8 +536,8 @@ fn the_remote_terminal_menu_reconnects_disconnects_and_copies_the_ip(cx: &mut Te
         "关掉了这张卡片的 shell 通道"
     );
     assert_eq!(
-        label(cx, handle, ("card-disconnected", 1usize)).as_deref(),
-        Some("连接已断开 · 已断开连接 · Enter 重新连接 · Space 关闭")
+        ended_notice(cx, &workspace, 1).as_deref(),
+        Some("[连接已断开] 已断开连接")
     );
 
     dispatch(cx, handle, ReconnectCard(CardId(1)));

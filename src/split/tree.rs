@@ -325,6 +325,21 @@ impl SplitTree {
         id
     }
 
+    /// 把 `old` 那一格换成 `card`（分屏的新卡片选好了：占位换成真卡片），分隔线和比例都不动，
+    /// 焦点给 `card`。树里没有 `old` 时不动，返回 `false`。
+    pub fn replace(&mut self, old: CardId, card: CardId) -> bool {
+        let Some(leaf) = self.root.leaf_mut(old) else {
+            return false;
+        };
+        *leaf = Node::Card(card);
+        self.recent.retain(|recent| *recent != old);
+        if self.zoomed == Some(old) {
+            self.zoomed = None;
+        }
+        self.set_focused(card);
+        true
+    }
+
     /// 放大的卡片：标签里只画它。
     pub fn zoomed(&self) -> Option<CardId> {
         self.zoomed
@@ -650,6 +665,20 @@ mod tests {
     }
 
     /// 放大和还原只换显示的那张，不改树的结构。
+    #[test]
+    fn replacing_a_card_keeps_its_place_and_ratio_and_focuses_the_new_one() {
+        let mut tree = SplitTree::new(A);
+        let node = tree.split(Axis::Horizontal, B);
+        tree.set_ratio(node, 0.3);
+        tree.focus(A);
+
+        assert!(tree.replace(B, C));
+        assert_eq!(tree.cards(), [A, C]);
+        assert_eq!(tree.ratio(node), Some(0.3));
+        assert_eq!(tree.focused(), C);
+        assert!(!tree.replace(B, C));
+    }
+
     #[test]
     fn zooming_toggles_the_focused_card_without_changing_the_tree() {
         let mut tree = SplitTree::new(A);

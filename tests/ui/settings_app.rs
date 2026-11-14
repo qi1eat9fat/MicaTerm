@@ -4,9 +4,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use qishell::app::{OpenSettings, WINDOW_STATE_FILE};
-use qishell::settings::{WindowBackdrop, WindowSettings, mica_supported};
-use qishell::workspace::{WindowState, default_window_size, window_options};
+use micaterm::app::{OpenSettings, WINDOW_STATE_FILE};
+use micaterm::settings::{WindowBackdrop, WindowSettings, mica_supported};
+use micaterm::workspace::{WindowState, default_window_size, window_options};
 
 use crate::support::*;
 
@@ -72,7 +72,7 @@ fn the_app_category_shows_the_window_data_folder_and_about(cx: &mut TestAppConte
         assert_eq!(window.find("data-dir-path").label(), Some(shown.as_str()));
         assert!(window.find("open-data-dir").visible());
         // 关于：产品名和版本，许可证按钮。
-        let about = format!("QiShell {}", env!("CARGO_PKG_VERSION"));
+        let about = format!("MicaTerm {}", env!("CARGO_PKG_VERSION"));
         assert_eq!(window.find("about-version").label(), Some(about.as_str()));
         assert!(window.find("about-license").visible());
     });

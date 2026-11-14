@@ -16,7 +16,7 @@ use crate::app::{
 };
 use crate::i18n::t;
 use crate::settings::segmented;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, TypeScale, ui_text};
 use crate::ui::DialogLayer;
 
 /// 预览读的图片不能比这大。
@@ -236,7 +236,7 @@ impl PreviewDialog {
                     .aria_label(zoom.clone())
                     .w(px(40.))
                     .text_center()
-                    .text_size(px(12.))
+                    .text_size(ui_text())
                     .text_color(tokens.faint)
                     .child(zoom),
             )
@@ -271,7 +271,7 @@ impl PreviewDialog {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .text_size(px(14.))
+                    .text_size(TypeScale::current(cx).title)
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(self.name.clone()),
             )
@@ -286,7 +286,7 @@ impl PreviewDialog {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .text_size(px(12.))
+                    .text_size(ui_text())
                     .text_color(tokens.faint)
                     .child(info)
             })
@@ -326,7 +326,9 @@ impl Render for PreviewDialog {
         let is_image = matches!(self.body, PreviewBody::Image(_));
         let body = match &self.body {
             PreviewBody::Image(image) => image.render_frame(&tokens, window, cx).into_any_element(),
-            PreviewBody::Markdown(text) => render_markdown(&self.name, text).into_any_element(),
+            PreviewBody::Markdown(text) => {
+                render_markdown(&self.name, text, TypeScale::current(cx).side).into_any_element()
+            }
         };
         div()
             .id("preview-dialog")
@@ -366,7 +368,12 @@ impl Render for PreviewDialog {
 }
 
 /// 排版后的 Markdown（原型 `.pv .md`）。点链接默认用浏览器打开。
-fn render_markdown(name: &SharedString, text: &SharedString) -> impl IntoElement + use<> {
+/// 正文用列表主文字那一档（`side`），比界面字大一点，读起来舒服。
+fn render_markdown(
+    name: &SharedString,
+    text: &SharedString,
+    size: Pixels,
+) -> impl IntoElement + use<> {
     div()
         .id("preview-markdown")
         .test_support()
@@ -375,7 +382,7 @@ fn render_markdown(name: &SharedString, text: &SharedString) -> impl IntoElement
         .min_w_0()
         .min_h_0()
         .size_full()
-        .text_size(px(13.5))
+        .text_size(size)
         .child(
             TextView::markdown("preview-markdown-text", text.clone())
                 .scrollable(true)
@@ -434,7 +441,7 @@ fn tool_button<F: Fn(&ClickEvent, &mut Window, &mut App) + 'static>(
     tokens: &Tokens,
     on_click: F,
 ) -> impl IntoElement + use<F> {
-    let pressed = tokens.pressed;
+    let pressed = tokens.sel;
     div()
         .id(id)
         .test_support()
@@ -447,7 +454,7 @@ fn tool_button<F: Fn(&ClickEvent, &mut Window, &mut App) + 'static>(
         .px(px(10.))
         .rounded(px(13.))
         .bg(tokens.hover)
-        .text_size(px(12.5))
+        .text_size(ui_text())
         .whitespace_nowrap()
         .cursor_pointer()
         .hover(move |style| style.bg(pressed))

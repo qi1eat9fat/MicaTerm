@@ -3,17 +3,20 @@
 // 来自 since2006/shell-rs @ b2a307a: src/settings/local_shell_editor.rs（裁剪：去掉「选择文件…」和切换语言）
 
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, Sizable as _,
+    Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 use gpui_kit::*;
 
-use qishell_terminal::{default_shell_name, installed_shells};
+use micaterm_terminal::{default_shell_name, installed_shells};
 
 use super::SettingsStore;
+use super::controls::field_input;
+use super::pages::WIDE_WIDTH;
 use crate::i18n::t;
+use crate::theme::Tokens;
 
 /// 输入框的文字（设置在它下面变时也保住光标），和下拉里列的 shell。
 pub struct LocalShellEditor {
@@ -123,10 +126,15 @@ impl Render for LocalShellEditor {
             .map(|found| found.installed.clone())
             .unwrap_or_default();
         let editor = cx.entity().downgrade();
+        let tokens = Tokens::current(cx);
         let menu = Button::new("local-shell-menu")
             .ghost()
             .xsmall()
-            .icon(IconName::ChevronDown)
+            .icon(
+                Icon::new(IconName::ChevronDown)
+                    .size(px(12.))
+                    .text_color(tokens.st_dim),
+            )
             .tooltip(t!("settings.local_terminal.installed"))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
                 let item = |label: SharedString, shell: Option<String>| {
@@ -147,13 +155,13 @@ impl Render for LocalShellEditor {
                     menu.item(item(shell.clone().into(), Some(shell.clone())))
                 })
             });
-        div().w(px(300.)).child(
+        // 26 号 `.stg-in`：界面字体（等宽字体会把中文的占位字拉开）。
+        div().w(WIDE_WIDTH).child(field_input(
             Input::new(&self.input)
                 .id("local-shell")
                 .aria_label(t!("settings.local_terminal.shell"))
-                .small()
-                .font_family(cx.theme().mono_font_family.clone())
                 .suffix(menu),
-        )
+            &tokens,
+        ))
     }
 }

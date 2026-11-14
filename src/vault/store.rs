@@ -7,7 +7,7 @@ use anyhow::Result;
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task};
 use zeroize::Zeroizing;
 
-use qishell_hosts::{SecretError, SecretRef, Vault, VaultError, VaultStatus};
+use micaterm_hosts::{SecretError, SecretRef, Vault, VaultError, VaultStatus};
 
 use crate::host::ErrorMessage as _;
 use crate::i18n::t;

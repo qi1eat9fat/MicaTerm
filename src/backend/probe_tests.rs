@@ -4,12 +4,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer};
-use qishell_ssh::{AgentLocation, HostLogin, LoginMethod, PROBE_COMMAND, SecretRef, SshConnector};
+use micaterm_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer};
+use micaterm_ssh::{AgentLocation, HostLogin, LoginMethod, PROBE_COMMAND, SecretRef, SshConnector};
 
 use super::tests::{Answerer, Terminal};
 use super::{ProbeFailure, RemoteEvent, RemoteTarget, RemoteTerminalId, SshRemoteTerminals};
-use qishell_hosts::HostId;
+use micaterm_hosts::HostId;
 
 /// 测试服务器、它的运行时和临时的 `known_hosts`。
 struct Fixture {

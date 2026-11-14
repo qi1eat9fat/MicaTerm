@@ -1,41 +1,51 @@
 // 参考 since2006/shell-rs @ b2a307a: src/editor/editor_panel.rs
-// 改造：不是 Dock 面板，是标签轨道上的一项；对话框走 `DialogLayer`；卡片的样子、状态栏和冲突框照全部界面原型。
+// 改造：不是 Dock 面板，是标签轨道上的一项；对话框走 `DialogLayer`；样子照 26 号「编辑器」（照 Zed 编辑器）。
 //! 编辑器标签（工单 23）：编辑一个远程文件或本地文件，不能分屏。
 //!
 //! 远程文件经打开它的 SFTP 标签的连接读写，本地文件直接读写磁盘。文件先读后开（`sftp_tab::file_open`）。
 //! `has_unsaved_changes` 决定标签上的橙点和关闭时要不要问。
+//!
+//! 样子（26 号，UI 重做工单 11）：没有卡片外框、头部和「重新加载」「保存」按钮——保存走 Ctrl+S，状态栏写
+//! 「未保存」，重新加载是状态栏最右边的小图标。代码区和终端同一种字体、字号、配色（`theme::code_colors`），
+//! 底色是内容区；行号右对齐、淡色，当前行号稍亮，当前行一层很淡的底色。查找替换见 `find`。
 
+mod find;
 mod model;
 
 use std::path::PathBuf;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::base::input::{DiagnosticColors, InputEditorStyle};
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, Position, Rope, RopeExt as _};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, Icon, Sizable as _, WindowExt as _};
+use gpui_kit::component::{ActiveTheme as _, Icon, WindowExt as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use micaterm_terminal::{TerminalColors, TerminalFont};
 
 pub use model::{
     cursor_label, encoding_label, indentation, language_for, language_label, line_end_label,
 };
 
-use crate::app::{CatalogIcon, EDITOR_CONTEXT, ReloadEditor, SaveEditor};
+use crate::app::{CatalogIcon, EDITOR_CONTEXT, ReloadEditor};
 use crate::backend::sftp::{
     FileStamp, ReadFailure, RemotePath, SaveFailure, SharedLocalDirectoryProvider, TextFile,
     TextFormat, describe_read_failure, read_local_text, write_local_text,
 };
-use crate::card::{StatusDot, render_program_tile, render_status_dot};
+use crate::card::StatusDot;
 use crate::i18n::t;
 use crate::programs::Program;
 use crate::sftp_tab::{SftpTab, format_changed, format_size};
-use crate::theme::{CARD_HEADER_HEIGHT, CARD_RADIUS, STATUS_BAR_HEIGHT, Tokens};
+use crate::theme::{Tokens, TypeScale, size};
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{
     Choice, ChoiceButton, ChoiceTone, Confirm, ConfirmLine, open_choice_dialog, open_confirm_dialog,
 };
+use crate::ui::icon_button::IconButton;
 
-/// 编辑器的行高（原型 `.ed`）。
+/// 编辑器的行高（26 号 `.ed-code`）。
 const LINE_HEIGHT: f32 = 1.6;
+/// 代码区上下留的边（26 号 `.ed-code` 的 padding 10，减去编辑器自己留的）。
+const CODE_TOP: Pixels = px(4.);
 
 /// 编辑器标签打开的文件在哪里。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -103,10 +113,8 @@ enum Phase {
 /// 打开一个编辑器标签要的东西。
 pub struct EditorOptions {
     pub location: EditorLocation,
-    /// 标签上的灰字：主机名（本地文件写「本机」）。
+    /// 状态栏左边的名字：主机名（本地文件写「本机」）。
     pub place: SharedString,
-    /// 状态栏左边：文件走的连接（本地文件写「本机文件」）。
-    pub link: SharedString,
     /// 打开它的 SFTP 标签：本地文件是 `None`。
     pub sftp: Option<WeakEntity<SftpTab>>,
     pub local_files: SharedLocalDirectoryProvider,
@@ -121,7 +129,6 @@ pub struct EditorTab {
     /// 文件名：标签上的名称。
     name: SharedString,
     place: SharedString,
-    link: SharedString,
     sftp: Option<WeakEntity<SftpTab>>,
     local_files: SharedLocalDirectoryProvider,
     language: &'static str,
@@ -138,6 +145,10 @@ pub struct EditorTab {
     cursor: Position,
     /// 开着的冲突框或者关闭确认，不再叠一个。
     dialog: Option<DialogLayer>,
+    /// 开着的查找浮卡。
+    find: Option<find::EditorFind>,
+    /// 上次查的：关了浮卡再开（没选着文字时）接着查它。
+    last_query: SharedString,
     dispatch: FocusHandle,
     _task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -150,7 +161,6 @@ impl EditorTab {
         let EditorOptions {
             location,
             place,
-            link,
             sftp,
             local_files,
             file,
@@ -171,6 +181,7 @@ impl EditorTab {
             cx.subscribe(&state, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.update_unsaved(cx);
+                    this.recount(cx);
                 }
             }),
             // 光标动了，文字没变。
@@ -186,7 +197,6 @@ impl EditorTab {
             location,
             name: name.into(),
             place,
-            link,
             sftp,
             local_files,
             language,
@@ -199,6 +209,8 @@ impl EditorTab {
             close_after_save: false,
             cursor: Position::default(),
             dialog: None,
+            find: None,
+            last_query: SharedString::default(),
             dispatch,
             _task: None,
             _subscriptions: subscriptions,
@@ -587,105 +599,33 @@ impl EditorTab {
             .is_some_and(|layer| layer.is_open(window, cx))
     }
 
-    /// 头部灰字：`web-01:/var/www/app/`，本地文件是所在的目录。
-    fn header_directory(&self) -> String {
-        let directory = self.location.directory();
-        match &self.location {
-            EditorLocation::Remote(_) => {
-                format!("{}:{}/", self.place, directory.trim_end_matches('/'))
-            }
-            EditorLocation::Local(_) => directory,
-        }
-    }
-
-    fn render_header(&self, tokens: &Tokens) -> impl IntoElement + use<> {
-        let directory = self.header_directory();
-        let command = |action: fn(&FocusHandle, &mut Window, &mut App)| {
-            let dispatch = self.dispatch.clone();
-            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                let dispatch = dispatch.clone();
-                window.defer(cx, move |window, cx| action(&dispatch, window, cx));
-            }
+    /// 状态栏（26 号 `.status`，和终端窗格同一种）：左边 主机（本地「本机」）/ 文件的完整路径，
+    /// 有未保存的修改时一个橙点「未保存」（正在保存、重新加载时写正在做什么）；右边 光标位置 | 编码 |
+    /// 换行 | 语言，最右一个「重新加载」小图标。
+    fn render_status(&self, tokens: &Tokens, scale: TypeScale) -> impl IntoElement + use<> {
+        let state: Option<SharedString> = match self.phase {
+            Phase::Saving => Some(t!("editor.status.saving")),
+            Phase::Reloading => Some(t!("editor.status.reloading")),
+            Phase::Idle => self.unsaved.then(|| t!("editor.status.unsaved")),
         };
-        div()
-            .id("editor-header")
-            .test_support()
-            .aria_label(format!("{} {}", self.name, directory))
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(7.))
-            .h(CARD_HEADER_HEIGHT)
-            .pl(px(12.))
-            .pr(px(8.))
-            .child(render_program_tile(
-                "editor-tile".into(),
-                &self.rail_tile(),
-                tokens,
-            ))
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(px(12.5))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .whitespace_nowrap()
-                    .child(self.name.clone()),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .text_size(px(12.5))
-                    .text_color(tokens.muted)
-                    .truncate()
-                    .child(directory),
-            )
-            .children(render_status_dot(
-                "editor-dot".into(),
-                self.rail_dot(),
-                tokens,
-            ))
-            .child(div().flex_1())
-            .child(
-                Button::new("editor-reload")
-                    .ghost()
-                    .small()
-                    .icon(Icon::new(CatalogIcon::RefreshCw))
-                    .label(t!("editor.command.reload"))
-                    .disabled(self.phase != Phase::Idle)
-                    .on_click(command(|dispatch, window, cx| {
-                        dispatch.dispatch_action(&ReloadEditor, window, cx)
-                    })),
-            )
-            .child(
-                Button::new("editor-save")
-                    .primary()
-                    .small()
-                    .label(t!("editor.command.save"))
-                    .disabled(!self.unsaved || self.phase != Phase::Idle)
-                    .on_click(command(|dispatch, window, cx| {
-                        dispatch.dispatch_action(&SaveEditor, window, cx)
-                    })),
-            )
-    }
-
-    fn render_status(&self, tokens: &Tokens) -> impl IntoElement + use<> {
-        let left: SharedString = match self.phase {
-            Phase::Idle => self.link.clone(),
-            Phase::Saving => t!("editor.status.saving"),
-            Phase::Reloading => t!("editor.status.reloading"),
-        };
+        let path = self.location.path();
         let right: [SharedString; 4] = [
             cursor_label(self.cursor.line, self.cursor.character),
             encoding_label(self.format).into(),
             line_end_label(self.format).into(),
             language_label(self.language),
         ];
-        let label = std::iter::once(&left)
-            .chain(right.iter())
-            .map(SharedString::as_ref)
+        let label = std::iter::once(format!("{} / {path}", self.place))
+            .chain(state.iter().map(ToString::to_string))
+            .chain(right.iter().map(ToString::to_string))
             .collect::<Vec<_>>()
             .join(" \u{b7} ");
-        let segment = |text: SharedString| div().min_w_0().truncate().child(text);
+        let rule = || div().flex_none().w(size::LINE).h(px(12.)).bg(tokens.line);
+        let (icon, reload_tip) = if self.location.is_remote() {
+            (CatalogIcon::Server, t!("editor.command.reload_remote"))
+        } else {
+            (CatalogIcon::Monitor, t!("editor.command.reload_local"))
+        };
         div()
             .id("editor-status")
             .test_support()
@@ -693,25 +633,125 @@ impl EditorTab {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(12.))
-            .h(STATUS_BAR_HEIGHT)
-            .pl(px(12.))
-            .pr(px(10.))
-            .text_size(px(11.))
-            .text_color(tokens.faint)
-            .border_t_1()
+            .gap(px(10.))
+            .h(size::STATUS_BAR)
+            // 左边距和代码的行号对齐（26 号 `.status` padding-left 20）。
+            .pl(px(20.))
+            .pr(px(4.))
+            .border_t(size::LINE)
             .border_color(tokens.line)
+            .bg(tokens.tabbar)
+            .text_size(scale.ui)
+            .text_color(tokens.text2)
             .whitespace_nowrap()
             .overflow_hidden()
-            .child(segment(left))
+            .child(
+                div()
+                    .flex()
+                    .min_w_0()
+                    .items_center()
+                    .gap(px(6.))
+                    // 13 的图标往下挪半个像素才和字面居中（和窗格状态栏一样，真程序实测）。
+                    .child(
+                        div()
+                            .flex_none()
+                            .relative()
+                            .top(px(0.5))
+                            .text_color(tokens.icon)
+                            .child(Icon::new(icon).size(px(13.))),
+                    )
+                    .child(div().flex_none().child(self.place.clone()))
+                    .child(div().flex_none().text_color(tokens.faint).child("/"))
+                    .child(div().min_w_0().truncate().child(path)),
+            )
+            .when_some(state, |bar, state| {
+                bar.child(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .gap(px(6.))
+                        .when(self.unsaved && self.phase == Phase::Idle, |group| {
+                            group.child(
+                                div()
+                                    .flex_none()
+                                    .size(size::DOT)
+                                    .rounded_full()
+                                    .bg(tokens.warn),
+                            )
+                        })
+                        .child(state),
+                )
+            })
             .child(
                 div()
                     .ml_auto()
                     .flex()
                     .flex_none()
-                    .gap(px(12.))
-                    .children(right.into_iter().map(segment)),
+                    .items_center()
+                    .gap(px(10.))
+                    .children(right.into_iter().enumerate().flat_map(|(ix, part)| {
+                        let rule = (ix > 0).then(|| rule().into_any_element());
+                        rule.into_iter()
+                            .chain(std::iter::once(div().child(part).into_any_element()))
+                    }))
+                    .child(
+                        IconButton::new(
+                            "editor-reload",
+                            Icon::new(CatalogIcon::RefreshCw),
+                            reload_tip.clone(),
+                        )
+                        .size(px(22.), px(13.))
+                        .tooltip(reload_tip)
+                        .dimmed(self.phase != Phase::Idle)
+                        .dispatch(
+                            Box::new(ReloadEditor),
+                            &self.dispatch,
+                            tokens,
+                        ),
+                    ),
             )
+    }
+
+    /// 只给这一个编辑器换行号的颜色（26 号：行号 `--faint`、当前行号 `--text2`），并去掉缩进参考线
+    /// （26 号没有；它只用 `border` 画参考线，设成透明就不画了）。gpui-component
+    /// 拿主题的次要字色、正文色画行号，而这两个颜色全应用都在用，不能改；它每次画都把样式重设一遍，
+    /// 所以放一块画布在编辑器前面，等它设完、画之前再换一次。其余照 gpui-component `Input::render`。
+    fn override_line_numbers(&self, tokens: &Tokens) -> impl IntoElement + use<> {
+        let state = self.state.clone();
+        let (line_number, current_line_number) = (tokens.faint, tokens.text2);
+        canvas(
+            move |_, _, cx| {
+                let theme = cx.theme();
+                let highlight = theme.highlight_theme.clone();
+                let style = InputEditorStyle {
+                    foreground: current_line_number,
+                    muted_foreground: line_number,
+                    background: highlight
+                        .style
+                        .editor_background
+                        .unwrap_or(theme.background),
+                    border: transparent_black(),
+                    selection: theme.selection,
+                    caret: theme.caret,
+                    diagnostics: DiagnosticColors {
+                        error: highlight.style.status.error(cx),
+                        warning: highlight.style.status.warning(cx),
+                        info: highlight.style.status.info(cx),
+                        hint: highlight.style.status.hint(cx),
+                    },
+                    editor_invisible: highlight.style.editor_invisible,
+                    editor_active_line: highlight.style.editor_active_line,
+                    editor_gutter_background: highlight.style.editor_gutter_background,
+                    highlight_styles: highlight,
+                    fold_icon_renderer: None,
+                };
+                state.update(cx, |state, _| state.set_editor_style(style));
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_0()
     }
 }
 
@@ -731,9 +771,13 @@ fn stamp_label(stamp: FileStamp) -> String {
 impl Render for EditorTab {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
-        div()
+        let scale = TypeScale::current(cx);
+        // 和终端同一种字体、字号、前景色。
+        let font = TerminalFont::current(cx);
+        let family = font.family(cx);
+        let foreground = TerminalColors::current(cx).foreground();
+        let root = div()
             .id("editor-tab")
-            .test_support()
             .key_context(EDITOR_CONTEXT)
             .flex()
             .flex_col()
@@ -742,38 +786,34 @@ impl Render for EditorTab {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .rounded(CARD_RADIUS)
-            .bg(tokens.card_focused)
-            .border_1()
-            .border_color(tokens.card_focused_border)
-            .shadow(vec![BoxShadow {
-                color: tokens.shadow_focused,
-                offset: point(px(0.), px(6.)),
-                blur_radius: px(22.),
-                spread_radius: px(-2.),
-                inset: false,
-            }])
-            .child(self.render_header(&tokens))
+            .bg(tokens.content);
+        self.find_actions(root, cx)
             .child(
                 div()
                     .id("editor-text")
                     .test_support()
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .pt(px(4.))
-                    .pr(px(12.))
-                    .pb(px(8.))
+                    .pt(CODE_TOP)
+                    .child(self.override_line_numbers(&tokens))
                     .child(
                         Editor::new(&self.state)
                             .appearance(false)
                             .bordered(false)
                             .h_full()
+                            .font_family(family.clone())
+                            .text_size(font.size)
                             .line_height(relative(LINE_HEIGHT))
+                            .text_color(foreground)
                             .readonly(self.phase == Phase::Reloading)
                             .aria_label(t!("editor.text_label", name = self.name)),
-                    ),
+                    )
+                    .children(self.render_matches((family, font.size)))
+                    .children(self.render_find(cx)),
             )
-            .child(self.render_status(&tokens))
+            .child(self.render_status(&tokens, scale))
+            .test_support()
     }
 }
 

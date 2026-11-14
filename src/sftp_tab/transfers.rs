@@ -41,6 +41,8 @@ pub struct TransferState {
     /// 开着的确认框，开着时不再叠一个。
     confirmation: Option<DialogLayer>,
     question: Option<OpenQuestion>,
+    /// 队列表格滚到哪了。
+    pub(super) scroll: gpui_kit::UniformListScrollHandle,
 }
 
 impl SftpTab {

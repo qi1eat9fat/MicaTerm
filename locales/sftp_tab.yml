@@ -43,18 +43,12 @@ sftp_tab.list.read_failed:
   zh-CN: 无法读取目录：%{error}
 sftp_tab.path.hint:
   zh-CN: 回车切换 · Esc 取消
-sftp_tab.status.items:
-  zh-CN: "%{count} 项"
 sftp_tab.status.items_selected:
   zh-CN: "%{count} 项 · 已选 %{selected} 项"
-sftp_tab.status.hidden:
-  zh-CN: 隐藏 %{count} 项
 sftp_tab.status.opening:
   zh-CN: 正在打开 %{name}…
 sftp_tab.status.connecting:
   zh-CN: 正在连接
-sftp_tab.status.connected:
-  zh-CN: 已连接
 sftp_tab.status.disconnected:
   zh-CN: 已断开
 sftp_tab.drag.upload:

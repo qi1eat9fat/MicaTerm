@@ -1,5 +1,8 @@
-//! 标签轨道（原型 `.track`）和里面的标签（`.tab`）：宽固定 180、高 28，叠放的程序图块、名称、目录和状态点。
-//! 点标签切过去；悬停时状态点让位给 ×，点了关闭整个标签；右键菜单三项；放不下时轨道横向滚动。
+//! 标签栏里的标签（26 号 `.tab`）：宽固定 176、高 32，右边一条竖线；前面是图块（终端标签里每张卡片一块、
+//! 叠放，焦点卡片在最前；SFTP、编辑器用类型图标），后面是名称、状态点和 ×（悬停或在前时出现）。
+//! 在前的标签是内容底色，盖住标签栏的下边线，和下面的内容连成一片。
+//! 标签里不止一张卡片时，悬停提示列出每张卡片的名称（焦点卡片排第一）。
+//! 点标签切过去；× 关闭整个标签；右键菜单三项；放不下时横向滚动。
 //! 按住标签左右拖动改顺序（工单 29）：标题栏里有插入线，拖到轨道两端自动横向滚动，
 //! 拖过轨道右端（`+`、拖动区）放到最后，拖过左端（「展开主机栏」）放到第一个；拖动中不切换在前的标签。
 //! 渲染不读实体，只拿窗口壳取好的快照；点击、菜单、拖动排序都经窗口壳的焦点派发 action。
@@ -10,33 +13,46 @@ use std::rc::Rc;
 
 use gpui_kit::base::POPUP_PRIORITY;
 use gpui_kit::component::Icon;
-use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use micaterm_ui::Menu;
 
 use super::{TabDrop, TabId};
 use crate::app::{
     ActivateTab, CatalogIcon, CloseOtherTabs, CloseTab, CloseTabsToRight, MoveTab, OpenTabMenu,
 };
-use crate::card::{StatusDot, render_status_dot, render_tile_stack};
+use crate::card::{StatusDot, render_status_dot, render_tab_tile};
 use crate::i18n::t;
 use crate::programs::Program;
-use crate::theme::{TAB_HEIGHT, TAB_TRACK_HEIGHT, TAB_WIDTH, Tokens};
+use crate::theme::{Tokens, TypeScale, size};
 use crate::ui::drag::{DragSlot, DropEdge, fade_while_dragged, render_drop_line};
+use crate::ui::icon_button::TextTooltip;
 
 /// 画一个标签要的东西。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabSnapshot {
     pub id: TabId,
-    /// 焦点卡片的名称（shell 名、主机名）。
+    /// 焦点卡片的名称（shell 名、主机名）；编辑器是文件名。
     pub name: SharedString,
-    /// 焦点卡片的目录。
+    /// 焦点卡片的目录：标签上不写（定宽放不下），只进无障碍名称。
     pub directory: SharedString,
     pub active: bool,
-    /// 叠放的程序图块：焦点卡片的在最前面，其余按分屏树的顺序，最多 3 块。
-    pub tiles: Vec<Program>,
+    /// 名称前面那一块（终端标签是叠放的几块）。
+    pub leading: TabLeading,
+    /// 终端标签里每张卡片的名称，焦点卡片排第一：不止一张时悬停提示列出来。别的标签是空的。
+    pub members: Vec<SharedString>,
     /// 标签上的状态点：有卡片要注意是橙点，否则有卡片在输出是绿点。
     pub dot: StatusDot,
+}
+
+/// 标签名称前面那一块。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TabLeading {
+    /// 终端标签：每张卡片一块（系统徽章，认出前台程序时是那个程序的图块），焦点卡片排第一；
+    /// 叠放，最多画 3 块（2026-11-14 用户定，取代「只放一块」）。
+    Tiles(Vec<Program>),
+    /// SFTP、编辑器标签：类型图标（文件夹、文件）。
+    Icon(CatalogIcon),
 }
 
 /// 标签轨道跨帧要记住的东西：横向滚动的位置、上一次露出来的在前标签、开着的右键菜单、拖动。
@@ -61,7 +77,7 @@ pub struct TabRail {
 struct OpenMenu {
     tab: TabId,
     position: Point<Pixels>,
-    view: Entity<PopupMenu>,
+    view: Entity<Menu>,
     _dismiss: Subscription,
 }
 
@@ -73,10 +89,15 @@ struct TabDrag {
     over_title_bar: bool,
 }
 
-/// 标签之间的竖线（`.tsep`）。
-const SEPARATOR_WIDTH: Pixels = px(1.);
 /// × 按钮的边长（`.tab .x`）。
-const CLOSE_BUTTON: Pixels = px(18.);
+const CLOSE_BUTTON: Pixels = px(20.);
+/// 叠放的图块最多画几块。
+const MAX_TILES: usize = 3;
+/// 后一块比前一块往右错开多少；每块外面一圈标签底色的宽度。
+const TILE_STEP: Pixels = px(6.);
+const TILE_RING: Pixels = px(1.5);
+/// 图块的边长（`render_tab_tile`）。
+const TILE: Pixels = px(14.);
 /// 拖到离轨道两端这么近（或者过了两端）时自动横向滚动。
 const AUTO_SCROLL_EDGE: Pixels = px(32.);
 /// 自动滚动每帧滚多少。
@@ -102,7 +123,6 @@ impl TabRail {
             return None;
         }
         self.reveal_active(&tabs);
-        let active = tabs.iter().position(|tab| tab.active);
         let menu_tab = self.menu_tab();
         let count = tabs.len();
         let drag = self.drag.get();
@@ -113,30 +133,26 @@ impl TabRail {
             drop.destination(&order, drag.source)?;
             line_position(drop, &order)
         });
-        let mut children = Vec::with_capacity(count * 2);
-        for (index, tab) in tabs.into_iter().enumerate() {
-            let look = TabLook {
-                pressed: menu_tab == Some(tab.id),
-                dragged: drag.is_some_and(|drag| drag.source == tab.id),
-                line: line.and_then(|(at, edge)| (at == index).then_some(edge)),
-            };
-            children.push(render_tab(tab, look, target, tokens).into_any_element());
-            if index + 1 < count {
-                // 在前的标签两边不画竖线（它自己有底色）。
-                let hidden = active == Some(index) || active == Some(index + 1);
-                children.push(render_separator(hidden, tokens).into_any_element());
-            }
-        }
+        let text_size = TypeScale::current(cx).ui;
+        let children: Vec<AnyElement> = tabs
+            .into_iter()
+            .enumerate()
+            .map(|(index, tab)| {
+                let look = TabLook {
+                    pressed: menu_tab == Some(tab.id),
+                    dragged: drag.is_some_and(|drag| drag.source == tab.id),
+                    line: line.and_then(|(at, edge)| (at == index).then_some(edge)),
+                };
+                render_tab(tab, look, text_size, target, tokens).into_any_element()
+            })
+            .collect();
+        debug_assert_eq!(children.len(), count);
         Some(
             div()
                 .id("tab-track")
                 .test_support()
                 .flex()
-                .items_center()
-                .h(TAB_TRACK_HEIGHT)
-                .p(px(2.))
-                .rounded(px(16.))
-                .bg(tokens.track)
+                .h_full()
                 .min_w_0()
                 // 只横着滚：普通滚轮的竖直增量也换成横向（GPUI 对单轴滚动容器的处理）。
                 .overflow_x_scroll()
@@ -193,7 +209,7 @@ impl TabRail {
         &mut self,
         tab: TabId,
         position: Point<Pixels>,
-        view: Entity<PopupMenu>,
+        view: Entity<Menu>,
         dismiss: Subscription,
     ) {
         self.menu = Some(OpenMenu {
@@ -205,7 +221,7 @@ impl TabRail {
     }
 
     /// 关掉右键菜单，只在开着的正是 `view` 时（右键另一个标签时，旧菜单的关闭事件晚到）。
-    pub fn close_menu(&mut self, view: &Entity<PopupMenu>) {
+    pub fn close_menu(&mut self, view: &Entity<Menu>) {
         if self.menu.as_ref().is_some_and(|menu| &menu.view == view) {
             self.menu = None;
         }
@@ -216,7 +232,7 @@ impl TabRail {
         self.menu.as_ref().map(|menu| menu.tab)
     }
 
-    /// 在前的标签换了：下一帧把它滚进视野。子元素里标签和竖线交替，第 i 个标签是第 2i 个子元素。
+    /// 在前的标签换了：下一帧把它滚进视野。第 i 个标签是第 i 个子元素。
     fn reveal_active(&self, tabs: &[TabSnapshot]) {
         let Some((index, tab)) = tabs.iter().enumerate().find(|(_, tab)| tab.active) else {
             return;
@@ -224,7 +240,7 @@ impl TabRail {
         if self.revealed.get() != Some(tab.id) || self.reveal_requested.get() {
             self.revealed.set(Some(tab.id));
             self.reveal_requested.set(false);
-            self.scroll.scroll_to_item(index * 2);
+            self.scroll.scroll_to_item(index);
         }
     }
 
@@ -266,7 +282,7 @@ fn drop_at(x: Pixels, scroll: &ScrollHandle, order: &[TabId]) -> Option<TabDrop>
     }
     let offset = scroll.offset().x;
     for (index, id) in order.iter().enumerate() {
-        let bounds = scroll.bounds_for_item(index * 2)?;
+        let bounds = scroll.bounds_for_item(index)?;
         if x < bounds.center().x + offset {
             return Some(TabDrop::Before(*id));
         }
@@ -295,9 +311,9 @@ pub fn build_tab_menu(
     target: &FocusHandle,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<PopupMenu> {
+) -> Entity<Menu> {
     let target = target.clone();
-    PopupMenu::build(window, cx, move |menu, _, _| {
+    Menu::build(window, cx, move |menu, _, _| {
         menu.action_context(target)
             .menu(t!("tabs.menu.close"), Box::new(CloseTab(tab)))
             .menu(t!("tabs.menu.close_others"), Box::new(CloseOtherTabs(tab)))
@@ -318,28 +334,39 @@ struct TabLook {
 fn render_tab(
     tab: TabSnapshot,
     look: TabLook,
+    text_size: Pixels,
     target: &FocusHandle,
     tokens: &Tokens,
 ) -> impl IntoElement {
-    let hover = tokens.hover;
     let id = tab.id;
     let activate = target.clone();
     let open_menu = target.clone();
     let dot = tab.dot;
+    let active = tab.active;
+    let text = tokens.text;
     let dragged = DraggedTab { tab: tab.clone() };
-    render_tab_face(&tab, ("tab-tiles", id.0 as usize).into(), tokens)
+    render_tab_face(&tab, ("tab-tiles", id.0 as usize).into(), text_size, tokens)
         .id(("tab", id.0 as usize))
         .test_support()
         .group("tab")
         .aria_label(format!("{} {}", tab.name, tab.directory))
         .relative()
         .cursor_pointer()
-        .when(tab.active, |this| {
-            this.bg(tokens.tab_active)
-                .shadow(floating_shadow(tokens.shadow))
+        .border_r(size::LINE)
+        .border_color(tokens.line)
+        .when(!active, |this| {
+            this.hover(move |style| style.text_color(text))
         })
-        .when(!tab.active, |this| this.hover(move |style| style.bg(hover)))
-        .when(look.pressed, |this| this.bg(tokens.pressed))
+        // 被右键的标签描一圈细边（和主机右键一样，在前的标签底色不变）。
+        .when(look.pressed, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .border_1()
+                    .border_color(tokens.line_strong),
+            )
+        })
         .map(|this| fade_while_dragged(this, look.dragged))
         // 按下标签不把焦点交给窗口壳：拖动排序（或拖出去取消）之后焦点还在原来的卡片里。
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
@@ -352,100 +379,130 @@ fn render_tab(
         })
         // 预览按住的位置跟着鼠标，看起来就是标签本身被拿起来。
         .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-        .child(
-            // 状态点和 × 占同一个位置：悬停时点让位给 ×（原型 `.tab:hover .dot`）。
-            div()
-                .relative()
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .size(CLOSE_BUTTON)
-                .children(
-                    render_status_dot(("tab-dot", id.0 as usize).into(), dot, tokens).map(|dot| {
-                        div()
-                            .absolute()
-                            .size_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .group_hover("tab", |style| style.invisible())
-                            .child(dot)
-                    }),
-                )
-                .child(render_close_button(id, target, tokens)),
-        )
+        // 不止一张卡片：悬停提示列出每张卡片（「web-01 · db-master · PowerShell」）。
+        .when(tab.members.len() > 1, |this| {
+            let text: SharedString = tab
+                .members
+                .iter()
+                .map(SharedString::as_ref)
+                .collect::<Vec<_>>()
+                .join(" · ")
+                .into();
+            this.tooltip(move |_, cx| TextTooltip::view(text.clone(), cx))
+        })
+        // 状态点在名称后面，× 在最右（spec 第 3 节「标签外观」）。
+        .children(render_status_dot(
+            ("tab-dot", id.0 as usize).into(),
+            dot,
+            tokens,
+        ))
+        .child(render_close_button(id, active, target, tokens))
         .children(look.line.map(|edge| {
             // 中线往外挪半像素，骑在两个标签之间的竖线上。
             render_drop_line("tab-drop-line".into(), edge, px(4.), px(0.5), tokens)
         }))
 }
 
-/// 标签的外形和左边的内容（图块、名称、目录）：轨道里的标签和拖动预览共用。
-fn render_tab_face(tab: &TabSnapshot, tiles: ElementId, tokens: &Tokens) -> Div {
+/// 标签的外形和左边的内容（前面那一块、名称）：标签栏里的标签和拖动预览共用。
+fn render_tab_face(
+    tab: &TabSnapshot,
+    leading_id: ElementId,
+    text_size: Pixels,
+    tokens: &Tokens,
+) -> Div {
+    let leading = match &tab.leading {
+        TabLeading::Tiles(programs) => {
+            render_tiles(leading_id, programs, tab.active, tokens).into_any_element()
+        }
+        TabLeading::Icon(icon) => div()
+            .id(leading_id)
+            .test_support()
+            .flex_none()
+            .text_color(tokens.icon)
+            .child(Icon::new(*icon).size(px(14.)))
+            .into_any_element(),
+    };
     div()
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(9.))
-        .w(TAB_WIDTH)
-        .h(TAB_HEIGHT)
-        .pl(px(6.))
-        .pr(px(4.))
-        .rounded(px(14.))
-        .child(render_tile_stack(tiles, &tab.tiles, tokens))
+        .gap(px(10.))
+        .w(size::TAB_WIDTH)
+        .h_full()
+        .pl(px(16.))
+        .pr(px(6.))
+        .text_size(text_size)
+        .text_color(if tab.active {
+            tokens.text
+        } else {
+            tokens.text2
+        })
+        .when(tab.active, |face| face.bg(tokens.content))
+        .child(leading)
         .child(
             div()
-                .flex()
                 .flex_1()
                 .min_w_0()
-                .gap(px(4.))
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_size(px(13.5))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(if tab.active {
-                    tokens.text
-                } else {
-                    tokens.muted
-                })
-                .child(div().flex_none().child(tab.name.clone()))
-                .child(
-                    div()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .font_weight(FontWeight::NORMAL)
-                        .text_color(tokens.faint)
-                        .child(tab.directory.clone()),
-                ),
+                .text_ellipsis()
+                .child(tab.name.clone()),
         )
 }
 
-/// 在前的标签和拖动预览底下的阴影：让它们看着浮在轨道上。
-fn floating_shadow(shadow: Hsla) -> Vec<BoxShadow> {
-    vec![
-        BoxShadow {
-            color: shadow,
-            offset: point(px(0.), px(1.)),
-            blur_radius: px(2.),
-            spread_radius: px(0.),
-            inset: false,
-        },
-        BoxShadow {
-            color: shadow,
-            offset: point(px(0.), px(2.)),
-            blur_radius: px(8.),
-            spread_radius: px(0.),
-            inset: false,
-        },
-    ]
+/// 叠放的图块：焦点卡片的那块在最前（最左、压在上面），其余往右错开 6、压在后面，
+/// 每块外面一圈标签底色把它们隔开。只有一块时就是那一块。无障碍名称是最前那块的程序名。
+fn render_tiles(
+    id: ElementId,
+    programs: &[Program],
+    active: bool,
+    tokens: &Tokens,
+) -> impl IntoElement + use<> {
+    let ring = if active {
+        tokens.content
+    } else {
+        tokens.tabbar
+    };
+    let shown = &programs[..programs.len().min(MAX_TILES)];
+    let label = shown
+        .first()
+        .map(|program| program.name.clone())
+        .unwrap_or_default();
+    // 每块绝对定位、往右错开 6；后画的压在上面，所以从最后一块画起，最前那块最后画。
+    let tiles = shown.iter().enumerate().rev().map(|(index, program)| {
+        div()
+            .absolute()
+            .top(-TILE_RING)
+            .left(TILE_STEP * index as f32 - TILE_RING)
+            .flex()
+            .items_center()
+            .justify_center()
+            .p(TILE_RING)
+            .rounded(px(5.5))
+            .bg(ring)
+            .child(render_tab_tile(("tab-tile", index).into(), program, tokens))
+    });
+    let count = shown.len().max(1) as f32;
+    div()
+        .id(id)
+        .test_support()
+        .aria_label(label)
+        .relative()
+        .flex_none()
+        .w(TILE + TILE_STEP * (count - 1.))
+        .h(TILE)
+        .children(tiles)
 }
 
-/// 标签右端的 ×：只在悬停这个标签时出现，点了关闭整个标签。
-fn render_close_button(id: TabId, target: &FocusHandle, tokens: &Tokens) -> impl IntoElement {
+/// 标签右端的 ×：在前或悬停时出现，点了关闭整个标签。
+fn render_close_button(
+    id: TabId,
+    active: bool,
+    target: &FocusHandle,
+    tokens: &Tokens,
+) -> impl IntoElement {
     let target = target.clone();
-    let pressed = tokens.pressed;
+    let hover = tokens.hover;
     let text = tokens.text;
     div()
         .id(("tab-close", id.0 as usize))
@@ -456,26 +513,20 @@ fn render_close_button(id: TabId, target: &FocusHandle, tokens: &Tokens) -> impl
         .items_center()
         .justify_center()
         .size(CLOSE_BUTTON)
-        .rounded(px(9.))
-        .text_color(tokens.icon)
-        .invisible()
-        .group_hover("tab", |style| style.visible())
-        .hover(move |style| style.bg(pressed).text_color(text))
+        .rounded(px(4.))
+        .text_color(tokens.faint)
+        .when(!active, |close| {
+            close
+                .invisible()
+                .group_hover("tab", |style| style.visible())
+        })
+        .hover(move |style| style.bg(hover).text_color(text))
         .on_click(move |_, window, cx| {
             // 不让外面的标签再把自己切到前面。
             cx.stop_propagation();
             target.dispatch_action(&CloseTab(id), window, cx);
         })
         .child(Icon::new(CatalogIcon::Close).size(px(12.)))
-}
-
-fn render_separator(hidden: bool, tokens: &Tokens) -> impl IntoElement {
-    div()
-        .flex_none()
-        .w(SEPARATOR_WIDTH)
-        .h(px(16.))
-        .bg(tokens.separator)
-        .when(hidden, |this| this.invisible())
 }
 
 /// 拖着的标签，和跟着鼠标的那块预览：标签本身的样子，浮起来。
@@ -491,9 +542,15 @@ impl Render for DraggedTab {
             active: true,
             ..self.tab.clone()
         };
-        render_tab_face(&tab, ("tab-drag-tiles", tab.id.0 as usize).into(), &tokens)
-            .bg(tokens.tab_active)
-            .shadow(floating_shadow(tokens.shadow))
-            .opacity(0.92)
+        render_tab_face(
+            &tab,
+            ("tab-drag-tiles", tab.id.0 as usize).into(),
+            TypeScale::current(cx).ui,
+            &tokens,
+        )
+        .h(size::TAB_BAR)
+        .border_1()
+        .border_color(tokens.line_strong)
+        .opacity(0.92)
     }
 }

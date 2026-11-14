@@ -1,4 +1,4 @@
-//! 卡片头部和标签上显示的目录：主目录下的写成 `~` 开头（原型「~\vibe\QiShell」）。
+//! 状态栏和标签上显示的目录：主目录下的写成 `~` 开头（原型「~\vibe\MicaTerm」）。
 
 use std::path::{Path, PathBuf};
 
@@ -49,11 +49,11 @@ mod tests {
     #[test]
     fn the_home_folder_and_what_is_under_it_start_with_a_tilde() {
         let home: PathBuf = ["/", "home", "qi"].iter().collect();
-        let under = home.join("vibe").join("QiShell");
+        let under = home.join("vibe").join("MicaTerm");
         assert_eq!(display_directory(&home, Some(&home)), "~");
         assert_eq!(
             display_directory(&under, Some(&home)),
-            format!("~{MAIN_SEPARATOR}vibe{MAIN_SEPARATOR}QiShell")
+            format!("~{MAIN_SEPARATOR}vibe{MAIN_SEPARATOR}MicaTerm")
         );
     }
 

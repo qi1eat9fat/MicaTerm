@@ -1,6 +1,6 @@
 //! 凭据（工单 14）的夹具：种子主机加四条凭据，像原型的凭据面板那样有人在用、有人没人用。
 
-use qishell_hosts::{
+use micaterm_hosts::{
     CredentialDraft, CredentialId, CredentialKind, GeneratedKey, HostData, HostId, KeyAlgorithm,
 };
 
@@ -14,7 +14,7 @@ pub fn seed_with_credentials() -> HostData {
     let key = GeneratedKey::generate(KeyAlgorithm::Ed25519).expect("a key");
     let deploy = data.insert_credential_unnotified(
         CredentialDraft::new("部署密钥", CredentialKind::Key, "deploy")
-            .with_public_key(key.public_key_line("deploy@qishell")),
+            .with_public_key(key.public_key_line("deploy@micaterm")),
     );
     let ops = data.insert_credential_unnotified(CredentialDraft::new(
         "运维密码",

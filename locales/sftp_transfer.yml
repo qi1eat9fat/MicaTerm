@@ -90,7 +90,7 @@ sftp_transfer.question.upload_failed_title:
 sftp_transfer.question.download_failed_title:
   zh-CN: 无法下载此项目
 sftp_transfer.queue.title:
-  zh-CN: 传输队列
+  zh-CN: 传输
 sftp_transfer.queue.running:
   zh-CN: "%{count} 批进行中"
 sftp_transfer.queue.stopped:
@@ -109,14 +109,12 @@ sftp_transfer.queue.discard:
   zh-CN: 丢弃续传进度
 sftp_transfer.queue.clear_finished:
   zh-CN: 清除已完成
-sftp_transfer.queue.column.operation:
-  zh-CN: 操作
 sftp_transfer.queue.column.source:
   zh-CN: 来源
 sftp_transfer.queue.column.target:
   zh-CN: 目标
-sftp_transfer.queue.column.done:
-  zh-CN: 已传输
+sftp_transfer.queue.column.size:
+  zh-CN: 文件大小
 sftp_transfer.queue.column.remaining:
   zh-CN: 剩余
 sftp_transfer.queue.column.speed:

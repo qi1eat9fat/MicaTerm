@@ -1,31 +1,30 @@
-//! 设置主密码框和更换主密码框（原型「第一次保存秘密：设置主密码」）。
+//! 设置主密码框和更换主密码框（原型「第一次保存秘密：设置主密码」；样子是共用的 `ui::modal` 弹窗）。
 //!
 //! - 第一次保存秘密（[`PasswordMode::FirstSave`]）：主密码、再输一次、「在本机记住」（默认勾选），
 //!   底部左边「不设置」（秘密照样存，只靠本机钥匙串），右边「取消」「设置并保存」；
 //! - 设置 › 安全「设置主密码…」（[`PasswordMode::Set`]）：没有「不设置」；
 //! - 设置 › 安全「更换主密码…」（[`PasswordMode::Change`]）：当前主密码、新主密码、再输一次。
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::{Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use qishell_hosts::VaultStatus;
+use micaterm_hosts::VaultStatus;
 
 use super::reply::{Reply, close_and_reply, open_small_dialog};
 use super::store::{VaultStore, describe, is_wrong_password};
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, FieldNote, form_field, text_input, typed_secret};
+use crate::ui::form::{FieldErrors, typed_secret};
+use crate::ui::modal::{
+    ModalButtonTone, ModalInputKind, OnClick, modal_button, modal_checkbox, modal_field,
+    modal_note, modal_question, modal_warn, render_modal,
+};
 
 pub const FIELD_CURRENT: &str = "vault-current-password";
 pub const FIELD_MASTER: &str = "vault-master-password";
 pub const FIELD_AGAIN: &str = "vault-master-password-again";
-
-const WIDTH: Pixels = px(440.);
 
 /// 主密码框是为什么打开的。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,24 +199,22 @@ impl PasswordDialog {
         label: SharedString,
         input: &Entity<InputState>,
         tokens: &Tokens,
-    ) -> AnyElement {
-        form_field(
-            Some(label.clone()),
-            text_input(
-                field,
-                label,
-                input,
-                self.errors.get(field).is_some(),
-                tokens,
-            ),
-            FieldNote::error_of(field, &self.errors)
-                .into_iter()
-                .collect(),
+        window: &Window,
+        cx: &App,
+    ) -> Div {
+        modal_field(
+            field,
+            label,
+            input,
+            ModalInputKind::Secret,
+            self.errors.get(field).cloned(),
             tokens,
+            window,
+            cx,
         )
     }
 
-    fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_footer(&self, tokens: &Tokens, window: &Window, cx: &mut Context<Self>) -> Div {
         let working = self.working.is_some();
         let (confirm, confirming) = match self.mode {
             PasswordMode::FirstSave => (t!("vault.setup.save"), t!("vault.setup.working")),
@@ -225,39 +222,50 @@ impl PasswordDialog {
             PasswordMode::Change => (t!("vault.change.confirm"), t!("vault.change.working")),
         };
         let reply = self.reply.clone();
+        // 「不设置」在最左，「取消」「设置并保存」在右。
         div()
             .flex()
-            .items_center()
-            .gap(px(8.))
-            .pt(px(12.))
-            .pb(px(14.))
-            .pl(px(18.))
-            .pr(px(14.))
+            .flex_1()
+            .gap(px(6.))
             .when(self.mode == PasswordMode::FirstSave, |footer| {
-                footer.child(
-                    Button::new("vault-password-skip")
-                        .small()
-                        .label(t!("vault.setup.skip"))
-                        .disabled(working)
-                        .on_click(cx.listener(|this, _, window, cx| this.skip(window, cx))),
-                )
+                footer.child(modal_button(
+                    "vault-password-skip",
+                    t!("vault.setup.skip"),
+                    None,
+                    ModalButtonTone::Plain,
+                    (!working).then(|| -> OnClick {
+                        Box::new(cx.listener(|this, _, window, cx| this.skip(window, cx)))
+                    }),
+                    tokens,
+                    window,
+                    cx,
+                ))
             })
             .child(div().flex_1())
-            .child(
-                Button::new("vault-password-cancel")
-                    .small()
-                    .label(t!("vault.setup.cancel"))
-                    .disabled(working)
-                    .on_click(move |_, window, cx| close_and_reply(&reply, false, window, cx)),
-            )
-            .child(
-                Button::new("vault-password-confirm")
-                    .primary()
-                    .small()
-                    .label(if working { confirming } else { confirm })
-                    .disabled(working)
-                    .on_click(cx.listener(|this, _, window, cx| this.confirm(window, cx))),
-            )
+            .child(modal_button(
+                "vault-password-cancel",
+                t!("vault.setup.cancel"),
+                Some("Esc"),
+                ModalButtonTone::Plain,
+                (!working).then(|| -> OnClick {
+                    Box::new(move |_, window, cx| close_and_reply(&reply, false, window, cx))
+                }),
+                tokens,
+                window,
+                cx,
+            ))
+            .child(modal_button(
+                "vault-password-confirm",
+                if working { confirming } else { confirm },
+                Some("Enter"),
+                ModalButtonTone::Primary,
+                (!working).then(|| -> OnClick {
+                    Box::new(cx.listener(|this, _, window, cx| this.confirm(window, cx)))
+                }),
+                tokens,
+                window,
+                cx,
+            ))
     }
 }
 
@@ -268,7 +276,7 @@ impl Focusable for PasswordDialog {
 }
 
 impl Render for PasswordDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let changing = self.mode == PasswordMode::Change;
         let (title, intro) = match self.mode {
@@ -281,105 +289,64 @@ impl Render for PasswordDialog {
         } else {
             t!("vault.setup.master")
         };
-        div()
-            .id("vault-password-dialog")
-            .test_support()
-            .aria_label(title.clone())
-            .track_focus(&self.focus_handle)
+        let body = div()
             .flex()
             .flex_col()
-            .text_color(tokens.text)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .h(px(46.))
-                    .px(px(18.))
-                    .text_size(px(14.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .size(px(24.))
-                            .rounded(px(7.))
-                            .bg(tokens.selection)
-                            .text_color(tokens.accent)
-                            .child(Icon::new(CatalogIcon::Shield).size(px(14.))),
-                    )
-                    .child(title),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .px(px(18.))
-                    .pt(px(4.))
-                    .child(
-                        div()
-                            .mb(px(12.))
-                            .text_size(px(12.5))
-                            .line_height(relative(1.6))
-                            .text_color(tokens.muted)
-                            .child(intro),
-                    )
-                    .when(changing, |body| {
-                        body.child(self.render_field(
-                            FIELD_CURRENT,
-                            t!("vault.change.current"),
-                            &self.current,
-                            &tokens,
-                        ))
-                    })
-                    .child(self.render_field(FIELD_MASTER, master_label, &self.master, &tokens))
-                    .child(self.render_field(
-                        FIELD_AGAIN,
-                        t!("vault.setup.again"),
-                        &self.again,
-                        &tokens,
-                    ))
-                    .when(!changing, |body| {
-                        body.child(form_field(
-                            None,
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.))
-                                .child(
-                                    Checkbox::new("vault-remember")
-                                        .checked(self.remember)
-                                        .label(t!("vault.setup.remember"))
-                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                            this.remember = *checked;
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(11.5))
-                                        .line_height(relative(1.5))
-                                        .text_color(tokens.faint)
-                                        .child(t!("vault.setup.remember_note")),
-                                ),
-                            Vec::new(),
-                            &tokens,
-                        ))
-                        .child(
-                            div()
-                                .px(px(10.))
-                                .py(px(8.))
-                                .rounded(px(8.))
-                                .bg(tokens.field)
-                                .text_size(px(11.5))
-                                .line_height(relative(1.5))
-                                .text_color(tokens.faint)
-                                .child(t!("vault.setup.forget_note")),
-                        )
-                    }),
-            )
-            .child(self.render_footer(cx))
+            .gap(px(8.))
+            .child(modal_warn(
+                CatalogIcon::Shield,
+                title.clone(),
+                false,
+                &tokens,
+            ))
+            .child(modal_question(intro, &tokens))
+            .when(changing, |body| {
+                body.child(self.render_field(
+                    FIELD_CURRENT,
+                    t!("vault.change.current"),
+                    &self.current,
+                    &tokens,
+                    window,
+                    cx,
+                ))
+            })
+            .child(self.render_field(
+                FIELD_MASTER,
+                master_label,
+                &self.master,
+                &tokens,
+                window,
+                cx,
+            ))
+            .child(self.render_field(
+                FIELD_AGAIN,
+                t!("vault.setup.again"),
+                &self.again,
+                &tokens,
+                window,
+                cx,
+            ))
+            .when(!changing, |body| {
+                body.child(modal_checkbox(
+                    "vault-remember",
+                    self.remember,
+                    t!("vault.setup.remember"),
+                    None,
+                    Box::new(cx.listener(|this, _, _, cx| {
+                        this.remember = !this.remember;
+                        cx.notify();
+                    })),
+                    &tokens,
+                ))
+                .child(modal_note(t!("vault.setup.remember_note"), &tokens))
+                .child(modal_note(t!("vault.setup.forget_note"), &tokens))
+            });
+        let footer = self.render_footer(&tokens, window, cx);
+        render_modal(None, body, footer, &tokens, window, cx)
+            .id("vault-password-dialog")
+            .test_support()
+            .aria_label(title)
+            .track_focus(&self.focus_handle)
     }
 }
 
@@ -394,7 +361,7 @@ pub(super) fn open_password_dialog(
     let view = cx.new(|cx| PasswordDialog::new(vault, mode, reply.clone(), window, cx));
     let first = view.read(cx).first_field().clone();
     let focus = view.read(cx).focus_handle.clone();
-    open_small_dialog(view, WIDTH, reply, focus, window, cx);
+    open_small_dialog(view, reply, focus, window, cx);
     first.update(cx, |field, cx| field.focus(window, cx));
 }
 

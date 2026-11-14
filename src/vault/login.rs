@@ -1,6 +1,6 @@
 //! 一次登录要读保险库里的哪些秘密：连接之前据此决定要不要先弹解锁框。
 
-use qishell_hosts::{HostLogin, JumpLogin, LoginMethod, LoginRoute, SecretRef};
+use micaterm_hosts::{HostLogin, JumpLogin, LoginMethod, LoginRoute, SecretRef};
 
 /// `login` 要读的秘密：密码登录读密码，密钥登录读私钥和口令；无密码和 Agent 登录什么都不读
 /// （spec：不弹解锁框）。跳板主机各自的登录、代理的密码也算在内。
@@ -36,10 +36,10 @@ fn collect(login: &HostLogin, secrets: &mut Vec<SecretRef>) {
 
 #[cfg(test)]
 mod tests {
-    use qishell_hosts::{
+    use micaterm_hosts::{
         HostLogin, JumpLogin, LoginMethod, LoginRoute, ProxyLogin, SavedKey, SecretRef,
     };
-    use qishell_ssh::ProxyKind;
+    use micaterm_ssh::ProxyKind;
 
     use super::login_secrets;
 

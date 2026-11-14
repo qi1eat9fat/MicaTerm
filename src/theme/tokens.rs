@@ -1,6 +1,9 @@
-//! 颜色 token：照抄全部界面原型（`.scratch/qishell-design/prototypes/17-all-screens.prototype.html`）
-//! CSS 里 `.win.light` / `.win.dark` 两组变量，名字对应原型的 `--xxx`。
-//! 界面颜色不跟终端主题走。
+//! 颜色 token：照抄 26 号逐屏原型（`.scratch/qishell-design/prototypes/26-screens.prototype.html`）
+//! CSS 里 `.win.light` / `.win.dark` 两组变量，字段名对应原型的 `--xxx`；另有几种原型写死在组件上的颜色
+//! （弹出层底、输入框底、查找高亮、Mica 渐变）也收在这里。界面颜色不跟终端主题走。
+//!
+//! 分层不靠阴影，靠**底色分档**加 1px 细线：侧栏 `side`、内容区 `content`、标签栏和状态栏比内容暗一档
+//! `tabbar`。**没有强调色**：主按钮是 `sel` 浅灰底，红色只用于危险操作和出错，绿色只用于已连接。
 
 use gpui_kit::{App, Background, Hsla, Rgba, linear_color_stop, linear_gradient, rgb, rgba};
 
@@ -8,70 +11,57 @@ use gpui_kit::component::ActiveTheme as _;
 
 use crate::settings::WindowBackdrop;
 
-/// 开了 Mica 时窗口背景渐变的不透明度：0 是纯 Mica，1 是看不见 Mica。
+/// 开了 Mica 时侧栏底色的不透明度：0 是纯 Mica，1 是看不见 Mica。
 pub const MICA_TINT_OPACITY: f32 = 0.5;
 
 /// 一组颜色 token。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
-    /// 窗口背景渐变的上、下两端（`--bg-top`、`--bg-bottom`）。GPUI 的渐变只有两个色标。
-    pub bg_top: Hsla,
-    pub bg_bottom: Hsla,
-    /// 卡片底色、描边；聚焦卡片的底色、描边（`--card`、`--card-b`、`--card-f`、`--card-bf`）。
-    pub card: Hsla,
-    pub card_border: Hsla,
-    pub card_focused: Hsla,
-    pub card_focused_border: Hsla,
-    /// 阴影；聚焦时的阴影（`--shadow`、`--shadow-f`）。
-    pub shadow: Hsla,
-    pub shadow_focused: Hsla,
-    /// 三级文字（`--text`、`--muted`、`--faint`）。
-    pub text: Hsla,
-    pub muted: Hsla,
-    pub faint: Hsla,
-    /// 图标按钮的图标色、悬停底、按下底（`--icon`、`--hover`、`--pressed`）。
-    pub icon: Hsla,
-    pub hover: Hsla,
-    pub pressed: Hsla,
-    /// 标签轨道底色、活动标签底色、分隔竖线（`--track`、`--tab-active`、`--sep`）。
-    pub track: Hsla,
-    pub tab_active: Hsla,
-    pub separator: Hsla,
-    /// 程序图块的外圈（`--rim`）。
-    pub rim: Hsla,
-    /// 浮层面板底色、描边（`--panel`、`--panel-b`）。
-    pub panel: Hsla,
-    pub panel_border: Hsla,
-    /// 强调色和强调色上的字（`--accent`、`--on-accent`）。
-    pub accent: Hsla,
-    pub on_accent: Hsla,
-    /// 选中底（`--sel`、`--sel-solid`）。
-    pub selection: Hsla,
-    pub selection_solid: Hsla,
-    /// 状态点：有输出（绿）、需要注意（橙）；离线灰（`--busy`、`--attn`、`--off`）。
-    pub busy: Hsla,
-    pub attention: Hsla,
-    pub offline: Hsla,
-    /// 终端前景（`--term`）、细分隔线（`--line`）、错误红（`--bad`）。
-    pub terminal: Hsla,
+    // ───────── 26 号 `.win.light` / `.win.dark` ─────────
+    /// 侧栏底（`--side`），也是窗口底色。
+    pub side: Hsla,
+    /// 内容区底（`--content`）：终端、编辑器、表单、设置的底，终端背景也用它。
+    pub content: Hsla,
+    /// 标签栏、状态栏、右侧图标栏的底，比内容暗一档（`--tabbar`）。
+    pub tabbar: Hsla,
+    /// 区块之间的 1px 线（`--line`）；弹出层外圈、输入框描边用的深一档（`--line-strong`）。
     pub line: Hsla,
-    pub bad: Hsla,
-    /// 输入框底、描边、聚焦底（`--field`、`--field-b`、`--field-f`）。
-    pub field: Hsla,
-    pub field_border: Hsla,
-    pub field_focused: Hsla,
-    /// 分段按钮底（`--seg`）、对话框遮罩（`--scrim`）、分组底（`--group`）。
-    pub segment: Hsla,
-    pub scrim: Hsla,
-    pub group: Hsla,
-    /// 查找命中、当前命中（`--match`、`--match-on`）。
+    pub line_strong: Hsla,
+    /// 文字：正文（`--text`）、侧栏和列表的条目（`--label`）、次要（`--text2`）、
+    /// 很淡的提示和占位（`--faint`）、非焦点窗格的状态栏（`--st-dim`）。
+    pub text: Hsla,
+    pub label: Hsla,
+    pub text2: Hsla,
+    pub faint: Hsla,
+    pub st_dim: Hsla,
+    /// 图标（`--icon`）。
+    pub icon: Hsla,
+    /// 悬停底（`--hover`）、选中底和主按钮底（`--sel`）。
+    pub hover: Hsla,
+    pub sel: Hsla,
+    /// 已连接绿点（`--ok`）和绿字（`--ok-text`）、出错和危险红（`--err`）、提醒橙（`--warn`）。
+    pub ok: Hsla,
+    pub ok_text: Hsla,
+    pub err: Hsla,
+    pub warn: Hsla,
+
+    // ───────── 原型写死在组件上的颜色 ─────────
+    /// 右键菜单、弹窗、浮卡的底（浅色同 `--content`，深色 `#202124`）。
+    pub popup: Hsla,
+    /// 输入框、下拉框、主题预览的底（`.stg-in` / `.stg-dd`）。
+    pub input: Hsla,
+    /// 查找：匹配底、匹配下划线、当前匹配底和字（`--hl`、`--hl-line`、`--hl-cur`、`--hl-cur-fg`）。
     pub find_match: Hsla,
-    pub find_match_current: Hsla,
-    /// 滚动条（`--scroll`）、提示框底和字（`--tip`、`--tip-t`）。
+    pub find_match_line: Hsla,
+    pub find_current: Hsla,
+    pub find_current_text: Hsla,
+    /// 开 Mica 时侧栏的渐变两端（`--mica` 取首尾两个色标，GPUI 的渐变只有两个色标）。
+    pub mica_start: Hsla,
+    pub mica_end: Hsla,
+    /// 滚动条、提示框底和字、窗口「关闭」按钮悬停的红底白字（26 号没改，沿用第一版）。
     pub scrollbar: Hsla,
     pub tooltip: Hsla,
     pub tooltip_text: Hsla,
-    /// 窗口「关闭」按钮悬停时的红底和白字（`.winbtns .ib.close:hover`）。
     pub close_hover: Hsla,
     pub close_hover_text: Hsla,
 }
@@ -80,118 +70,153 @@ fn c(color: Rgba) -> Hsla {
     color.into()
 }
 
+/// 一套颜色的原值。
+struct Palette {
+    side: Rgba,
+    content: Rgba,
+    tabbar: Rgba,
+    line: Rgba,
+    line_strong: Rgba,
+    text: Rgba,
+    label: Rgba,
+    text2: Rgba,
+    icon: Rgba,
+    faint: Rgba,
+    st_dim: Rgba,
+    hover: Rgba,
+    sel: Rgba,
+    ok: Rgba,
+    ok_text: Rgba,
+    err: Rgba,
+    warn: Rgba,
+    popup: Rgba,
+    input: Rgba,
+    find_match: Rgba,
+    find_match_line: Rgba,
+    find_current: Rgba,
+    find_current_text: Rgba,
+    mica_start: Rgba,
+    mica_end: Rgba,
+    scrollbar: Rgba,
+    tooltip: Rgba,
+    tooltip_text: Rgba,
+}
+
 impl Tokens {
-    /// 浅色：中性冷灰底 + 白卡片。
+    /// 浅色：带一点冷调的中性灰。
     pub fn light() -> Self {
-        Self {
-            bg_top: c(rgb(0xf4f5f7)),
-            bg_bottom: c(rgb(0xeceef1)),
-            card: c(rgb(0xffffff)),
-            card_border: c(rgb(0xe3e6ea)),
-            card_focused: c(rgb(0xffffff)),
-            card_focused_border: c(rgba(0x4f5bd58c)),
-            shadow: c(rgba(0x1018280a)),
-            shadow_focused: c(rgba(0x10182817)),
-            text: c(rgb(0x1c2024)),
-            muted: c(rgb(0x525a65)),
-            faint: c(rgb(0x6b7280)),
-            icon: c(rgb(0x6b7280)),
-            hover: c(rgba(0x0f172a0d)),
-            pressed: c(rgba(0x0f172a17)),
-            track: c(rgb(0xe5e7eb)),
-            tab_active: c(rgb(0xffffff)),
-            separator: c(rgb(0xd3d7dd)),
-            rim: c(rgb(0xffffff)),
-            panel: c(rgb(0xffffff)),
-            panel_border: c(rgb(0xdfe2e7)),
-            accent: c(rgb(0x4f5bd5)),
-            on_accent: c(rgb(0xffffff)),
-            selection: c(rgba(0x4f5bd51a)),
-            selection_solid: c(rgb(0xedeefb)),
-            busy: c(rgb(0x1f883d)),
-            attention: c(rgb(0xc27c0e)),
-            offline: c(rgb(0x8c939d)),
-            terminal: c(rgb(0x1f2328)),
-            line: c(rgb(0xeaecef)),
-            bad: c(rgb(0xcf222e)),
-            field: c(rgb(0xf3f4f6)),
-            field_border: c(rgb(0xe2e5e9)),
-            field_focused: c(rgb(0xffffff)),
-            segment: c(rgb(0xeceef1)),
-            scrim: c(rgba(0x0f172a42)),
-            group: c(rgb(0xf7f8fa)),
-            find_match: c(rgba(0xd4a72c52)),
-            find_match_current: c(rgb(0xf2cc60)),
-            scrollbar: c(rgba(0x0f172a38)),
-            tooltip: c(rgb(0x1f2328)),
-            tooltip_text: c(rgb(0xf5f6f8)),
-            close_hover: c(rgb(0xc42b1c)),
-            close_hover_text: c(rgb(0xffffff)),
-        }
+        Self::from_palette(Palette {
+            side: rgb(0xebecef),
+            content: rgb(0xfafafb),
+            tabbar: rgb(0xf2f3f5),
+            line: rgb(0xdfe0e4),
+            line_strong: rgb(0xcdd0d5),
+            text: rgb(0x23252a),
+            label: rgb(0x383b41),
+            text2: rgb(0x565a62),
+            icon: rgb(0x5c6068),
+            faint: rgb(0xa3a7ae),
+            st_dim: rgb(0x7e828a),
+            hover: rgba(0x141e3209), // rgba(20,30,50,.035)
+            sel: rgb(0xdcdee2),
+            ok: rgb(0x1f8152),
+            ok_text: rgb(0x1b7a4c),
+            err: rgb(0xc9392f),
+            warn: rgb(0xc08b0e),
+            popup: rgb(0xfafafb),
+            input: rgb(0xf4f5f7),
+            find_match: rgba(0xe8b2142e),      // rgba(232,178,20,.18)
+            find_match_line: rgba(0xc48c008c), // rgba(196,140,0,.55)
+            find_current: rgb(0xf2c443),
+            find_current_text: rgb(0x23252a),
+            mica_start: rgb(0xe6eaf2),
+            mica_end: rgb(0xeeebed),
+            scrollbar: rgba(0x0f172a38),
+            tooltip: rgb(0x23252a),
+            tooltip_text: rgb(0xf2f3f5),
+        })
     }
 
-    /// 深色：炭灰底，卡片比底亮一级；强调色用浅一号的靛蓝。
+    /// 深色：同一套结构，炭灰底。
     pub fn dark() -> Self {
+        Self::from_palette(Palette {
+            side: rgb(0x131416),
+            content: rgb(0x18191b),
+            tabbar: rgb(0x131417),
+            line: rgb(0x2a2b2f),
+            line_strong: rgb(0x3a3c41),
+            text: rgb(0xe3e6eb),
+            label: rgb(0xc3c7cd),
+            text2: rgb(0x9a9ea6),
+            icon: rgb(0xa9adb5),
+            faint: rgb(0x62666e),
+            st_dim: rgb(0x7f838b),
+            hover: rgba(0xffffff0a), // rgba(255,255,255,.04)
+            sel: rgba(0xffffff13),   // rgba(255,255,255,.075)
+            ok: rgb(0x4cb782),
+            ok_text: rgb(0x4cb782),
+            err: rgb(0xeb5757),
+            warn: rgb(0xf2c94c),
+            popup: rgb(0x202124),
+            input: rgb(0x131416),
+            find_match: rgba(0xf2c94c1f),      // rgba(242,201,76,.12)
+            find_match_line: rgba(0xf2c94c8c), // rgba(242,201,76,.55)
+            find_current: rgb(0xe6bb3f),
+            find_current_text: rgb(0x18191b),
+            mica_start: rgb(0x171a20),
+            mica_end: rgb(0x17141a),
+            scrollbar: rgba(0xffffff38),
+            tooltip: rgb(0x3a3c41),
+            tooltip_text: rgb(0xe3e6eb),
+        })
+    }
+
+    fn from_palette(p: Palette) -> Self {
         Self {
-            bg_top: c(rgb(0x18191c)),
-            bg_bottom: c(rgb(0x131416)),
-            card: c(rgb(0x1d1f23)),
-            card_border: c(rgb(0x2b2e34)),
-            card_focused: c(rgb(0x212328)),
-            card_focused_border: c(rgba(0x8b93ff99)),
-            shadow: c(rgba(0x00000038)),
-            shadow_focused: c(rgba(0x00000057)),
-            text: c(rgb(0xe8eaed)),
-            muted: c(rgb(0xaab0b8)),
-            faint: c(rgb(0x8f96a0)),
-            icon: c(rgb(0x979ea8)),
-            hover: c(rgba(0xffffff0f)),
-            pressed: c(rgba(0xffffff1a)),
-            track: c(rgb(0x232529)),
-            tab_active: c(rgb(0x34373e)),
-            separator: c(rgb(0x34373d)),
-            rim: c(rgb(0x1d1f23)),
-            panel: c(rgb(0x25272c)),
-            panel_border: c(rgb(0x363940)),
-            accent: c(rgb(0x8b93ff)),
-            on_accent: c(rgb(0x101228)),
-            selection: c(rgba(0x8b93ff29)),
-            selection_solid: c(rgb(0x2a2c44)),
-            busy: c(rgb(0x3fb950)),
-            attention: c(rgb(0xe3a82b)),
-            offline: c(rgb(0x5f656e)),
-            terminal: c(rgb(0xe6e8eb)),
-            line: c(rgb(0x2b2e33)),
-            bad: c(rgb(0xff6b6b)),
-            field: c(rgb(0x17191c)),
-            field_border: c(rgb(0x30333a)),
-            field_focused: c(rgb(0x131417)),
-            segment: c(rgb(0x17191c)),
-            scrim: c(rgba(0x00000080)),
-            group: c(rgb(0x1a1c20)),
-            find_match: c(rgba(0xe3b34140)),
-            find_match_current: c(rgb(0xe3b341)),
-            scrollbar: c(rgba(0xffffff38)),
-            tooltip: c(rgb(0x3a3d45)),
-            tooltip_text: c(rgb(0xf2f3f5)),
+            side: c(p.side),
+            content: c(p.content),
+            tabbar: c(p.tabbar),
+            line: c(p.line),
+            line_strong: c(p.line_strong),
+            text: c(p.text),
+            label: c(p.label),
+            text2: c(p.text2),
+            faint: c(p.faint),
+            st_dim: c(p.st_dim),
+            icon: c(p.icon),
+            hover: c(p.hover),
+            sel: c(p.sel),
+            ok: c(p.ok),
+            ok_text: c(p.ok_text),
+            err: c(p.err),
+            warn: c(p.warn),
+            popup: c(p.popup),
+            input: c(p.input),
+            find_match: c(p.find_match),
+            find_match_line: c(p.find_match_line),
+            find_current: c(p.find_current),
+            find_current_text: c(p.find_current_text),
+            mica_start: c(p.mica_start),
+            mica_end: c(p.mica_end),
+            scrollbar: c(p.scrollbar),
+            tooltip: c(p.tooltip),
+            tooltip_text: c(p.tooltip_text),
             close_hover: c(rgb(0xc42b1c)),
             close_hover_text: c(rgb(0xffffff)),
         }
     }
 
-    /// 窗口背景：从 `bg_top` 到 `bg_bottom` 的竖直渐变。窗口用 Mica（工单 26）时
-    /// 两端都降到 `MICA_TINT_OPACITY`，让系统的 Mica 透出来，又带着界面原型的底色。
-    /// Mica 自己的深浅由窗口的深色属性决定，已经按应用外观设好（`settings::backdrop`）。
-    pub fn window_gradient(&self, backdrop: WindowBackdrop) -> Background {
-        let tint = |color: Hsla| match backdrop {
-            WindowBackdrop::Opaque => color,
-            WindowBackdrop::Mica => color.opacity(MICA_TINT_OPACITY),
-        };
-        linear_gradient(
-            180.,
-            linear_color_stop(tint(self.bg_top), 0.),
-            linear_color_stop(tint(self.bg_bottom), 1.),
-        )
+    /// 窗口背景：一块平的侧栏底色。开了 Mica（工单 26）时降到 `MICA_TINT_OPACITY`，让系统的 Mica 透出来。
+    /// Mica 只该透在侧栏（26 号），内容区、标签栏、状态栏各自有不透明的底。
+    pub fn window_background(&self, backdrop: WindowBackdrop) -> Background {
+        match backdrop {
+            WindowBackdrop::Opaque => self.side.into(),
+            WindowBackdrop::Mica => linear_gradient(
+                165.,
+                linear_color_stop(self.mica_start.opacity(MICA_TINT_OPACITY), 0.),
+                linear_color_stop(self.mica_end.opacity(MICA_TINT_OPACITY), 1.),
+            ),
+        }
     }
 
     /// 当前主题模式（浅色或深色）的那组 token。

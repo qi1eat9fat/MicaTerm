@@ -18,7 +18,7 @@ use super::{
 };
 use crate::backend::describe::{describe_login_error, link as describe_link};
 use crate::i18n::t;
-use qishell_ssh::link_as;
+use micaterm_ssh::link_as;
 
 type Cause<'a> = &'a (dyn Error + 'static);
 
@@ -278,7 +278,7 @@ fn edit(error: &EditError, rest: &[Cause<'_>]) -> String {
 mod tests {
     use super::*;
     use anyhow::anyhow;
-    use qishell_ssh::{ConnectError, wrap};
+    use micaterm_ssh::{ConnectError, wrap};
     use std::io;
 
     fn reason(error: impl Error + Send + Sync + 'static) -> Reason {

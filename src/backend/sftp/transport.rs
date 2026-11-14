@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_channel::{Receiver, Sender};
-use qishell_ssh::{ConnectionPrompt, HostLogin, Latency, SshConnector};
+use micaterm_ssh::{ConnectionPrompt, HostLogin, Latency, SshConnector};
 
 use super::{
     DirectoryListing, EngineEvent, EventSink, FileBytes, FileStamp, ReadFailure, RemotePath,

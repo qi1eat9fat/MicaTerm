@@ -1,4 +1,4 @@
-//! backend：包装 SSH 核心（`qishell-ssh`）的类型，并把错误链翻译成中文文案。界面只认这里的类型
+//! backend：包装 SSH 核心（`micaterm-ssh`）的类型，并把错误链翻译成中文文案。界面只认这里的类型
 //! （spec 第 10 节）。
 //!
 //! - `remote`：远程终端的边界（`RemoteTerminals` trait、`RemoteTarget`、`RemoteEvent`），
@@ -45,10 +45,10 @@ pub use tester::{
 };
 
 // 界面要用到的 SSH 核心类型：问题和回答、延迟、探测结果、登录。
-pub use qishell_ssh::{
+pub use micaterm_ssh::{
     AuthenticationPrompt, AuthenticationRequest, ConnectionPrompt, ConnectionPromptField,
     ConnectionPromptKind, ConnectionPromptReply, ConnectionSecret, HostKeyChangedPrompt, HostLogin,
     Latency, ProbedHost, UnknownHostPrompt,
 };
 // 跳板和代理的路线（工单 15）。
-pub use qishell_ssh::{JumpLogin, LoginRoute};
+pub use micaterm_ssh::{JumpLogin, LoginRoute};

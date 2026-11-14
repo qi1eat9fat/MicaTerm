@@ -1,7 +1,7 @@
 //! 凭据（工单 14）的 UI 测试：右侧栏的凭据面板（保险库状态条、列表、编辑、右键菜单）、凭据对话框的
 //! 三种凭据、主机对话框的「使用凭据」「无密码」和叠层新建、用凭据登录、删除在用的凭据。
 
-use qishell::app::ShowCredentials;
+use micaterm::app::ShowCredentials;
 
 use crate::support::*;
 
@@ -61,7 +61,22 @@ fn row(id: u64) -> (&'static str, usize) {
     ("credential-row", id as usize)
 }
 
-/// 面板里各行的文字，从上到下。
+/// 面板里显示着的凭据 id，从上到下。
+fn shown_rows(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> Vec<u64> {
+    in_frame(cx, handle, |window, _| {
+        let mut shown: Vec<(gpui_kit::Pixels, u64)> = (1..=8u64)
+            .filter_map(|id| {
+                window
+                    .try_find(row(id))
+                    .map(|element| (element.bounds().top(), id))
+            })
+            .collect();
+        shown.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        shown.into_iter().map(|(_, id)| id).collect()
+    })
+}
+
+/// 面板里各行的文字，按 id。
 fn rows(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> Vec<String> {
     (1..=8)
         .filter_map(|id| label(cx, handle, row(id)))
@@ -77,7 +92,7 @@ fn the_credentials_icon_opens_the_panel_and_closes_it_again(cx: &mut TestAppCont
     cx.update(|cx| {
         assert_eq!(
             workspace.read(cx).right_panel(),
-            Some(qishell::workspace::RightPanel::Credentials)
+            Some(micaterm::workspace::RightPanel::Credentials)
         )
     });
     assert_eq!(
@@ -96,75 +111,42 @@ fn the_credentials_icon_opens_the_panel_and_closes_it_again(cx: &mut TestAppCont
 
     // 命令片段面板和凭据面板共用一个位置。
     dispatch(cx, handle, ShowCredentials);
-    dispatch(cx, handle, qishell::app::ShowSnippets);
+    dispatch(cx, handle, micaterm::app::ShowSnippets);
     assert!(!present(cx, handle, "credentials"));
     assert!(present(cx, handle, "snippets"));
 }
 
+/// 保险库的状态只在主机栏左下角（26 号）：面板里没有状态条；锁着时名称、类型、用户名照常显示。
 #[gpui_kit::test]
-fn the_vault_bar_says_there_is_no_master_password(cx: &mut TestAppContext) {
-    for vault in [TestVault::unprotected(), TestVault::absent()] {
-        let (handle, _, _) = open_with(cx, vault.services());
-        dispatch(cx, handle, ShowCredentials);
-        assert_eq!(
-            label(cx, handle, "credentials-vault").as_deref(),
-            Some("未设主密码：秘密只靠本机钥匙串保护")
-        );
-        assert_eq!(
-            label(cx, handle, "credentials-vault-action").as_deref(),
-            Some("设置…")
-        );
-        click(cx, handle, "credentials-vault-action");
-        assert!(present(cx, handle, "vault-password-dialog"));
-        click(cx, handle, "vault-password-cancel");
-    }
-}
-
-#[gpui_kit::test]
-fn a_locked_vault_still_lists_every_credential_and_unlocks_from_the_bar(cx: &mut TestAppContext) {
+fn a_locked_vault_still_lists_every_credential(cx: &mut TestAppContext) {
     let vault = TestVault::unlocked().locked();
     let (handle, _, _) = open_with(cx, vault.services());
     dispatch(cx, handle, ShowCredentials);
 
-    assert_eq!(
-        label(cx, handle, "credentials-vault").as_deref(),
-        Some("保险库已锁定")
-    );
-    // 锁着时名称、类型、用户名照常显示。
+    assert!(!present(cx, handle, "credentials-vault"));
     assert_eq!(rows(cx, handle).len(), 4);
     assert_eq!(
         label(cx, handle, row(1)).as_deref(),
         Some("部署密钥 · 密钥 · ED25519 · deploy · 2 台主机")
     );
-
-    assert_eq!(
-        label(cx, handle, "credentials-vault-action").as_deref(),
-        Some("解锁…")
-    );
-    click(cx, handle, "credentials-vault-action");
-    assert!(present(cx, handle, "vault-unlock"));
 }
 
+/// 按类型分组（26 号）：密钥、密码、SSH Agent，组内照存的顺序；点分组标题收起、再点展开。
 #[gpui_kit::test]
-fn an_unlocked_vault_locks_from_the_bar(cx: &mut TestAppContext) {
-    let vault = TestVault::unlocked();
-    let (handle, _, _) = open_with(cx, vault.services());
+fn credentials_are_grouped_by_kind_and_a_group_folds(cx: &mut TestAppContext) {
+    let (handle, _, _) = open(cx);
     dispatch(cx, handle, ShowCredentials);
+    assert_eq!(shown_rows(cx, handle), [1, 4, 2, 3]);
+    let group = (
+        "credential-group",
+        micaterm_hosts::CredentialKind::Key as usize,
+    );
+    assert_eq!(label(cx, handle, group).as_deref(), Some("密钥"));
 
-    assert_eq!(
-        label(cx, handle, "credentials-vault").as_deref(),
-        Some("保险库已解锁")
-    );
-    assert_eq!(
-        label(cx, handle, "credentials-vault-action").as_deref(),
-        Some("锁定")
-    );
-    click(cx, handle, "credentials-vault-action");
-    assert_eq!(vault.status(), VaultStatus::Locked);
-    assert_eq!(
-        label(cx, handle, "credentials-vault").as_deref(),
-        Some("保险库已锁定")
-    );
+    click(cx, handle, group);
+    assert_eq!(shown_rows(cx, handle), [2, 3]);
+    click(cx, handle, group);
+    assert_eq!(shown_rows(cx, handle), [1, 4, 2, 3]);
 }
 
 // ---- 凭据对话框：三种凭据的新建 ----
@@ -189,8 +171,10 @@ fn open_with_secrets(
 }
 
 /// 把字段 `field` 的内容换成 `text`。
+/// 在凭据对话框的一栏里填字。字段多（生成密钥）时正文要滚动，先把这一栏滚进看得见的地方。
 fn fill(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str, text: &str) {
     let field = gpui_kit::SharedString::from(field.to_owned());
+    reveal_in(cx, handle, "credential-dialog-body", &field.clone().into());
     in_frame(cx, handle, move |window, cx| window.click(field, cx));
     in_frame(cx, handle, |window, cx| {
         window.press("ctrl-a", cx);
@@ -228,13 +212,13 @@ fn credential(
     cx: &mut TestAppContext,
     workspace: &Entity<Workspace>,
     id: u64,
-) -> Option<qishell_hosts::Credential> {
+) -> Option<micaterm_hosts::Credential> {
     cx.update(|cx| {
         workspace
             .read(cx)
             .hosts()
             .read(cx)
-            .credential(qishell_hosts::CredentialId(id))
+            .credential(micaterm_hosts::CredentialId(id))
             .cloned()
     })
 }
@@ -251,10 +235,7 @@ fn a_new_password_credential_keeps_its_password_in_the_vault(cx: &mut TestAppCon
     let (handle, workspace, secrets) = open_with_secrets(cx);
     new_credential(cx, handle);
     in_frame(cx, handle, |window, _| {
-        assert_eq!(
-            window.find("credential-dialog-title").label(),
-            Some("新建凭据")
-        );
+        assert_eq!(window.find("modal-title").label(), Some("新建凭据"));
         assert_eq!(window.find("credential-name").focused(), Some(true));
     });
 
@@ -279,7 +260,7 @@ fn a_new_password_credential_keeps_its_password_in_the_vault(cx: &mut TestAppCon
     assert!(!credential_dialog_open(cx, handle));
     let saved = credential(cx, &workspace, 5).expect("saved");
     assert_eq!(saved.name.as_ref(), "跳板密码");
-    assert_eq!(saved.kind, qishell_hosts::CredentialKind::Password);
+    assert_eq!(saved.kind, micaterm_hosts::CredentialKind::Password);
     assert_eq!(saved.user.as_ref(), "ops");
     assert_eq!(
         secret(&secrets, &saved.password_secret()).as_deref(),
@@ -325,11 +306,11 @@ fn a_generated_key_shows_its_public_key_and_goes_into_the_vault(cx: &mut TestApp
 
     assert!(!credential_dialog_open(cx, handle));
     let saved = credential(cx, &workspace, 5).expect("saved");
-    assert_eq!(saved.kind, qishell_hosts::CredentialKind::Key);
+    assert_eq!(saved.kind, micaterm_hosts::CredentialKind::Key);
     assert_eq!(saved.public_key.as_deref(), Some(line.as_str()));
     // 私钥用口令加密后存进保险库，口令也存。
     let text = secret(&secrets, &saved.private_key_secret()).expect("the private key");
-    let pasted = qishell_hosts::PastedKey::parse(&text).unwrap();
+    let pasted = micaterm_hosts::PastedKey::parse(&text).unwrap();
     assert!(pasted.is_encrypted());
     assert_eq!(
         secret(&secrets, &saved.passphrase_secret()).as_deref(),
@@ -343,7 +324,7 @@ fn a_generated_key_shows_its_public_key_and_goes_into_the_vault(cx: &mut TestApp
 
 /// 一把没加密的 Ed25519 私钥的文件内容和它的公钥。
 fn plain_key() -> (String, String) {
-    let key = qishell_hosts::GeneratedKey::generate(qishell_hosts::KeyAlgorithm::Ed25519).unwrap();
+    let key = micaterm_hosts::GeneratedKey::generate(micaterm_hosts::KeyAlgorithm::Ed25519).unwrap();
     (
         key.encode("me@laptop", "").unwrap().to_string(),
         key.public_key_line("me@laptop"),
@@ -447,7 +428,7 @@ fn an_agent_credential_keeps_no_secret(cx: &mut TestAppContext) {
 
     assert!(!credential_dialog_open(cx, handle));
     let saved = credential(cx, &workspace, 5).expect("saved");
-    assert_eq!(saved.kind, qishell_hosts::CredentialKind::Agent);
+    assert_eq!(saved.kind, micaterm_hosts::CredentialKind::Agent);
     assert!(secrets.is_empty());
 }
 
@@ -479,23 +460,23 @@ fn a_double_click_or_enter_edits_a_credential(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, cx| window.double_click(row(2), cx));
     assert!(credential_dialog_open(cx, handle));
     assert_eq!(
-        label(cx, handle, "credential-dialog-title").as_deref(),
+        label(cx, handle, "modal-title").as_deref(),
         Some("编辑凭据")
     );
     assert_eq!(
-        label(cx, handle, "credential-dialog-subtitle").as_deref(),
+        label(cx, handle, "modal-detail").as_deref(),
         Some("运维密码")
     );
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
     assert!(!credential_dialog_open(cx, handle));
 
-    // 单击选中，↓ 移到下一行，回车编辑。
+    // 单击选中，↓ 移到显示的下一行（同是密钥的「旧 RSA 密钥」），回车编辑。
     click(cx, handle, row(1));
     in_frame(cx, handle, |window, cx| window.press("down", cx));
     in_frame(cx, handle, |window, cx| window.press("enter", cx));
     assert_eq!(
-        label(cx, handle, "credential-dialog-subtitle").as_deref(),
-        Some("运维密码")
+        label(cx, handle, "modal-detail").as_deref(),
+        Some("旧 RSA 密钥")
     );
 }
 
@@ -514,9 +495,23 @@ fn the_menu_edits_copies_a_public_key_and_deletes(cx: &mut TestAppContext) {
     assert_eq!(menu_labels(cx, handle, 2), ["编辑…", "删除"]);
     click_menu_item(cx, handle, 0);
     assert_eq!(
-        label(cx, handle, "credential-dialog-subtitle").as_deref(),
+        label(cx, handle, "modal-detail").as_deref(),
         Some("运维密码")
     );
+}
+
+/// 右键另一行时选中项不变（26 号：被右键的行只描细边）。
+#[gpui_kit::test]
+fn a_right_click_leaves_the_selection_alone(cx: &mut TestAppContext) {
+    let (handle, _, _) = open(cx);
+    dispatch(cx, handle, ShowCredentials);
+    click(cx, handle, row(1));
+    in_frame(cx, handle, |window, cx| window.right_click(row(4), cx));
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("popup-menu").is_some());
+        assert_eq!(window.find(row(1)).selected(), Some(true));
+        assert_eq!(window.find(row(4)).selected(), Some(false));
+    });
 }
 
 #[gpui_kit::test]
@@ -536,7 +531,7 @@ fn renaming_a_credentials_user_renames_every_host_using_it(cx: &mut TestAppConte
             "-----BEGIN OPENSSH PRIVATE KEY-----",
         )
         .unwrap();
-    dispatch(cx, handle, qishell::app::EditCredential(deploy.id));
+    dispatch(cx, handle, micaterm::app::EditCredential(deploy.id));
 
     // 编辑密钥凭据时停在「当前私钥」，显示现在的公钥；写明有几台主机跟着改。
     in_frame(cx, handle, |window, _| {
@@ -591,7 +586,7 @@ fn editing_a_password_credential_starts_from_its_saved_password(cx: &mut TestApp
     let ops = credential(cx, &workspace, 2).unwrap();
     secrets.set(&ops.password_secret(), "old-secret").unwrap();
 
-    dispatch(cx, handle, qishell::app::EditCredential(ops.id));
+    dispatch(cx, handle, micaterm::app::EditCredential(ops.id));
     fill(cx, handle, "credential-name", "运维");
     save_credential(cx, handle);
 
@@ -603,7 +598,7 @@ fn editing_a_password_credential_starts_from_its_saved_password(cx: &mut TestApp
     );
 
     // 改成新的密码。
-    dispatch(cx, handle, qishell::app::EditCredential(ops.id));
+    dispatch(cx, handle, micaterm::app::EditCredential(ops.id));
     fill(cx, handle, "credential-password", "new-secret");
     save_credential(cx, handle);
     assert_eq!(
@@ -621,9 +616,9 @@ fn a_locked_vault_keeps_a_credentials_password_out_of_the_form(cx: &mut TestAppC
         .vault
         .set(&ops.password_secret(), "old-secret")
         .unwrap();
-    dispatch(cx, handle, qishell::app::LockVault);
+    dispatch(cx, handle, micaterm::app::LockVault);
 
-    dispatch(cx, handle, qishell::app::EditCredential(ops.id));
+    dispatch(cx, handle, micaterm::app::EditCredential(ops.id));
     assert_eq!(
         label(cx, handle, "credential-password-locked").as_deref(),
         Some("已保存，保险库锁定中 · 解锁后修改")
@@ -682,7 +677,7 @@ fn deleting_a_key_in_use_names_its_hosts_and_leaves_them_without_a_password(
     click(cx, handle, "credential-delete-cancel");
     assert!(credential(cx, &workspace, 1).is_some());
 
-    dispatch(cx, handle, qishell::app::DeleteCredential(deploy.id));
+    dispatch(cx, handle, micaterm::app::DeleteCredential(deploy.id));
     click(cx, handle, "credential-delete-confirm");
 
     assert!(!present(cx, handle, "credential-delete"));
@@ -706,7 +701,7 @@ fn deleting_a_password_credential_in_use_turns_its_hosts_back_to_a_password(
     dispatch(
         cx,
         handle,
-        qishell::app::DeleteCredential(qishell_hosts::CredentialId(2)),
+        micaterm::app::DeleteCredential(micaterm_hosts::CredentialId(2)),
     );
     assert_eq!(
         label(cx, handle, "credential-delete-text").as_deref(),
@@ -730,7 +725,7 @@ fn deleting_an_unused_credential_just_asks(cx: &mut TestAppContext) {
     dispatch(
         cx,
         handle,
-        qishell::app::DeleteCredential(qishell_hosts::CredentialId(4)),
+        micaterm::app::DeleteCredential(micaterm_hosts::CredentialId(4)),
     );
     assert_eq!(
         label(cx, handle, "credential-delete-text").as_deref(),
@@ -747,13 +742,13 @@ fn host_dialog_open(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> bool
 }
 
 fn save_host(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
 }
 
 #[gpui_kit::test]
 fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open(cx);
-    dispatch(cx, handle, qishell::app::NewHost);
+    dispatch(cx, handle, micaterm::app::NewHost);
     in_frame(cx, handle, |window, _| {
         let choices: Vec<_> = (0..3usize)
             .map(|ix| window.find(("host-auth", ix)).label().map(str::to_owned))
@@ -810,7 +805,7 @@ fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
 
     assert!(!host_dialog_open(cx, handle));
     let host = saved_host(cx, &workspace, 7).expect("saved");
-    assert_eq!(host.credential, Some(qishell_hosts::CredentialId(1)));
+    assert_eq!(host.credential, Some(micaterm_hosts::CredentialId(1)));
     assert_eq!(host.user.as_ref(), "deploy");
     // 凭据面板上的「N 台主机」跟着变。
     dispatch(cx, handle, ShowCredentials);
@@ -820,7 +815,7 @@ fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
     );
 
     // 编辑时停在「使用凭据」和选的那条。
-    dispatch(cx, handle, qishell::app::EditHost(HostId(7)));
+    dispatch(cx, handle, micaterm::app::EditHost(HostId(7)));
     in_frame(cx, handle, |window, _| {
         assert_eq!(window.find(("host-auth", 1usize)).selected(), Some(true));
     });
@@ -833,7 +828,7 @@ fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_host_without_a_password_tries_the_agent_and_the_default_keys(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open(cx);
-    dispatch(cx, handle, qishell::app::EditHost(HostId(2)));
+    dispatch(cx, handle, micaterm::app::EditHost(HostId(2)));
     click(cx, handle, ("host-auth", 2usize));
     assert_eq!(
         label(cx, handle, "host-auth-hint").as_deref(),
@@ -849,7 +844,7 @@ fn a_host_without_a_password_tries_the_agent_and_the_default_keys(cx: &mut TestA
     assert_eq!(host.user.as_ref(), "admin");
 
     // 用凭据的主机改回「密码」：不再用凭据，用户名照表单。
-    dispatch(cx, handle, qishell::app::EditHost(HostId(1)));
+    dispatch(cx, handle, micaterm::app::EditHost(HostId(1)));
     click(cx, handle, ("host-auth", 0usize));
     save_host(cx, handle);
     let web01 = saved_host(cx, &workspace, 1).unwrap();
@@ -860,7 +855,7 @@ fn a_host_without_a_password_tries_the_agent_and_the_default_keys(cx: &mut TestA
 #[gpui_kit::test]
 fn a_credential_made_on_top_of_the_host_dialog_is_picked_when_saved(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open(cx);
-    dispatch(cx, handle, qishell::app::NewHost);
+    dispatch(cx, handle, micaterm::app::NewHost);
     fill(cx, handle, "host-name", "api-03");
     fill(cx, handle, "host-address", "10.0.1.33");
     click(cx, handle, ("host-auth", 1usize));
@@ -871,7 +866,7 @@ fn a_credential_made_on_top_of_the_host_dialog_is_picked_when_saved(cx: &mut Tes
     assert!(host_dialog_open(cx, handle));
     assert!(credential_dialog_open(cx, handle));
     assert_eq!(
-        label(cx, handle, "credential-dialog-subtitle").as_deref(),
+        label(cx, handle, "modal-detail").as_deref(),
         Some("保存后自动选上")
     );
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
@@ -895,14 +890,14 @@ fn a_credential_made_on_top_of_the_host_dialog_is_picked_when_saved(cx: &mut Tes
     save_host(cx, handle);
     assert!(!host_dialog_open(cx, handle));
     let host = saved_host(cx, &workspace, 7).expect("saved");
-    assert_eq!(host.credential, Some(qishell_hosts::CredentialId(5)));
+    assert_eq!(host.credential, Some(micaterm_hosts::CredentialId(5)));
     assert_eq!(host.user.as_ref(), "ops");
 }
 
 // ---- 用凭据登录 ----
 
 /// 最后一次连接用的登录。
-fn last_login(remote: &FakeRemoteTerminals) -> qishell_hosts::HostLogin {
+fn last_login(remote: &FakeRemoteTerminals) -> micaterm_hosts::HostLogin {
     remote
         .targets()
         .last()
@@ -922,17 +917,17 @@ fn a_host_connects_with_its_credential_unlocking_only_for_a_saved_key(cx: &mut T
             "-----BEGIN OPENSSH PRIVATE KEY-----",
         )
         .unwrap();
-    dispatch(cx, handle, qishell::app::LockVault);
+    dispatch(cx, handle, micaterm::app::LockVault);
 
     // Agent 凭据什么秘密都不读：不弹解锁，直接连。
-    dispatch(cx, handle, qishell::app::ConnectHost(HostId(5)));
+    dispatch(cx, handle, micaterm::app::ConnectHost(HostId(5)));
     assert!(!present(cx, handle, "vault-unlock"));
     let login = last_login(&remote);
-    assert_eq!(login.method, qishell_hosts::LoginMethod::Agent);
+    assert_eq!(login.method, micaterm_hosts::LoginMethod::Agent);
     assert_eq!(login.user, "ops");
 
     // 密钥凭据的私钥存在锁着的保险库里：先解锁再连，用凭据的用户名和保险库里的私钥。
-    dispatch(cx, handle, qishell::app::ConnectHost(HostId(3)));
+    dispatch(cx, handle, micaterm::app::ConnectHost(HostId(3)));
     assert_eq!(
         label(cx, handle, "vault-unlock-reason").as_deref(),
         Some("连接 db-01 要用保存的凭据")
@@ -942,19 +937,19 @@ fn a_host_connects_with_its_credential_unlocking_only_for_a_saved_key(cx: &mut T
     click(cx, handle, "vault-unlock-confirm");
     assert!(!present(cx, handle, "vault-unlock"));
     let login = last_login(&remote);
-    assert_eq!(login.method, qishell_hosts::LoginMethod::Key);
+    assert_eq!(login.method, micaterm_hosts::LoginMethod::Key);
     assert_eq!(login.user, "deploy");
     assert_eq!(
         login.key,
-        Some(qishell_hosts::SavedKey::new(deploy.secret_id.as_str()))
+        Some(micaterm_hosts::SavedKey::new(deploy.secret_id.as_str()))
     );
 
     // 删了凭据，主机改成「无密码」：再连就依次试 Agent 和默认私钥，用户名保留。
-    dispatch(cx, handle, qishell::app::DeleteCredential(deploy.id));
+    dispatch(cx, handle, micaterm::app::DeleteCredential(deploy.id));
     click(cx, handle, "credential-delete-confirm");
-    dispatch(cx, handle, qishell::app::ConnectHost(HostId(3)));
+    dispatch(cx, handle, micaterm::app::ConnectHost(HostId(3)));
     let login = last_login(&remote);
-    assert_eq!(login.method, qishell_hosts::LoginMethod::NoPassword);
+    assert_eq!(login.method, micaterm_hosts::LoginMethod::NoPassword);
     assert_eq!(login.user, "deploy");
 }
 

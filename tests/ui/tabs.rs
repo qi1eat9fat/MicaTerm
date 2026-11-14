@@ -1,5 +1,5 @@
 //! 多标签（工单 04）的 UI 测试：新建、点标签和快捷键切换、×、右键菜单的三种关闭、
-//! 关掉最后一个回到开始卡片、标签宽度固定和轨道横向滚动；拖动排序（工单 29）。本地终端一律用假传输。
+//! 关掉最后一个回到新标签页、标签宽度固定和轨道横向滚动；拖动排序（工单 29）。本地终端一律用假传输。
 //!
 //! 每个标签里只有一张卡片（分屏是工单 05），所以第 n 个新开的标签里是第 n 张卡片。
 
@@ -7,7 +7,7 @@ use gpui_kit::{
     Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput,
     Point, ScrollDelta, Window, point,
 };
-use qishell::app::{
+use micaterm::app::{
     ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, NextTab, SwitchToTab,
 };
 
@@ -169,16 +169,16 @@ fn ctrl_shift_digit_switches_to_the_nth_tab(cx: &mut TestAppContext) {
     assert_in_front(cx, handle, 4);
 }
 
-/// × 只在悬停时出现，点了关闭整个标签和它的 shell。
+/// × 在悬停或在前时出现，点了关闭整个标签和它的 shell。
 #[gpui_kit::test]
 fn the_cross_shows_on_hover_and_closes_the_tab(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_tabs(cx, 3);
 
     in_frame(cx, handle, |window, cx| {
-        // 鼠标在别处：哪个标签都没有 ×，在前的那个也没有。
+        // 鼠标在别处：只有在前的那个（3）有 ×（26 号 `.tab.on .x`）。
         window.hover("title-drag", cx);
         assert!(!window.find(("tab-close", 1usize)).visible());
-        assert!(!window.find(("tab-close", 3usize)).visible());
+        assert!(window.find(("tab-close", 3usize)).visible());
         window.hover(tab(2), cx);
         let close = window.find(("tab-close", 2usize));
         assert!(close.visible());
@@ -224,7 +224,7 @@ fn the_menu_closes_the_tab(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn closing_the_active_tab_closes_all_its_cards(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_tabs(cx, 2);
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     cx.update(|cx| assert_eq!(workspace.read(cx).tab_cards(TabId(2)).len(), 2));
 
     dispatch(cx, handle, CloseActiveTab);
@@ -286,9 +286,9 @@ fn closing_to_the_right_keeps_the_front_tab_on_the_left(cx: &mut TestAppContext)
     assert_in_front(cx, handle, 1);
 }
 
-/// 关掉最后一个标签：回到开始卡片，程序不退出，开始卡片拿到焦点、还能新开标签。
+/// 关掉最后一个标签：回到新标签页，程序不退出，新标签页拿到焦点、还能新开标签。
 #[gpui_kit::test]
-fn closing_the_last_tab_shows_the_start_card(cx: &mut TestAppContext) {
+fn closing_the_last_tab_shows_the_new_tab_page(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_tabs(cx, 2);
 
     dispatch(cx, handle, CloseOtherTabs(TabId(1)));
@@ -300,8 +300,8 @@ fn closing_the_last_tab_shows_the_start_card(cx: &mut TestAppContext) {
     assert_eq!(factory.wait_for_shutdowns(2), 2);
     assert!(tab_ids(cx, &workspace).is_empty());
     in_frame(cx, handle, |window, _| {
-        assert!(window.find("start-card").visible());
-        assert_eq!(window.find("start-card").focused(), Some(true));
+        assert!(window.find("new-tab-page").visible());
+        assert_eq!(window.find("new-tab-page").focused(), Some(true));
         assert!(window.try_find(tab(1)).is_none());
     });
     // 窗口还在。
@@ -312,19 +312,19 @@ fn closing_the_last_tab_shows_the_start_card(cx: &mut TestAppContext) {
     assert_in_front(cx, handle, 3);
 }
 
-/// 标签不随内容伸缩，一律宽 180；放不下时轨道横向滚动，新开的标签露出来，滚轮能滚回去。
+/// 标签不随内容伸缩，一律宽 176；放不下时横向滚动，新开的标签露出来，滚轮能滚回去。
 #[gpui_kit::test]
 fn tabs_keep_their_width_and_the_track_scrolls(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open_tabs(cx, 10);
 
     in_frame(cx, handle, |window, _| {
         let track = window.find("tab-track").bounds();
-        assert!(track.size.width < px(180. * 10.), "{track:?}");
+        assert!(track.size.width < px(176. * 10.), "{track:?}");
         assert!(track.right() <= window.find("new-tab").bounds().left());
         for id in 1..=10 {
             assert_eq!(
                 window.find(tab(id)).bounds().size.width,
-                px(180.),
+                px(176.),
                 "tab {id}"
             );
         }

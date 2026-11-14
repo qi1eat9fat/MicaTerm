@@ -3,7 +3,7 @@ _version: 2
 connect.unknown_host.title:
   zh-CN: 确认主机密钥
 connect.unknown_host.note:
-  zh-CN: 信任后记在 QiShell 自己的 known_hosts（data/known_hosts），之后不再问。
+  zh-CN: 信任后记在 MicaTerm 自己的 known_hosts，之后不再问
 connect.unknown_host.trust:
   zh-CN: 信任并连接
 connect.key_changed.title:
@@ -20,7 +20,9 @@ connect.key_changed.replace:
   zh-CN: 更新并连接
 connect.fingerprint.algorithm:
   zh-CN: 类型
+connect.fingerprint.value:
+  zh-CN: 指纹
 connect.cancel:
   zh-CN: 取消
 connect.ok:
-  zh-CN: 确定
+  zh-CN: 连接

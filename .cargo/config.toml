@@ -1,5 +1,5 @@
 # Windows 上把 C 运行库静态链接进程序。动态链接要 VCRUNTIME140.dll，
-# 而 LTSC 版和没装 VC++ 运行库的系统没有它，QiShell 就启动不了。
+# 而 LTSC 版和没装 VC++ 运行库的系统没有它，MicaTerm 就启动不了。
 # 依赖里的 C 代码也跟着这个开关走。
 [target.'cfg(all(target_os = "windows", target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]

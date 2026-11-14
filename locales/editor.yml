@@ -1,18 +1,30 @@
 _version: 2
 
-# 编辑器标签（工单 23）：卡片头部、状态栏、冲突框、关闭确认、打不开的文件，和退出时的询问。
+# 编辑器标签（工单 23）：状态栏、查找替换（UI 重做工单 11）、冲突框、关闭确认、打不开的文件，和退出时的询问。
 # 部分文案来自 since2006/shell-rs @ b2a307a: locales/editor.yml、locales/explorer.yml
 
-editor.command.reload:
-  zh-CN: 重新加载
-editor.command.save:
-  zh-CN: 保存
+editor.command.reload_remote:
+  zh-CN: 重新加载（从服务器重读）
+editor.command.reload_local:
+  zh-CN: 重新加载（从磁盘重读）
+editor.status.unsaved:
+  zh-CN: 未保存
+editor.find.placeholder:
+  zh-CN: 查找
+editor.find.replace_placeholder:
+  zh-CN: 替换为
+editor.find.previous:
+  zh-CN: 上一个
+editor.find.next:
+  zh-CN: 下一个
+editor.find.close:
+  zh-CN: 关闭
+editor.find.replace:
+  zh-CN: 替换
+editor.find.replace_all:
+  zh-CN: 全部替换
 editor.text_label:
   zh-CN: 编辑「%{name}」
-editor.status.local:
-  zh-CN: 本机文件
-editor.status.remote:
-  zh-CN: 经 %{host} 的 SFTP 连接 · %{endpoint}
 editor.status.cursor:
   zh-CN: 第 %{line} 行，第 %{column} 列
 editor.status.plain_text:
@@ -92,7 +104,7 @@ editor.refused.close:
 editor.refused.download:
   zh-CN: 下载…
 quit.title:
-  zh-CN: 退出 QiShell
+  zh-CN: 退出 MicaTerm
 quit.transfers:
   zh-CN: "%{name} 还有 %{count} 批传输没完成%{detail}。"
 quit.transfers_note:

@@ -1,17 +1,17 @@
 //! 主机的处理器（工单 11）：新建、编辑、创建副本、复制地址、删除、拖动排序、聚焦主机搜索。
 //!
-//! 连接类的 action：`ConnectHost`（12，在新标签里连接）、`ConnectHostRight`、`ConnectHostDown`
-//! （16，开在焦点卡片旁边，见 `split_open_host`）在这里，`OpenHostSftp` 在 `sftp`（20）。
+//! 连接类的 action：`ConnectHost`（12，在新标签里连接）在这里，`OpenHostSftp` 在 `sftp`（20）。
+//! 把主机开在卡片旁边走分屏的新卡片（`handlers::cards`）。
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 
 use crate::app::{
-    ConnectHost, ConnectHostDown, ConnectHostRight, CopyHostAddress, DeleteHost, DuplicateHost,
-    EditHost, FocusHostSearch, MoveHost, NewHost,
+    ConnectHost, CopyHostAddress, DeleteHost, DuplicateHost, EditHost, FocusHostSearch, MoveHost,
+    NewHost,
 };
-use crate::host::{open_delete_host_dialog, open_host_dialog};
-use crate::split::Axis;
+use crate::host::{HostDialog, HostFormEvent, HostId, open_delete_host_dialog};
+use crate::tabs::Tab;
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) fn bind_hosts_actions(
@@ -26,8 +26,6 @@ pub(in crate::workspace) fn bind_hosts_actions(
         .on_action(cx.listener(Workspace::on_move_host))
         .on_action(cx.listener(Workspace::on_focus_host_search))
         .on_action(cx.listener(Workspace::on_connect_host))
-        .on_action(cx.listener(Workspace::on_connect_host_right))
-        .on_action(cx.listener(Workspace::on_connect_host_down))
 }
 
 impl Workspace {
@@ -41,34 +39,13 @@ impl Workspace {
         self.connect_host(id, window, cx);
     }
 
-    /// 右键菜单「在右侧分屏打开」：开在在前标签焦点卡片的右边。
-    fn on_connect_host_right(
-        &mut self,
-        &ConnectHostRight(id): &ConnectHostRight,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.split_open_host(id, Axis::Horizontal, window, cx);
-    }
-
-    /// 右键菜单「在下方分屏打开」：开在在前标签焦点卡片的下面。
-    fn on_connect_host_down(
-        &mut self,
-        &ConnectHostDown(id): &ConnectHostDown,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.split_open_host(id, Axis::Vertical, window, cx);
-    }
-
-    /// 新建主机（主机栏「主机 N」后面的「+」、Ctrl+Shift+N、开始卡片的「新建主机」）。
-    /// 已经开着对话框时不再叠一个。
+    /// 新建主机（主机栏顶部的新建按钮、Ctrl+Shift+N、新标签页的「新建主机」）：在标签页里开表单
+    /// （26 号「新建主机」）。已经开着新建主机的标签就切过去，不再开一个。问答框这类弹窗开着时不开。
     fn on_new_host(&mut self, _: &NewHost, window: &mut Window, cx: &mut Context<Self>) {
         if window.has_active_dialog(cx) {
             return;
         }
-        let tester = self.services.connection_tester.clone();
-        open_host_dialog(self.hosts.clone(), None, tester, window, cx);
+        self.open_host_form(None, window, cx);
     }
 
     fn on_edit_host(
@@ -80,8 +57,42 @@ impl Workspace {
         if window.has_active_dialog(cx) || self.hosts.read(cx).host(id).is_none() {
             return;
         }
+        self.open_host_form(Some(id), window, cx);
+    }
+
+    /// 新建（`editing` 是 `None`）或编辑一台主机的表单标签：这台主机（或新建）已经开着就切过去。
+    fn open_host_form(
+        &mut self,
+        editing: Option<HostId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self.tabs.find(|tab| {
+            tab.as_host()
+                .is_some_and(|form| form.read(cx).editing() == editing)
+        });
+        if let Some(id) = open {
+            self.tabs.activate(id);
+            self.focus_active_tab(window, cx);
+            cx.notify();
+            return;
+        }
         let tester = self.services.connection_tester.clone();
-        open_host_dialog(self.hosts.clone(), Some(id), tester, window, cx);
+        let store = self.hosts.clone();
+        let form = cx.new(|cx| HostDialog::new(store, editing, tester, window, cx));
+        cx.subscribe_in(
+            &form,
+            window,
+            |this, form, event: &HostFormEvent, window, cx| {
+                let HostFormEvent::Close = event;
+                let tab = this.tabs.find(|tab| tab.as_host() == Some(form));
+                if let Some(tab) = tab {
+                    this.close_tab(tab, window, cx);
+                }
+            },
+        )
+        .detach();
+        self.open_tab(Tab::Host(form), window, cx);
     }
 
     /// 创建副本：名称后加「 副本」，不带密码，插在原主机后面；主机栏自动选上它。

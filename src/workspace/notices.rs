@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::*;
-use qishell_terminal::{TerminalEvent, TerminalNotice};
+use micaterm_terminal::{TerminalEvent, TerminalNotice};
 
 use super::Workspace;
 use crate::card::{CardId, TerminalCard};
@@ -285,7 +285,7 @@ impl Workspace {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use qishell_terminal::TerminalNotice;
+    use micaterm_terminal::TerminalNotice;
 
     use super::{
         CardId, Delivery, NoticeKind, NoticeTimes, card_of_tag, delivery, notice_tag, notice_text,

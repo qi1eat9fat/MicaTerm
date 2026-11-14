@@ -1,5 +1,5 @@
-//! 确认框（原型 `.dlg.confirm`）：标题、一段话、右下「取消」和红色的确认按钮。删除主机、删除凭据、
-//! 重置保险库、「在另一台电脑上创建」共用。
+//! 确认框：标题、一段话、右下「取消 Esc」和红字描边的确认按钮。删除主机、删除凭据、
+//! 重置保险库、「在另一台电脑上创建」共用。样子是唯一的那种弹窗（`super::modal`，26 号「连接提示」）。
 //!
 //! 确认要做的事可以在后台跑（重置保险库）：跑的时候两个按钮都不能点，跑完由它自己关掉这一层
 //! （只关自己，上面叠着的问答框不受影响）。
@@ -10,16 +10,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::{Disableable as _, Sizable as _};
 use gpui_kit::*;
 
 use super::DialogLayer;
-use crate::theme::Tokens;
-
-/// 确认框的宽（原型 `.dlg.confirm`）。
-const WIDTH: Pixels = px(420.);
+use super::modal::{
+    ModalButtonTone, OnClick, modal_button, modal_checkbox, modal_dialog, render_modal,
+};
+use crate::theme::{Tokens, WEIGHT_MEDIUM};
 
 /// 确认框里的一行话。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,13 +55,48 @@ impl ConfirmLine {
                     div()
                         .flex_none()
                         .w(px(52.))
-                        .text_color(tokens.faint)
+                        .text_color(tokens.st_dim)
                         .child(label.clone()),
                 )
                 .child(div().min_w_0().text_color(tokens.text).child(value.clone()))
                 .into_any_element(),
         }
     }
+}
+
+/// 正文最上面一行：标题（500），后面可以跟淡色的说明（主机名、文件名）。
+fn render_title(title: SharedString, subtitle: Option<SharedString>, tokens: &Tokens) -> Div {
+    div()
+        .flex()
+        .items_baseline()
+        .gap(px(8.))
+        .child(
+            div()
+                .flex_none()
+                .font_weight(WEIGHT_MEDIUM)
+                .text_color(tokens.text)
+                .child(title),
+        )
+        .children(subtitle.map(|subtitle| {
+            div()
+                .min_w_0()
+                .truncate()
+                .text_color(tokens.st_dim)
+                .child(subtitle)
+        }))
+}
+
+/// 一段话（`.cp-q`）。
+fn render_lines(id: SharedString, lines: &[ConfirmLine], tokens: &Tokens) -> impl IntoElement {
+    div()
+        .id(id)
+        .test_support()
+        .aria_label(lines_text(lines))
+        .flex()
+        .flex_col()
+        .line_height(relative(1.6))
+        .text_color(tokens.text2)
+        .children(lines.iter().map(|line| line.render(tokens)))
 }
 
 /// 全部文字，一行一句：写在无障碍名称里，测试靠它断言。
@@ -140,67 +172,51 @@ impl Focusable for ConfirmDialog {
 }
 
 impl Render for ConfirmDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let id = self.confirm.id;
         let working = self.working.is_some();
-        div()
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(render_title(self.confirm.title.clone(), None, &tokens))
+            .child(render_lines(
+                SharedString::from(format!("{id}-text")),
+                &self.confirm.lines,
+                &tokens,
+            ));
+        let footer = div()
+            .flex()
+            .gap(px(6.))
+            .child(modal_button(
+                SharedString::from(format!("{id}-cancel")),
+                self.confirm.cancel.clone(),
+                Some("Esc"),
+                ModalButtonTone::Plain,
+                (!working).then(|| -> OnClick {
+                    Box::new(cx.listener(|this, _, window, cx| this.cancel(window, cx)))
+                }),
+                &tokens,
+                window,
+                cx,
+            ))
+            .child(modal_button(
+                SharedString::from(format!("{id}-confirm")),
+                self.confirm.confirm.clone(),
+                None,
+                ModalButtonTone::Danger,
+                (!working).then(|| -> OnClick {
+                    Box::new(cx.listener(|this, _, window, cx| this.confirm(window, cx)))
+                }),
+                &tokens,
+                window,
+                cx,
+            ));
+        render_modal(None, body, footer, &tokens, window, cx)
             .id(id)
             .test_support()
             .track_focus(&self.focus_handle)
-            .flex()
-            .flex_col()
-            .text_color(tokens.text)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .h(px(46.))
-                    .px(px(18.))
-                    .text_size(px(14.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.confirm.title.clone()),
-            )
-            .child(
-                div()
-                    .id(SharedString::from(format!("{id}-text")))
-                    .test_support()
-                    .aria_label(lines_text(&self.confirm.lines))
-                    .flex()
-                    .flex_col()
-                    .px(px(18.))
-                    .pb(px(10.))
-                    .text_size(px(12.5))
-                    .line_height(relative(1.6))
-                    .text_color(tokens.muted)
-                    .children(self.confirm.lines.iter().map(|line| line.render(&tokens))),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .pt(px(12.))
-                    .pb(px(14.))
-                    .pl(px(18.))
-                    .pr(px(14.))
-                    .child(div().flex_1())
-                    .child(
-                        Button::new(SharedString::from(format!("{id}-cancel")))
-                            .small()
-                            .label(self.confirm.cancel.clone())
-                            .disabled(working)
-                            .on_click(cx.listener(|this, _, window, cx| this.cancel(window, cx))),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!("{id}-confirm")))
-                            .danger()
-                            .small()
-                            .label(self.confirm.confirm.clone())
-                            .disabled(working)
-                            .on_click(cx.listener(|this, _, window, cx| this.confirm(window, cx))),
-                    ),
-            )
     }
 }
 
@@ -224,15 +240,7 @@ pub fn open_confirm_dialog(
     });
     let focus = view.read(cx).focus_handle.clone();
     layer.open_dismissable(
-        move |dialog, _, _| {
-            dialog
-                .w(WIDTH)
-                .p_0()
-                .rounded(px(14.))
-                .close_button(false)
-                .overlay_closable(false)
-                .child(view.clone())
-        },
+        move |dialog, _, _| modal_dialog(dialog).child(view.clone()),
         move |window, cx| cancelled(&on_cancel, window, cx),
         window,
         cx,
@@ -244,7 +252,7 @@ pub fn open_confirm_dialog(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChoiceTone {
     Normal,
-    /// 强调色：主按钮（覆盖、保存）。
+    /// 浅灰底：主按钮（覆盖、保存）。
     Primary,
     /// 红色：会丢东西的（覆盖别人的修改）。
     Danger,
@@ -324,17 +332,31 @@ impl ChoiceDialog {
         chosen(&self.on_choice, outcome, window, cx);
     }
 
-    fn render_button(&self, button: &ChoiceButton, cx: &mut Context<Self>) -> Button {
+    fn render_button(
+        &self,
+        button: &ChoiceButton,
+        tokens: &Tokens,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let (id, choice) = (self.choice.id, button.id);
-        let view = Button::new(SharedString::from(format!("{id}-{choice}")))
-            .small()
-            .label(button.label.clone())
-            .on_click(cx.listener(move |this, _, window, cx| this.choose(choice, window, cx)));
-        match button.tone {
-            ChoiceTone::Normal => view,
-            ChoiceTone::Primary => view.primary(),
-            ChoiceTone::Danger => view.danger(),
-        }
+        let tone = match button.tone {
+            ChoiceTone::Normal => ModalButtonTone::Plain,
+            ChoiceTone::Primary => ModalButtonTone::Primary,
+            ChoiceTone::Danger => ModalButtonTone::Danger,
+        };
+        modal_button(
+            SharedString::from(format!("{id}-{choice}")),
+            button.label.clone(),
+            None,
+            tone,
+            Some(Box::new(cx.listener(move |this, _, window, cx| {
+                this.choose(choice, window, cx)
+            }))),
+            tokens,
+            window,
+            cx,
+        )
     }
 }
 
@@ -357,7 +379,7 @@ impl Focusable for ChoiceDialog {
 }
 
 impl Render for ChoiceDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let id = self.choice.id;
         let left: Vec<_> = self
@@ -365,85 +387,54 @@ impl Render for ChoiceDialog {
             .buttons
             .iter()
             .filter(|button| button.left)
-            .map(|button| self.render_button(button, cx))
+            .map(|button| self.render_button(button, &tokens, window, cx))
             .collect();
         let right: Vec<_> = self
             .choice
             .buttons
             .iter()
             .filter(|button| !button.left)
-            .map(|button| self.render_button(button, cx))
+            .map(|button| self.render_button(button, &tokens, window, cx))
             .collect();
         let check = self.choice.check.clone().map(|label| {
-            div().px(px(18.)).pb(px(4.)).child(
-                Checkbox::new(SharedString::from(format!("{id}-check")))
-                    .small()
-                    .checked(self.checked)
-                    .label(label)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        this.checked = *checked;
-                        cx.notify();
-                    })),
+            modal_checkbox(
+                SharedString::from(format!("{id}-check")),
+                self.checked,
+                label,
+                None,
+                Box::new(cx.listener(|this, _, _, cx| {
+                    this.checked = !this.checked;
+                    cx.notify();
+                })),
+                &tokens,
             )
         });
-        div()
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(render_title(
+                self.choice.title.clone(),
+                self.choice.subtitle.clone(),
+                &tokens,
+            ))
+            .child(render_lines(
+                SharedString::from(format!("{id}-text")),
+                &self.choice.lines,
+                &tokens,
+            ))
+            .children(check);
+        let footer = div()
+            .flex()
+            .flex_1()
+            .gap(px(6.))
+            .children(left)
+            .child(div().flex_1())
+            .children(right);
+        render_modal(None, body, footer, &tokens, window, cx)
             .id(id)
             .test_support()
             .track_focus(&self.focus_handle)
-            .flex()
-            .flex_col()
-            .text_color(tokens.text)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .h(px(46.))
-                    .px(px(18.))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(14.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(self.choice.title.clone()),
-                    )
-                    .children(self.choice.subtitle.clone().map(|subtitle| {
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(px(12.))
-                            .text_color(tokens.faint)
-                            .child(subtitle)
-                    })),
-            )
-            .child(
-                div()
-                    .id(SharedString::from(format!("{id}-text")))
-                    .test_support()
-                    .aria_label(lines_text(&self.choice.lines))
-                    .flex()
-                    .flex_col()
-                    .px(px(18.))
-                    .pb(px(10.))
-                    .text_size(px(12.5))
-                    .line_height(relative(1.6))
-                    .text_color(tokens.muted)
-                    .children(self.choice.lines.iter().map(|line| line.render(&tokens))),
-            )
-            .children(check)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .pt(px(12.))
-                    .pb(px(14.))
-                    .pl(px(18.))
-                    .pr(px(14.))
-                    .children(left)
-                    .child(div().flex_1())
-                    .children(right),
-            )
     }
 }
 
@@ -465,15 +456,7 @@ pub fn open_choice_dialog(
     });
     let focus = view.read(cx).focus_handle.clone();
     layer.open_dismissable(
-        move |dialog, _, _| {
-            dialog
-                .w(WIDTH)
-                .p_0()
-                .rounded(px(14.))
-                .close_button(false)
-                .overlay_closable(false)
-                .child(view.clone())
-        },
+        move |dialog, _, _| modal_dialog(dialog).child(view.clone()),
         move |window, cx| {
             let outcome = ChoiceOutcome {
                 button: None,

@@ -4,9 +4,9 @@
 
 use std::time::Duration;
 
-use qishell::app::{OpenHostSftp, Quit, SftpAction, SftpTabCommand};
-use qishell::editor::EditorTab;
-use qishell::sftp_tab::{CardSide, SftpTab, TransferJob};
+use micaterm::app::{OpenHostSftp, Quit, SftpAction, SftpTabCommand};
+use micaterm::editor::EditorTab;
+use micaterm::sftp_tab::{CardSide, SftpTab, TransferJob};
 
 use crate::support::*;
 
@@ -205,13 +205,10 @@ fn opening_a_remote_file_shows_it_and_opening_it_again_switches_to_it(cx: &mut T
     assert_eq!(text_of(cx, &fixture), "hello world\n");
     assert_eq!(tab_count(cx, &fixture), 2);
     assert_eq!(active_dot(cx, &fixture), Some(StatusDot::None));
-    assert_eq!(
-        label(cx, &fixture, "editor-header"),
-        "文件 甲.txt web-01:/home/tester/"
-    );
+    // 没有头部了（26 号）：状态栏写「主机 / 完整路径」。
     assert_eq!(
         label(cx, &fixture, "editor-status"),
-        "经 web-01 的 SFTP 连接 · root@10.0.1.12 · 第 1 行，第 1 列 · UTF-8 · LF · 纯文本"
+        "web-01 / /home/tester/文件 甲.txt · 第 1 行，第 1 列 · UTF-8 · LF · 纯文本"
     );
 
     // 再打开同一个：切过去，不再读一遍，不多开标签。
@@ -220,7 +217,7 @@ fn opening_a_remote_file_shows_it_and_opening_it_again_switches_to_it(cx: &mut T
     dispatch(
         cx,
         fixture.handle,
-        qishell::app::NextTab, // 切回 SFTP 标签
+        micaterm::app::NextTab, // 切回 SFTP 标签
     );
     assert!(editor(cx, &fixture).is_none());
     dispatch(
@@ -254,7 +251,7 @@ fn f4_enter_and_a_double_click_open_the_file_under_the_cursor(cx: &mut TestAppCo
 
     // F4、回车：光标在这个文件上，切回同一个标签。
     for key in ["f4", "enter"] {
-        dispatch(cx, fixture.handle, qishell::app::NextTab);
+        dispatch(cx, fixture.handle, micaterm::app::NextTab);
         assert!(editor(cx, &fixture).is_none());
         in_frame(cx, fixture.handle, |window, cx| {
             window.within("remote-card").click(name.clone(), cx);
@@ -289,7 +286,7 @@ fn the_one_selected_file_opens_even_with_the_cursor_elsewhere(cx: &mut TestAppCo
         &fixture,
         SftpTabCommand::MoveCursor {
             side: CardSide::Remote,
-            motion: qishell::sftp_tab::CursorMotion::Up,
+            motion: micaterm::sftp_tab::CursorMotion::Up,
             extend: true,
         },
     );
@@ -304,7 +301,7 @@ fn the_one_selected_file_opens_even_with_the_cursor_elsewhere(cx: &mut TestAppCo
     dispatch(
         cx,
         fixture.handle,
-        qishell::app::SftpShortcut(SftpTabCommand::Edit {
+        micaterm::app::SftpShortcut(SftpTabCommand::Edit {
             side: CardSide::Remote,
             path: None,
         }),
@@ -325,7 +322,7 @@ fn a_new_file_opens_in_the_editor(cx: &mut TestAppContext) {
         &fixture,
         SftpTabCommand::New {
             side: CardSide::Remote,
-            kind: qishell::sftp_tab::NewEntryKind::File,
+            kind: micaterm::sftp_tab::NewEntryKind::File,
         },
     );
     type_text(cx, &fixture, "a.txt");
@@ -346,24 +343,50 @@ fn a_new_file_opens_in_the_editor(cx: &mut TestAppContext) {
     assert!(!unsaved(cx, &fixture));
 }
 
+/// 查找替换用和终端同一张浮卡（26 号）：Ctrl+F 只有查找一行，Ctrl+H 多一行替换；
+/// 不分大小写（查询全小写），Enter / Shift+Enter 前后跳，Esc 关掉、再开还是上次查的。
 #[gpui_kit::test]
 fn the_editor_has_find_and_replace_on_its_own_keys(cx: &mut TestAppContext) {
-    let fixture = open_server(cx, &[(REMOTE_FILE, b"alpha beta\n")]);
+    let fixture = open_server(cx, &[(REMOTE_FILE, b"Alpha beta alpha\n")]);
     open_file(cx, &fixture, true, REMOTE_FILE);
-    // 查找面板有切换替换的按钮；替换的按钮只在替换时有。
-    assert!(!visible(cx, &fixture, "replace-mode"));
+    assert!(!visible(cx, &fixture, "editor-find"));
     press(cx, &fixture, "ctrl-f");
-    assert!(visible(cx, &fixture, "replace-mode"));
-    assert!(!visible(cx, &fixture, "replace-all"));
-    // Esc 收起，焦点回到文字；从文字里按 Ctrl+H 直接是替换。
+    assert!(visible(cx, &fixture, "editor-find"));
+    assert!(!visible(cx, &fixture, "editor-replace"));
+
+    type_text(cx, &fixture, "alpha");
+    assert_eq!(label(cx, &fixture, "editor-find-count"), "1/2");
+    press(cx, &fixture, "enter");
+    assert_eq!(label(cx, &fixture, "editor-find-count"), "2/2");
+    press(cx, &fixture, "shift-enter");
+    assert_eq!(label(cx, &fixture, "editor-find-count"), "1/2");
+    // 有大写就分大小写。
+    press(cx, &fixture, "ctrl-a");
+    type_text(cx, &fixture, "Alpha");
+    assert_eq!(label(cx, &fixture, "editor-find-count"), "1/1");
+    press(cx, &fixture, "ctrl-a");
+    type_text(cx, &fixture, "alpha");
+
+    // Esc 关掉，焦点回到文字；Ctrl+H 再开，查的还是 alpha，多一行替换。
     press(cx, &fixture, "escape");
-    assert!(!visible(cx, &fixture, "replace-mode"));
+    assert!(!visible(cx, &fixture, "editor-find"));
     press(cx, &fixture, "ctrl-h");
-    assert!(visible(cx, &fixture, "replace-all"));
-    assert_eq!(text_of(cx, &fixture), "alpha beta\n");
+    assert!(visible(cx, &fixture, "editor-replace"));
+    assert_eq!(label(cx, &fixture, "editor-find-count"), "1/2");
+
+    // 替换框里 Enter 替换当前这个，跳到下一个；全部替换一次改完。
+    click(cx, &fixture, "editor-replace");
+    type_text(cx, &fixture, "gamma");
+    press(cx, &fixture, "enter");
+    assert_eq!(text_of(cx, &fixture), "gamma beta alpha\n");
+    assert_eq!(label(cx, &fixture, "editor-find-count"), "1/1");
+    click(cx, &fixture, "editor-replace-all");
+    assert_eq!(text_of(cx, &fixture), "gamma beta gamma\n");
+    assert_eq!(label(cx, &fixture, "editor-find-count"), "0/0");
+    assert!(unsaved(cx, &fixture));
 }
 
-/// 深浅色下编辑器都用原型的颜色和随包的等宽字体：行号栏不能是默认主题的底色，和卡片不搭。
+/// 深浅色下编辑器都用 26 号原型的颜色和 Maple Mono：行号栏不能是默认主题的底色，和内容区不搭。
 #[gpui_kit::test]
 fn the_editor_takes_its_colors_and_font_from_the_prototype_in_both_modes(cx: &mut TestAppContext) {
     for appearance in [Appearance::Dark, Appearance::Light] {
@@ -373,14 +396,22 @@ fn the_editor_takes_its_colors_and_font_from_the_prototype_in_both_modes(cx: &mu
         in_frame(cx, handle, |_, cx| {
             let tokens = Tokens::current(cx);
             let theme = cx.theme();
-            assert_eq!(theme.mono_font_family.as_ref(), "JetBrains Mono");
+            assert_eq!(
+                theme.mono_font_family.as_ref(),
+                "Maple Mono Normal NL NF CN"
+            );
+            assert_eq!(theme.font_family.as_ref(), "HarmonyOS Sans SC");
             let style = &theme.highlight_theme.style;
-            assert_eq!(style.editor_background, Some(tokens.card_focused));
-            assert_eq!(style.editor_gutter_background, Some(tokens.card_focused));
-            assert_eq!(style.editor_foreground, Some(tokens.terminal));
+            assert_eq!(style.editor_background, Some(tokens.content));
+            assert_eq!(style.editor_gutter_background, Some(tokens.content));
+            // 代码和终端同一套配色（26 号）：前景是终端主题的前景。
+            assert_eq!(
+                style.editor_foreground,
+                Some(micaterm_terminal::TerminalColors::current(cx).foreground())
+            );
             assert_eq!(style.editor_active_line, Some(tokens.hover));
             assert_eq!(style.editor_line_number, Some(tokens.faint));
-            assert_eq!(style.editor_active_line_number, Some(tokens.text));
+            assert_eq!(style.editor_active_line_number, Some(tokens.text2));
             // 语法的颜色还在：不是整个换掉。
             assert!(style.syntax.keyword.is_some() || style.syntax.string.is_some());
         });
@@ -406,7 +437,7 @@ fn the_rail_and_the_status_bar_name_the_file_and_its_connection(cx: &mut TestApp
     assert_eq!(rail_label(cx, &fixture), "compose.yml web-01");
     assert_eq!(
         label(cx, &fixture, "editor-status"),
-        "经 web-01 的 SFTP 连接 · root@10.0.1.12 · 第 1 行，第 1 列 · UTF-8 · LF · YAML"
+        "web-01 / /home/tester/compose.yml · 第 1 行，第 1 列 · UTF-8 · LF · YAML"
     );
 }
 
@@ -448,14 +479,21 @@ fn ctrl_s_writes_the_file_back_and_clears_the_dot(cx: &mut TestAppContext) {
     );
 }
 
+/// 没有「保存」按钮（26 号）：状态栏写「未保存」，Ctrl+S 存完就没了。
 #[gpui_kit::test]
-fn the_save_button_in_the_header_saves_too(cx: &mut TestAppContext) {
+fn the_status_bar_says_when_there_are_unsaved_changes(cx: &mut TestAppContext) {
     let fixture = open_server(cx, &[(REMOTE_FILE, b"text\n")]);
     open_file(cx, &fixture, true, REMOTE_FILE);
+    assert!(!visible(cx, &fixture, "editor-save"));
     type_text(cx, &fixture, "1");
-    click(cx, &fixture, "editor-save");
+    assert!(
+        label(cx, &fixture, "editor-status").contains("文件 甲.txt · 未保存 · 第 1 行，第 2 列"),
+        "{}",
+        label(cx, &fixture, "editor-status")
+    );
+    press(cx, &fixture, "ctrl-s");
     wait_for_writes(cx, &fixture, 1);
-    assert_eq!(fixture.sftp.file(REMOTE_FILE), b"1text\n");
+    assert!(!label(cx, &fixture, "editor-status").contains("未保存"));
 }
 
 #[gpui_kit::test]
@@ -673,7 +711,7 @@ fn closing_the_sftp_tab_asks_once_and_takes_its_files_along(cx: &mut TestAppCont
     assert_eq!(tab_count(cx, &fixture), 3);
 
     let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
-    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    dispatch(cx, fixture.handle, micaterm::app::CloseTab(sftp));
     let text = label(cx, &fixture, "close-tabs-text");
     assert!(text.contains("文件 甲.txt"), "{text}");
     assert!(text.contains("文件 乙.txt"), "{text}");
@@ -681,7 +719,7 @@ fn closing_the_sftp_tab_asks_once_and_takes_its_files_along(cx: &mut TestAppCont
     click(cx, &fixture, "close-tabs-cancel");
     assert_eq!(tab_count(cx, &fixture), 3);
 
-    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    dispatch(cx, fixture.handle, micaterm::app::CloseTab(sftp));
     click(cx, &fixture, "close-tabs-confirm");
     assert_eq!(tab_count(cx, &fixture), 0);
 }
@@ -698,7 +736,7 @@ fn closing_all_other_tabs_asks_once_for_every_unsaved_file(cx: &mut TestAppConte
     type_text(cx, &fixture, "2");
     let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
     // 关掉两个有修改的编辑器：合成一个框，不是一个一个问。
-    dispatch(cx, fixture.handle, qishell::app::CloseOtherTabs(sftp));
+    dispatch(cx, fixture.handle, micaterm::app::CloseOtherTabs(sftp));
     assert!(!visible(cx, &fixture, "editor-close"));
     let text = label(cx, &fixture, "close-tabs-text");
     assert!(text.contains("文件 甲.txt"), "{text}");
@@ -734,7 +772,7 @@ fn a_binary_file_is_explained_not_opened_and_offers_the_download(cx: &mut TestAp
 
 #[gpui_kit::test]
 fn a_file_over_the_limit_says_how_large_it_is(cx: &mut TestAppContext) {
-    let big = vec![b'a'; qishell::backend::sftp::EDIT_LIMIT as usize + 1];
+    let big = vec![b'a'; micaterm::backend::sftp::EDIT_LIMIT as usize + 1];
     let fixture = open_server(cx, &[(REMOTE_FILE, big.as_slice())]);
     sftp_command(
         cx,
@@ -790,13 +828,13 @@ fn a_local_file_is_edited_on_this_computer(cx: &mut TestAppContext) {
     assert_eq!(text_of(cx, &fixture), "local\n");
     assert_eq!(
         label(cx, &fixture, "editor-status"),
-        "本机文件 · 第 1 行，第 1 列 · UTF-8 · LF · 纯文本"
+        format!("本机 / {LOCAL_FILE} · 第 1 行，第 1 列 · UTF-8 · LF · 纯文本")
     );
     // 标签上灰字写「本机」，「文件」是灰的。
     assert_eq!(rail_label(cx, &fixture), "文件 甲.txt 本机");
     assert!(matches!(
         cx.update(|cx| fixture.workspace.read(cx).files_button(cx)),
-        qishell::workspace::FilesButton::Unavailable(_)
+        micaterm::workspace::FilesButton::Unavailable(_)
     ));
 
     type_text(cx, &fixture, "x");
@@ -823,7 +861,7 @@ fn closing_the_sftp_tab_leaves_local_files_open(cx: &mut TestAppContext) {
     open_file(cx, &fixture, false, LOCAL_FILE);
     type_text(cx, &fixture, "x");
     let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
-    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    dispatch(cx, fixture.handle, micaterm::app::CloseTab(sftp));
     assert!(
         !visible(cx, &fixture, "close-tabs"),
         "本地文件不跟着关，不用问"
@@ -872,7 +910,7 @@ fn a_read_cut_off_by_a_lost_connection_can_be_tried_again(cx: &mut TestAppContex
 
     fixture
         .sftp
-        .emit(qishell::backend::sftp::SftpEvent::Disconnected(
+        .emit(micaterm::backend::sftp::SftpEvent::Disconnected(
             "连接超时".into(),
         ));
     let sftp = sftp_tab(cx, &fixture);
@@ -884,7 +922,7 @@ fn a_read_cut_off_by_a_lost_connection_can_be_tried_again(cx: &mut TestAppContex
     sftp_command(cx, &fixture, SftpTabCommand::Reconnect);
     assert!(wait_until(cx, fixture.handle, |cx| {
         cx.update(|cx| sftp.read(cx).connection_state())
-            == qishell::sftp_tab::ConnectionState::Connected
+            == micaterm::sftp_tab::ConnectionState::Connected
     }));
     sftp_command(cx, &fixture, edit);
     assert!(wait_until(cx, fixture.handle, |_| {
@@ -899,7 +937,7 @@ fn saving_while_disconnected_offers_to_reconnect(cx: &mut TestAppContext) {
     type_text(cx, &fixture, "1");
     fixture
         .sftp
-        .emit(qishell::backend::sftp::SftpEvent::Disconnected(
+        .emit(micaterm::backend::sftp::SftpEvent::Disconnected(
             "连接超时".into(),
         ));
     let sftp = sftp_tab(cx, &fixture);
@@ -930,7 +968,7 @@ fn enqueue_upload(cx: &mut TestAppContext, fixture: &Fixture) {
 fn quitting_with_nothing_to_lose_does_not_ask(cx: &mut TestAppContext) {
     let fixture = open_server(cx, &[(REMOTE_FILE, b"text\n")]);
     open_file(cx, &fixture, true, REMOTE_FILE);
-    assert!(!in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    assert!(!in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
     assert!(!visible(cx, &fixture, "quit-confirm"));
 }
 
@@ -950,7 +988,7 @@ fn quitting_with_unsaved_changes_and_unfinished_transfers_asks_once(cx: &mut Tes
     assert!(text.contains("「文件 甲.txt」有未保存的修改"), "{text}");
 
     // 再来一次：还是拦着，也不多叠一个框。
-    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    assert!(in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
     click(cx, &fixture, "quit-confirm-cancel");
     assert!(!visible(cx, &fixture, "quit-confirm"));
     assert_eq!(tab_count(cx, &fixture), 2);
@@ -961,7 +999,7 @@ fn quitting_with_unsaved_changes_and_unfinished_transfers_asks_once(cx: &mut Tes
 fn closing_the_window_with_only_a_transfer_left_asks_too(cx: &mut TestAppContext) {
     let fixture = open_server(cx, &[]);
     enqueue_upload(cx, &fixture);
-    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    assert!(in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
     assert!(visible(cx, &fixture, "quit-confirm"));
     click(cx, &fixture, "quit-confirm-confirm");
     assert!(!visible(cx, &fixture, "quit-confirm"));
@@ -989,13 +1027,13 @@ fn start_held_save(cx: &mut TestAppContext) -> Fixture {
 fn finish_held_save(
     cx: &mut TestAppContext,
     fixture: &Fixture,
-    result: Result<(), qishell::backend::sftp::SaveFailure>,
+    result: Result<(), micaterm::backend::sftp::SaveFailure>,
 ) {
     let request_id = fixture.sftp.held_writes.lock().unwrap().remove(0);
     let bytes = b"1text\n";
     fixture
         .sftp
-        .emit(qishell::backend::sftp::SftpEvent::FileWritten {
+        .emit(micaterm::backend::sftp::SftpEvent::FileWritten {
             request_id,
             result: result.map(|()| fake_stamp(bytes, 101)),
         });
@@ -1012,7 +1050,7 @@ fn closing_the_sftp_tab_during_a_save_waits_for_it(cx: &mut TestAppContext) {
     let fixture = start_held_save(cx);
     let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
 
-    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    dispatch(cx, fixture.handle, micaterm::app::CloseTab(sftp));
     assert!(visible(cx, &fixture, "save-wait"));
     let text = label(cx, &fixture, "save-wait-text");
     assert!(text.contains("文件 甲.txt"), "{text}");
@@ -1039,11 +1077,11 @@ fn closing_an_editor_during_its_save_waits_instead_of_asking(cx: &mut TestAppCon
 fn a_save_that_fails_while_waiting_keeps_everything_open_and_says_so(cx: &mut TestAppContext) {
     let fixture = start_held_save(cx);
     let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
-    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    dispatch(cx, fixture.handle, micaterm::app::CloseTab(sftp));
     finish_held_save(
         cx,
         &fixture,
-        Err(qishell::backend::sftp::SaveFailure::Interrupted(
+        Err(micaterm::backend::sftp::SaveFailure::Interrupted(
             "连接断开".into(),
         )),
     );
@@ -1060,7 +1098,7 @@ fn a_save_that_fails_while_waiting_keeps_everything_open_and_says_so(cx: &mut Te
 fn the_wait_can_be_called_off(cx: &mut TestAppContext) {
     let fixture = start_held_save(cx);
     let sftp = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
-    dispatch(cx, fixture.handle, qishell::app::CloseTab(sftp));
+    dispatch(cx, fixture.handle, micaterm::app::CloseTab(sftp));
     click(cx, &fixture, "save-wait-cancel");
     assert!(!visible(cx, &fixture, "save-wait"));
     assert_eq!(tab_count(cx, &fixture), 2);
@@ -1073,11 +1111,11 @@ fn the_wait_can_be_called_off(cx: &mut TestAppContext) {
 fn quitting_during_a_save_waits_and_then_asks_about_the_rest(cx: &mut TestAppContext) {
     let fixture = start_held_save(cx);
     enqueue_upload(cx, &fixture);
-    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    assert!(in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
     assert!(visible(cx, &fixture, "save-wait"));
     assert!(!visible(cx, &fixture, "quit-confirm"));
     // 再要求一次：还是拦着，不多叠一个框。
-    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    assert!(in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
 
     finish_held_save(cx, &fixture, Ok(()));
     assert!(!visible(cx, &fixture, "save-wait"));
@@ -1091,11 +1129,11 @@ fn quitting_during_a_save_waits_and_then_asks_about_the_rest(cx: &mut TestAppCon
 #[gpui_kit::test]
 fn a_save_that_fails_while_quitting_stops_the_quit(cx: &mut TestAppContext) {
     let fixture = start_held_save(cx);
-    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    assert!(in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
     finish_held_save(
         cx,
         &fixture,
-        Err(qishell::backend::sftp::SaveFailure::Failed(
+        Err(micaterm::backend::sftp::SaveFailure::Failed(
             "权限不足".into(),
         )),
     );
@@ -1132,7 +1170,7 @@ fn closing_the_others_of_a_remote_editor_keeps_it_and_its_sftp_tab(cx: &mut Test
         (workspace.tab_ids()[0], workspace.active_tab().unwrap())
     });
 
-    dispatch(cx, fixture.handle, qishell::app::CloseOtherTabs(kept));
+    dispatch(cx, fixture.handle, micaterm::app::CloseOtherTabs(kept));
     assert_eq!(
         cx.update(|cx| fixture.workspace.read(cx).tab_ids()),
         [sftp, kept]
@@ -1143,7 +1181,7 @@ fn closing_the_others_of_a_remote_editor_keeps_it_and_its_sftp_tab(cx: &mut Test
     );
 
     // 只剩它和它的 SFTP 标签：没什么可关的。
-    dispatch(cx, fixture.handle, qishell::app::CloseOtherTabs(kept));
+    dispatch(cx, fixture.handle, micaterm::app::CloseOtherTabs(kept));
     assert_eq!(
         cx.update(|cx| fixture.workspace.read(cx).tab_ids()),
         [sftp, kept]
@@ -1153,13 +1191,8 @@ fn closing_the_others_of_a_remote_editor_keeps_it_and_its_sftp_tab(cx: &mut Test
 // ---------- 文件卡片的右键菜单 ----------
 
 /// 右键文件，点「编辑」：开编辑器。
-///
-/// 文件卡片的菜单是 gpui-component 的 `context_menu`，它的状态和关菜单的订阅互相持有（上游
-/// `context_menu.rs:331` 的 Rc 环），菜单实体放不掉，退出时泄漏检测会 panic。菜单只持弱引用，影响很小，
-/// 上游不修：这里让这个测试的 App 不析构，检测器就不跑，别的测试不受影响。
 #[gpui_kit::test]
 fn the_file_menu_opens_the_editor(cx: &mut TestAppContext) {
-    std::mem::forget(cx.app.clone());
     let fixture = open_server(cx, &[(REMOTE_FILE, b"text\n")]);
     in_frame(cx, fixture.handle, |window, cx| {
         window

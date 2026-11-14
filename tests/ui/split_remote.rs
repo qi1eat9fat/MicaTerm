@@ -1,17 +1,17 @@
-//! 分屏复用连接（工单 16）的 UI 测试：远程卡片上分屏、主机右键「在右侧 / 下方分屏打开」、主机栏的绿色数字；
+//! 分屏复用连接（工单 16）的 UI 测试：远程卡片上分屏、在分出来的新卡片里选主机、主机栏的绿色数字；
 //! 再对着进程内的 SSH 测试服务器真的登录，看分屏不再登录、关第一张卡片不断别的通道、
 //! 只给一个通道的主机分屏时回退成新建连接。
 
 use std::time::Duration;
 
-use qishell::app::{ConnectHost, ConnectHostDown, ConnectHostRight};
-use qishell::backend::{
+use micaterm::app::ConnectHost;
+use micaterm::backend::{
     ConnectionId, ConnectionPromptReply, PromptId, RemoteEvent, RemoteTarget, RemoteTerminalId,
     RemoteTerminals, SshRemoteTerminals,
 };
-use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer};
-use qishell_ssh::{AgentLocation, SshConnector};
-use qishell_terminal::{SharedTerminalTransportFactory, TerminalLifecycle};
+use micaterm_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer};
+use micaterm_ssh::{AgentLocation, SshConnector};
+use micaterm_terminal::{SharedTerminalTransportFactory, TerminalLifecycle};
 
 use crate::support::*;
 
@@ -160,7 +160,7 @@ fn splitting_a_remote_card_opens_the_same_host_on_the_same_login_without_asking(
     let (handle, workspace, remote) = open_remote(cx);
     connect(cx, handle, &workspace, 1, 1);
 
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     wait_running(cx, handle, &workspace, 2);
     settle(cx, handle);
 
@@ -170,7 +170,7 @@ fn splitting_a_remote_card_opens_the_same_host_on_the_same_login_without_asking(
         let first = window.find(("card", 1usize)).bounds();
         let second = window.find(("card", 2usize)).bounds();
         assert_eq!(first.top(), second.top());
-        assert!(second.left() > first.right());
+        assert!(second.left() >= first.right());
         assert_eq!(window.find(("terminal", 2usize)).focused(), Some(true));
     });
     // 登录一样：连接表复用连接、新开 shell 通道（真的不再登录见下面对着测试服务器的测试）；
@@ -195,7 +195,7 @@ fn splitting_a_card_of_an_edited_host_keeps_the_cards_login(cx: &mut TestAppCont
     });
 
     // 头部的向下分屏按钮。
-    dispatch(cx, handle, SplitDown);
+    split_again(cx, handle, SplitDown);
     wait_running(cx, handle, &workspace, 2);
 
     // 分屏复用源卡片的连接：用它打开时的主机和登录，不是编辑后的。
@@ -208,7 +208,7 @@ fn splitting_a_card_of_an_edited_host_keeps_the_cards_login(cx: &mut TestAppCont
     edit_hosts(cx, &workspace, |store, cx| {
         store.remove(HostId(1), cx);
     });
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     wait_running(cx, handle, &workspace, 3);
     assert_eq!(remote.targets()[2].1, targets[0].1);
     assert_eq!(tab_cards(cx, &workspace), [[1, 2, 3]]);
@@ -235,29 +235,26 @@ fn host_menu_labels(
     })
 }
 
-fn click_menu_item(cx: &mut TestAppContext, handle: WindowHandle<Root>, item: usize) {
-    in_frame(cx, handle, |window, cx| {
-        window.within("popup-menu").click(item, cx)
-    });
-}
-
+/// 分屏重做（2026-11-14）：主机右键菜单不再有「在右侧 / 下方分屏打开」，在卡片上分屏，
+/// 再在新卡片里选主机——本地卡片、远程卡片旁边都行，已经连着就复用连接。
 #[gpui_kit::test]
-fn the_host_menu_opens_a_host_beside_the_focused_card_local_or_remote(cx: &mut TestAppContext) {
+fn the_new_card_opens_a_host_beside_the_focused_card_local_or_remote(cx: &mut TestAppContext) {
     let (handle, workspace, remote) = open_remote(cx);
     dispatch(cx, handle, NewLocalTerminalTab);
 
     let labels = host_menu_labels(cx, handle, 2);
-    assert_eq!(
-        labels[..3],
-        [
-            Some("连接".to_string()),
-            Some("在右侧分屏打开".to_string()),
-            Some("在下方分屏打开".to_string())
-        ],
+    assert_eq!(labels[0].as_deref(), Some("连接"), "{labels:?}");
+    assert!(
+        labels.iter().flatten().all(|label| !label.contains("分屏")),
         "{labels:?}"
     );
-    // 本地卡片旁边，右侧。
-    click_menu_item(cx, handle, 1);
+    in_frame(cx, handle, |window, cx| window.press("escape", cx));
+
+    // 本地卡片旁边，右侧：新卡片里点 web-02（再开一个、本地终端、web-01、web-02、db-01）。
+    dispatch(cx, handle, SplitRight);
+    in_frame(cx, handle, |window, cx| {
+        window.click(("card-picker-item", 3usize), cx)
+    });
     wait_running(cx, handle, &workspace, 2);
     settle(cx, handle);
     assert_eq!(tab_cards(cx, &workspace), [[1, 2]]);
@@ -266,12 +263,13 @@ fn the_host_menu_opens_a_host_beside_the_focused_card_local_or_remote(cx: &mut T
         let local = window.find(("card", 1usize)).bounds();
         let remote = window.find(("card", 2usize)).bounds();
         assert_eq!(local.top(), remote.top());
-        assert!(remote.left() > local.right());
+        assert!(remote.left() >= local.right());
     });
 
-    // 远程卡片（焦点卡片 web-02）旁边，下方。
-    host_menu_labels(cx, handle, 3);
-    click_menu_item(cx, handle, 2);
+    // 远程卡片（焦点卡片 web-02）旁边，下方：打字过滤，回车开第一个匹配的。
+    dispatch(cx, handle, SplitDown);
+    in_frame(cx, handle, |window, cx| window.input("db", cx));
+    in_frame(cx, handle, |window, cx| window.press("enter", cx));
     wait_running(cx, handle, &workspace, 3);
     settle(cx, handle);
     assert_eq!(tab_cards(cx, &workspace), [[1, 2, 3]]);
@@ -280,7 +278,7 @@ fn the_host_menu_opens_a_host_beside_the_focused_card_local_or_remote(cx: &mut T
         let above = window.find(("card", 2usize)).bounds();
         let below = window.find(("card", 3usize)).bounds();
         assert_eq!(above.left(), below.left());
-        assert!(below.top() > above.bottom());
+        assert!(below.top() >= above.bottom());
         assert_eq!(window.find(("terminal", 3usize)).focused(), Some(true));
     });
     let hosts: Vec<u64> = remote
@@ -291,17 +289,17 @@ fn the_host_menu_opens_a_host_beside_the_focused_card_local_or_remote(cx: &mut T
     assert_eq!(hosts, [2, 3]);
 }
 
+/// 没有终端标签时分屏什么都不做：没有卡片可分。
 #[gpui_kit::test]
-fn the_split_menu_items_open_a_new_tab_when_no_terminal_tab_is_open(cx: &mut TestAppContext) {
+fn splitting_without_a_terminal_tab_does_nothing(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open_remote(cx);
 
-    dispatch(cx, handle, ConnectHostRight(HostId(1)));
-    wait_running(cx, handle, &workspace, 1);
-    // 已经有标签了：接着开在它旁边。
-    dispatch(cx, handle, ConnectHostDown(HostId(1)));
-    wait_running(cx, handle, &workspace, 2);
+    dispatch(cx, handle, SplitRight);
 
-    assert_eq!(tab_cards(cx, &workspace), [[1, 2]]);
+    cx.update(|cx| assert!(workspace.read(cx).tab_ids().is_empty()));
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("card-picker-search").is_none());
+    });
 }
 
 #[gpui_kit::test]
@@ -310,7 +308,7 @@ fn the_host_sidebar_counts_a_hosts_open_cards_in_green(cx: &mut TestAppContext) 
     assert_eq!(count_badge(cx, handle, 1), None);
 
     connect(cx, handle, &workspace, 1, 1);
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     wait_running(cx, handle, &workspace, 2);
     connect(cx, handle, &workspace, 1, 3);
     connect(cx, handle, &workspace, 2, 4);
@@ -323,7 +321,7 @@ fn the_host_sidebar_counts_a_hosts_open_cards_in_green(cx: &mut TestAppContext) 
     assert_eq!(open_cards(cx, &workspace, 1), 3);
 
     // 断开了的卡片还开着，照样算。
-    dispatch(cx, handle, qishell::app::DisconnectCard(CardId(1)));
+    dispatch(cx, handle, micaterm::app::DisconnectCard(CardId(1)));
     assert_eq!(count_badge(cx, handle, 1).as_deref(), Some("3"));
 
     dispatch(cx, handle, CloseCard(CardId(2)));
@@ -426,7 +424,7 @@ impl RealSsh {
             .unwrap();
         let directory = tempfile::tempdir().unwrap();
         let secrets =
-            qishell_hosts::secrets::StoreSource::shared(Arc::new(InMemorySecretStore::default()));
+            micaterm_hosts::secrets::StoreSource::shared(Arc::new(InMemorySecretStore::default()));
         let connector = SshConnector::new(directory.path().join("known_hosts"), secrets)
             .with_agent(AgentLocation::None)
             .with_default_key_dir(None);
@@ -522,7 +520,7 @@ fn a_split_shares_the_real_connection_and_survives_closing_the_first_card(cx: &m
     dispatch(cx, handle, ConnectHost(HostId(1)));
     assert_eq!(log_in(cx, handle, &workspace, 1), 1);
 
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     // 不再问任何问题：没有新登录。
     assert_eq!(log_in(cx, handle, &workspace, 2), 0);
     assert_eq!(ssh.remote.connection_count(), 1);
@@ -558,7 +556,7 @@ fn a_split_of_a_host_that_gives_one_channel_logs_in_on_a_new_connection(cx: &mut
     dispatch(cx, handle, ConnectHost(HostId(1)));
     assert_eq!(log_in(cx, handle, &workspace, 1), 1);
 
-    dispatch(cx, handle, SplitDown);
+    split_again(cx, handle, SplitDown);
     // 复用的连接开不出 shell 通道：自动改成新建一条连接，于是要再登录一次，而不是报错。
     assert_eq!(log_in(cx, handle, &workspace, 2), 1);
     assert_eq!(ssh.remote.connection_count(), 2);

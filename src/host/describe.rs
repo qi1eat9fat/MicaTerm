@@ -6,7 +6,7 @@
 
 use gpui_kit::SharedString;
 
-use qishell_hosts::{Change, Failure, HostDraftError, OpenError, SecretError};
+use micaterm_hosts::{Change, Failure, HostDraftError, OpenError, SecretError};
 
 use crate::i18n::t;
 
@@ -80,7 +80,6 @@ fn not_saved(change: Change, error: &str) -> SharedString {
         Change::NewCredential => t!("host.store.not_saved.new_credential", error = error),
         Change::SaveCredential => t!("host.store.not_saved.save_credential", error = error),
         Change::DeleteCredential => t!("host.store.not_saved.delete_credential", error = error),
-        Change::Recent => t!("host.store.not_saved.recent", error = error),
         Change::HostOs => t!("host.store.not_saved.host_os", error = error),
         Change::NewSnippet => t!("host.store.not_saved.new_snippet", error = error),
         Change::SaveSnippet => t!("host.store.not_saved.save_snippet", error = error),

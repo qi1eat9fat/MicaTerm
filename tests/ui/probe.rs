@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use gpui_kit::{ScrollDelta, point};
 
-use qishell::app::{ConnectHost, EditHost};
-use qishell::backend::{ProbeFailure, RemoteEvent, RemoteTerminalId};
-use qishell_terminal::TerminalLifecycle;
+use micaterm::app::{ConnectHost, EditHost};
+use micaterm::backend::{ProbeFailure, RemoteEvent, RemoteTerminalId};
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 

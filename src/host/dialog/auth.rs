@@ -9,7 +9,6 @@
 //! 保险库（工单 13）：
 //! - 保险库锁着、这台主机的密码又存过时，密码框换成「已保存，保险库锁定中 · 解锁后修改」和「解锁…」，
 //!   解开后换回密码框、填上存的密码；
-//! - 还没建保险库时，密码框下面提示「第一次保存秘密时会问你要不要设主密码，可以跳过」；
 //! - 要写密码而保险库还收不下（没建、锁着、打不开）时，对话框先经 `vault::before_saving_secret` 弹框
 //!   （[`AuthSection::writes_password`]）。
 
@@ -21,14 +20,15 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use zeroize::Zeroizing;
 
-use qishell_hosts::{AuthKind, Credential, CredentialId, HostDraft, SecretRef};
+use micaterm_hosts::{AuthKind, Credential, CredentialId, HostDraft, SecretRef};
 
 use super::HostDialog;
 use crate::host::HostStore;
 use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
-use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret, text_input};
+use crate::theme::{Tokens, ui_text};
+use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, form_pair, locked_secret};
+use crate::ui::modal::{ModalInputKind, modal_input};
 use crate::vault::{SecretChange, SecretField, VaultStatus, VaultStore};
 
 pub const FIELD_USER: &str = "host-user";
@@ -38,8 +38,6 @@ pub const AUTH_CHOICE: &str = "host-auth";
 /// 保险库锁着时代替密码框的那一行，和它的「解锁…」。
 pub const PASSWORD_LOCKED: &str = "host-password-locked";
 pub const PASSWORD_UNLOCK: &str = "host-password-unlock";
-/// 还没建保险库时密码框下面的提示。
-pub const PASSWORD_HINT: &str = "host-password-hint";
 /// 「使用凭据」的下拉框（当前选的凭据在无障碍名称里），点开是凭据列表。
 pub const FIELD_CREDENTIAL: &str = "host-credential";
 /// 下拉里的一条凭据，`(CREDENTIAL_OPTION, 凭据 id)`。
@@ -93,7 +91,7 @@ pub(super) struct AuthSection {
     /// 「使用凭据」选的凭据。
     credential: Option<CredentialId>,
     /// 凭据下拉展开着。
-    picking: bool,
+    pub(super) picking: bool,
     store: Entity<HostStore>,
     /// 保险库的状态（没有保险库时是 `None`），跟着保险库变。
     vault_status: Option<VaultStatus>,
@@ -111,7 +109,7 @@ impl AuthSection {
     ) -> Self {
         let user = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder(qishell_hosts::DEFAULT_USER)
+                .placeholder(micaterm_hosts::DEFAULT_USER)
                 .default_value(draft.user.clone())
         });
         let mut password =
@@ -235,6 +233,7 @@ impl AuthSection {
         &self,
         errors: &FieldErrors,
         tokens: &Tokens,
+        window: &Window,
         cx: &mut Context<HostDialog>,
     ) -> AnyElement {
         let choice = self.choice;
@@ -251,7 +250,7 @@ impl AuthSection {
                 .ok();
         });
         let mut rows = vec![form_field(
-            None,
+            Some(t!("host.dialog.auth")),
             segmented(
                 AUTH_CHOICE,
                 AuthChoice::ALL
@@ -269,18 +268,22 @@ impl AuthSection {
             tokens,
         )];
         match choice {
-            AuthChoice::Password => {
-                rows.push(self.render_user(errors, None, tokens));
-                rows.push(self.render_password(tokens));
-            }
+            // 用户名和密码并排（26 号 `.mf-two`）。
+            AuthChoice::Password => rows.push(form_pair(
+                self.render_user(errors, None, tokens, window, cx),
+                self.render_password(tokens, window, cx),
+                None,
+            )),
             AuthChoice::Credential => rows.push(self.render_credential(errors, tokens, cx)),
             AuthChoice::NoPassword => rows.push(self.render_user(
                 errors,
                 Some(t!("host.dialog.no_password_hint")),
                 tokens,
+                window,
+                cx,
             )),
         }
-        form_group(t!("host.dialog.auth"), rows, tokens)
+        form_group(rows)
     }
 
     fn render_user(
@@ -288,6 +291,8 @@ impl AuthSection {
         errors: &FieldErrors,
         hint: Option<SharedString>,
         tokens: &Tokens,
+        window: &Window,
+        cx: &App,
     ) -> AnyElement {
         let notes: Vec<FieldNote> = FieldNote::error_of(FIELD_USER, errors)
             .into_iter()
@@ -296,12 +301,15 @@ impl AuthSection {
             .flex()
             .flex_col()
             .gap(px(3.))
-            .child(text_input(
+            .child(modal_input(
                 FIELD_USER,
                 t!("host.dialog.user"),
                 &self.user,
+                ModalInputKind::Text,
                 errors.get(FIELD_USER).is_some(),
                 tokens,
+                window,
+                cx,
             ))
             .children(hint.map(|hint| hint_line(hint, tokens)));
         form_field(Some(t!("host.dialog.user")), control, notes, tokens)
@@ -332,19 +340,18 @@ impl AuthSection {
             .flex()
             .items_center()
             .gap(px(6.))
-            .h(px(30.))
-            .px(px(10.))
-            .rounded(px(8.))
-            .bg(tokens.field)
+            .h(crate::theme::size::INPUT)
+            .px(px(8.))
+            .rounded(crate::theme::size::RADIUS)
+            .bg(tokens.content)
             .border_1()
             .border_color(if invalid {
-                tokens.bad
+                tokens.err
             } else if self.picking {
-                tokens.field_focused
+                tokens.icon
             } else {
-                tokens.field_border
+                tokens.line
             })
-            .text_size(px(12.5))
             .cursor_pointer()
             .on_click(cx.listener(|dialog, _, _, cx| {
                 dialog.auth.picking = !dialog.auth.picking;
@@ -399,7 +406,7 @@ impl AuthSection {
                 .px(px(8.))
                 .py(px(4.))
                 .rounded(px(6.))
-                .text_size(px(12.5))
+                .text_size(ui_text())
                 .cursor_pointer()
                 .hover(move |style| style.bg(hover))
                 .child(div().truncate().child(label))
@@ -420,7 +427,7 @@ impl AuthSection {
                     (CREDENTIAL_OPTION, id.0 as usize).into(),
                     credential_label(&credential),
                 )
-                .when(self.credential == Some(id), |row| row.bg(tokens.selection))
+                .when(self.credential == Some(id), |row| row.bg(tokens.sel))
                 .on_click(cx.listener(move |dialog, _, _, cx| {
                     dialog.auth.choose_credential(id, &mut dialog.errors);
                     cx.notify();
@@ -428,7 +435,7 @@ impl AuthSection {
             }))
             .child(
                 option(CREDENTIAL_NEW.into(), t!("host.dialog.new_credential"))
-                    .text_color(tokens.accent)
+                    .text_color(tokens.text)
                     .on_click(cx.listener(|dialog, _, window, cx| {
                         dialog.auth.picking = false;
                         cx.notify();
@@ -438,7 +445,7 @@ impl AuthSection {
             .into_any_element()
     }
 
-    fn render_password(&self, tokens: &Tokens) -> AnyElement {
+    fn render_password(&self, tokens: &Tokens, window: &Window, cx: &App) -> AnyElement {
         if self.password.is_locked() {
             return form_field(
                 Some(t!("host.dialog.password")),
@@ -447,31 +454,18 @@ impl AuthSection {
                 tokens,
             );
         }
-        let first_time = self.vault_status == Some(VaultStatus::Absent);
         form_field(
             Some(t!("host.dialog.password")),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(3.))
-                .child(text_input(
-                    FIELD_PASSWORD,
-                    t!("host.dialog.password"),
-                    self.password.input(),
-                    false,
-                    tokens,
-                ))
-                .children(first_time.then(|| {
-                    let hint = t!("vault.field.first_hint");
-                    div()
-                        .id(PASSWORD_HINT)
-                        .test_support()
-                        .aria_label(hint.clone())
-                        .text_size(px(11.5))
-                        .line_height(relative(1.45))
-                        .text_color(tokens.faint)
-                        .child(hint)
-                })),
+            modal_input(
+                FIELD_PASSWORD,
+                t!("host.dialog.password"),
+                self.password.input(),
+                ModalInputKind::Secret,
+                false,
+                tokens,
+                window,
+                cx,
+            ),
             Vec::new(),
             tokens,
         )
@@ -494,7 +488,7 @@ fn hint_line(hint: SharedString, tokens: &Tokens) -> impl IntoElement + use<> {
         .id(AUTH_HINT)
         .test_support()
         .aria_label(hint.clone())
-        .text_size(px(11.5))
+        .text_size(ui_text())
         .line_height(relative(1.45))
         .text_color(tokens.faint)
         .child(hint)

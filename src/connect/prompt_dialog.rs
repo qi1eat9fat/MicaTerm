@@ -1,38 +1,39 @@
 // 参考 since2006/shell-rs @ b2a307a: src/workspace/workspace_view.rs 的 `open_next_prompt`、
 // `AuthenticationPromptForm` 和 src/host/host_dialog.rs 的 `ask_to_trust` 重写：
-// 样式按全部界面原型的「第一次连接：确认主机密钥」「主机密钥变了：告警」「连接时询问密码 / 验证码」。
+// 样式按 26 号逐屏原型的「连接提示」（主机密钥 / 密码 / 验证码）和「主机密钥变了」，外框是共用的 `ui::modal`。
 
 //! 连接时要问用户的事：第一次见到的主机密钥（信任并连接）、变了的主机密钥（更新并连接，默认取消）、
 //! 密码和服务器的键盘交互问题（如验证码）。远程卡片和主机对话框的「测试连接」共用。
 //!
 //! 对话框不点遮罩关闭、没有右上角的 ×，只能经下面的按钮或 Esc（= 取消）离开，所以每个问题一定有回答。
 
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::app::CatalogIcon;
 use crate::backend::{
-    ConnectionPromptField, ConnectionPromptKind, ConnectionPromptReply, ConnectionSecret,
-    authentication_fields, authentication_instructions, authentication_title,
+    AuthenticationRequest, ConnectionPromptField, ConnectionPromptKind, ConnectionPromptReply,
+    ConnectionSecret, authentication_fields, authentication_instructions, authentication_title,
     host_key_changed_lead, unknown_host_lead,
 };
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{MONO_FONT_FAMILY, Tokens};
 use crate::ui::DialogLayer;
 use crate::ui::form::typed_secret;
-
-/// 对话框的宽（原型 `.dlg.small`）。
-const WIDTH: Pixels = px(440.);
+use crate::ui::modal::{
+    FingerprintRow, ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button,
+    modal_dialog, modal_fingerprint, modal_input, modal_note, modal_question, modal_warn,
+    render_modal,
+};
 
 /// 回答交给谁：远程卡片的连接，或者测试连接。
 type Answer = Box<dyn FnOnce(ConnectionPromptReply, &mut Window, &mut App)>;
 
 pub struct PromptDialog {
     kind: ConnectionPromptKind,
-    /// 标题后面的灰字：主机名（问密码时还有 `user@地址`）。
-    subtitle: SharedString,
+    /// 弹窗头部：哪台主机在问（主机名和 `user@地址:端口`）。
+    head: ModalHead,
     /// 认证问题的输入框，和服务器给的字段一一对应。
     fields: Vec<(ConnectionPromptField, Entity<InputState>)>,
     answer: Option<Answer>,
@@ -44,7 +45,7 @@ pub struct PromptDialog {
 
 impl PromptDialog {
     fn new(
-        subtitle: SharedString,
+        head: ModalHead,
         kind: ConnectionPromptKind,
         answer: Answer,
         layer: DialogLayer,
@@ -75,7 +76,7 @@ impl PromptDialog {
             .collect();
         Self {
             kind,
-            subtitle,
+            head,
             fields,
             answer: Some(answer),
             layer,
@@ -164,142 +165,178 @@ impl PromptDialog {
         lines.join("\n").into()
     }
 
-    fn render_fingerprint(
-        label: SharedString,
-        algorithm: &str,
-        fingerprint: &str,
-        old: bool,
-        tokens: &Tokens,
-    ) -> Div {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .mb(px(8.))
-            .px(px(10.))
-            .py(px(8.))
-            .rounded(px(8.))
-            .bg(tokens.field)
-            .font_family("JetBrains Mono")
-            .text_size(px(11.5))
-            .when(old, |box_| box_.text_color(tokens.faint).line_through())
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.))
-                    .child(div().text_color(tokens.faint).child(label))
-                    .child(algorithm.to_string()),
-            )
-            .child(div().child(fingerprint.to_string()))
+    /// 指纹框的行：类型，再是指纹（`SHA256:…` 拆成标签 SHA256 和后面那串）。
+    fn fingerprint_rows(algorithm: &str, fingerprint: &str) -> Vec<FingerprintRow> {
+        let (label, value) = match fingerprint.split_once(':') {
+            Some((hash, value)) if !hash.is_empty() && !hash.contains(' ') => {
+                (SharedString::from(hash.to_string()), value.to_string())
+            }
+            _ => (t!("connect.fingerprint.value"), fingerprint.to_string()),
+        };
+        vec![
+            FingerprintRow {
+                label: t!("connect.fingerprint.algorithm"),
+                value: algorithm.to_string().into(),
+                old: false,
+            },
+            FingerprintRow {
+                label,
+                value: value.into(),
+                old: false,
+            },
+        ]
     }
 
-    fn render_body(&self, tokens: &Tokens) -> AnyElement {
-        let lead = div()
-            .mb(px(10.))
-            .text_size(px(12.5))
-            .line_height(relative(1.6))
-            .text_color(tokens.muted)
-            .child(self.lead());
+    fn render_body(&self, tokens: &Tokens, window: &Window, cx: &App) -> AnyElement {
         match &self.kind {
+            // 26 号「连接提示 · 主机密钥」：问话、指纹框、说明。
             ConnectionPromptKind::UnknownHost(prompt) => div()
-                .child(lead)
-                .child(Self::render_fingerprint(
-                    t!("connect.fingerprint.algorithm"),
-                    prompt.algorithm(),
-                    prompt.fingerprint(),
-                    false,
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(modal_question(self.lead(), tokens))
+                .child(modal_fingerprint(
+                    Self::fingerprint_rows(prompt.algorithm(), prompt.fingerprint()),
                     tokens,
+                    cx,
                 ))
-                .child(
-                    div()
-                        .text_size(px(11.5))
-                        .line_height(relative(1.6))
-                        .text_color(tokens.faint)
-                        .child(t!("connect.unknown_host.note")),
-                )
+                .child(modal_note(t!("connect.unknown_host.note"), tokens))
                 .into_any_element(),
-            ConnectionPromptKind::HostKeyChanged(prompt) => div()
-                .child(lead.text_color(tokens.bad))
-                .children(prompt.old_fingerprints().iter().map(|old| {
-                    Self::render_fingerprint(
-                        t!("connect.key_changed.saved_label"),
-                        prompt.algorithm(),
-                        old,
-                        true,
-                        tokens,
+            // 26 号「主机密钥变了」：红色警示行、问话、类型 / 记下的（淡）/ 现在的。
+            ConnectionPromptKind::HostKeyChanged(prompt) => {
+                let mut rows = vec![FingerprintRow {
+                    label: t!("connect.fingerprint.algorithm"),
+                    value: prompt.algorithm().to_string().into(),
+                    old: false,
+                }];
+                // 指纹去掉 `SHA256:` 前缀（26 号）：两行都是同一种，前缀只占地方，放不下整串。
+                rows.extend(prompt.old_fingerprints().iter().map(|old| FingerprintRow {
+                    label: t!("connect.key_changed.saved_label"),
+                    value: without_hash_name(old).into(),
+                    old: true,
+                }));
+                rows.push(FingerprintRow {
+                    label: t!("connect.key_changed.now_label"),
+                    value: without_hash_name(prompt.fingerprint()).into(),
+                    old: false,
+                });
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(modal_warn(CatalogIcon::ShieldX, self.title(), true, tokens))
+                    .child(modal_question(self.lead(), tokens))
+                    .child(modal_fingerprint(rows, tokens, cx))
+                    .into_any_element()
+            }
+            // 26 号「连接提示 · 密码 / 验证码」：问话；服务器自己的问题（键盘交互）先照写它的原话
+            // （等宽字），下面一个输入框；密码框右边有眼睛。
+            ConnectionPromptKind::Authentication(prompt) => {
+                let server_asks = matches!(
+                    prompt.request(),
+                    AuthenticationRequest::KeyboardInteractive { .. }
+                );
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(modal_question(self.lead(), tokens))
+                    .children(
+                        self.fields
+                            .iter()
+                            .enumerate()
+                            .map(|(index, (field, input))| {
+                                let label = SharedString::from(field.label().to_string());
+                                let kind = if !field.echo() {
+                                    ModalInputKind::Secret
+                                } else if server_asks {
+                                    ModalInputKind::Mono
+                                } else {
+                                    ModalInputKind::Text
+                                };
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(6.))
+                                    .when(server_asks, |field| {
+                                        field.child(
+                                            div()
+                                                .font_family(MONO_FONT_FAMILY)
+                                                .text_color(tokens.text)
+                                                .child(label.clone()),
+                                        )
+                                    })
+                                    .child(modal_input(
+                                        ("prompt-field", index),
+                                        label,
+                                        input,
+                                        kind,
+                                        false,
+                                        tokens,
+                                        window,
+                                        cx,
+                                    ))
+                            }),
                     )
-                }))
-                .child(Self::render_fingerprint(
-                    t!("connect.key_changed.now_label"),
-                    prompt.algorithm(),
-                    prompt.fingerprint(),
-                    false,
-                    tokens,
-                ))
-                .into_any_element(),
-            ConnectionPromptKind::Authentication(_) => div()
-                .child(lead)
-                .children(
-                    self.fields
-                        .iter()
-                        .enumerate()
-                        .map(|(index, (field, input))| {
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.))
-                                .mb(px(8.))
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(tokens.muted)
-                                        .child(field.label().to_string()),
-                                )
-                                .child(
-                                    Input::new(input)
-                                        .id(("prompt-field", index))
-                                        .aria_label(SharedString::from(field.label().to_string()))
-                                        .small(),
-                                )
-                        }),
-                )
-                .into_any_element(),
+                    .into_any_element()
+            }
         }
     }
 
-    fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let cancel = Button::new("prompt-cancel")
-            .small()
-            .label(t!("connect.cancel"))
-            .on_click(cx.listener(|this, _, window, cx| this.cancel(window, cx)));
-        let confirm = Button::new("prompt-confirm")
-            .small()
-            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
-        let (cancel, confirm) = match &self.kind {
-            ConnectionPromptKind::UnknownHost(_) => (
-                cancel,
-                confirm.primary().label(t!("connect.unknown_host.trust")),
-            ),
-            // 默认按钮是「取消」。
-            ConnectionPromptKind::HostKeyChanged(_) => (
-                cancel.primary(),
-                confirm.danger().label(t!("connect.key_changed.replace")),
-            ),
-            ConnectionPromptKind::Authentication(_) => {
-                (cancel, confirm.primary().label(t!("connect.ok")))
-            }
+    fn render_footer(&self, tokens: &Tokens, window: &Window, cx: &mut Context<Self>) -> Div {
+        let button = |id: &'static str,
+                      label: SharedString,
+                      keys: Option<&'static str>,
+                      tone: ModalButtonTone,
+                      on_click: OnClick,
+                      cx: &App| {
+            modal_button(id, label, keys, tone, Some(on_click), tokens, window, cx)
         };
-        div()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .pt(px(12.))
-            .pb(px(14.))
-            .pl(px(18.))
-            .pr(px(14.))
-            .child(div().flex_1())
-            .child(cancel)
-            .child(confirm)
+        let cancel_tone = if matches!(self.kind, ConnectionPromptKind::HostKeyChanged(_)) {
+            ModalButtonTone::Primary
+        } else {
+            ModalButtonTone::Plain
+        };
+        let cancel = button(
+            "prompt-cancel",
+            t!("connect.cancel"),
+            Some("Esc"),
+            cancel_tone,
+            Box::new(cx.listener(|this, _, window, cx| this.cancel(window, cx))),
+            cx,
+        );
+        let submit =
+            || -> OnClick { Box::new(cx.listener(|this, _, window, cx| this.submit(window, cx))) };
+        let confirm = match &self.kind {
+            ConnectionPromptKind::UnknownHost(_) => button(
+                "prompt-confirm",
+                t!("connect.unknown_host.trust"),
+                Some("Enter"),
+                ModalButtonTone::Primary,
+                submit(),
+                cx,
+            ),
+            // 默认是「取消」；「更新并连接」红字描边、不带快捷键（26 号，用户定）。
+            ConnectionPromptKind::HostKeyChanged(_) => button(
+                "prompt-confirm",
+                t!("connect.key_changed.replace"),
+                None,
+                ModalButtonTone::Danger,
+                submit(),
+                cx,
+            ),
+            ConnectionPromptKind::Authentication(_) => button(
+                "prompt-confirm",
+                t!("connect.ok"),
+                Some("Enter"),
+                ModalButtonTone::Primary,
+                submit(),
+                cx,
+            ),
+        };
+        // 「取消」在左、做事的在右；主机密钥变了也一样，「更新并连接」在最右（2026-11-13 用户定，
+        // 改了 26 号的危险按钮在左），默认按钮仍是「取消」。
+        div().flex().gap(px(6.)).child(cancel).child(confirm)
     }
 }
 
@@ -310,61 +347,50 @@ impl Focusable for PromptDialog {
 }
 
 impl Render for PromptDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
-        div()
+        let body = self.render_body(&tokens, window, cx);
+        let footer = self.render_footer(&tokens, window, cx);
+        render_modal(Some(self.head.clone()), body, footer, &tokens, window, cx)
             .id("connection-prompt")
             .test_support()
             .aria_label(self.description())
             .track_focus(&self.focus_handle)
-            // Esc 就是取消：问题一定有回答。
+            // Esc 就是取消：问题一定有回答。没有输入框时回车按默认按钮：确认主机密钥是「信任并连接」，
+            // 主机密钥变了是「取消」（有输入框时回车由输入框交上去）。
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape" {
-                    cx.stop_propagation();
-                    this.cancel(window, cx);
+                match event.keystroke.key.as_str() {
+                    "escape" => {
+                        cx.stop_propagation();
+                        this.cancel(window, cx);
+                    }
+                    "enter" if this.fields.is_empty() => {
+                        cx.stop_propagation();
+                        if matches!(this.kind, ConnectionPromptKind::HostKeyChanged(_)) {
+                            this.cancel(window, cx);
+                        } else {
+                            this.submit(window, cx);
+                        }
+                    }
+                    _ => {}
                 }
             }))
-            .flex()
-            .flex_col()
-            .text_color(tokens.text)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .h(px(46.))
-                    .px(px(18.))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(14.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .when(
-                                matches!(self.kind, ConnectionPromptKind::HostKeyChanged(_)),
-                                |title| title.text_color(tokens.bad),
-                            )
-                            .child(self.title()),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_size(px(12.))
-                            .text_color(tokens.faint)
-                            .truncate()
-                            .child(self.subtitle.clone()),
-                    ),
-            )
-            .child(div().px(px(18.)).child(self.render_body(&tokens)))
-            .child(self.render_footer(cx))
     }
 }
 
-/// 问用户 `kind`，回答交给 `answer`（取消、Esc 也是回答）。`subtitle` 写在标题后面：主机名。
-/// 有输入框时焦点给第一个，否则给对话框（Esc 能用）。返回问答框那一层：问题作废时
+/// 指纹去掉开头的哈希名（`SHA256:`）；没有哈希名时原样。
+fn without_hash_name(fingerprint: &str) -> String {
+    match fingerprint.split_once(':') {
+        Some((hash, value)) if !hash.is_empty() && !hash.contains(' ') => value.to_string(),
+        _ => fingerprint.to_string(),
+    }
+}
+
+/// 问用户 `kind`，回答交给 `answer`（取消、Esc 也是回答）。`head` 是弹窗头部：哪台主机在问。
+/// 有输入框时焦点给第一个，否则给对话框（Esc、回车能用）。返回问答框那一层：问题作废时
 /// （等它的卡片都关了）调用方拿它关掉问答框，不交回答。
 pub fn open_prompt_dialog(
-    subtitle: SharedString,
+    head: ModalHead,
     kind: ConnectionPromptKind,
     answer: impl FnOnce(ConnectionPromptReply, &mut Window, &mut App) + 'static,
     window: &mut Window,
@@ -372,20 +398,11 @@ pub fn open_prompt_dialog(
 ) -> DialogLayer {
     let layer = DialogLayer::new();
     let view =
-        cx.new(|cx| PromptDialog::new(subtitle, kind, Box::new(answer), layer.clone(), window, cx));
+        cx.new(|cx| PromptDialog::new(head, kind, Box::new(answer), layer.clone(), window, cx));
     let first_field = view.read(cx).fields.first().map(|(_, input)| input.clone());
     let focus = view.read(cx).focus_handle.clone();
     layer.open(
-        move |dialog, _, _| {
-            dialog
-                .w(WIDTH)
-                .p_0()
-                .rounded(px(14.))
-                .close_button(false)
-                .overlay_closable(false)
-                .keyboard(false)
-                .child(view.clone())
-        },
+        move |dialog, _, _| modal_dialog(dialog).keyboard(false).child(view.clone()),
         window,
         cx,
     );

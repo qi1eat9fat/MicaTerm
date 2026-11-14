@@ -1,14 +1,14 @@
 // 参考 since2006/shell-rs @ b2a307a: src/secrets/keychain.rs 改写：钥匙串里不再放密码和口令，
-// 只放保险库的数据密钥（`DataKeyStore`），账户名 `vault:<保险库 id>`；service 改成 `qishell`。
+// 只放保险库的数据密钥（`DataKeyStore`），账户名 `vault:<保险库 id>`；service 改成 `micaterm`。
 
 use anyhow::{Result, anyhow};
 use keyring::{Entry, Error};
-use qishell_hosts::{DataKey, DataKeyStore};
+use micaterm_hosts::{DataKey, DataKeyStore};
 
 use crate::i18n::t;
 
 /// 钥匙串条目的 service 名。发布后不能改：改了就找不到已经记住的数据密钥。
-pub const SERVICE: &str = "qishell";
+pub const SERVICE: &str = "micaterm";
 
 /// 保险库 `vault_id` 的数据密钥在钥匙串里的账户名。发布后不能改。
 pub fn account(vault_id: &str) -> String {
@@ -85,7 +85,7 @@ enum Action {
 
 #[cfg(test)]
 mod tests {
-    use qishell_hosts::{DataKey, DataKeyStore};
+    use micaterm_hosts::{DataKey, DataKeyStore};
 
     use super::{KeychainDataKeyStore, account};
 
@@ -107,7 +107,7 @@ mod tests {
             "这台机器上没有可用的系统钥匙串"
         );
         let store = KeychainDataKeyStore;
-        let vault_id = "qishell-test-0000000000000000";
+        let vault_id = "micaterm-test-0000000000000000";
         store.delete(vault_id).unwrap();
         assert!(store.get(vault_id).unwrap().is_none());
 
@@ -127,8 +127,8 @@ mod tests {
     fn a_vault_without_a_master_password_keeps_its_key_in_the_system_keychain() {
         use std::sync::Arc;
 
-        use qishell_hosts::secrets::SecretStore as _;
-        use qishell_hosts::{KdfParams, SecretRef, Vault, VaultStatus};
+        use micaterm_hosts::secrets::SecretStore as _;
+        use micaterm_hosts::{KdfParams, SecretRef, Vault, VaultStatus};
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vault.json");

@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 
 use gpui_kit::*;
 
+use crate::app::CatalogIcon;
 use crate::backend::{
     ConnectionId, ConnectionPrompt, ConnectionPromptKind, ConnectionPromptReply, HostLogin,
     JumpLogin, LoginRoute, PromptId, RemotePrompt,
@@ -18,6 +19,7 @@ use crate::card::CardId;
 use crate::connect::open_prompt_dialog;
 use crate::sftp_tab::SftpTabId;
 use crate::ui::DialogLayer;
+use crate::ui::modal::ModalHead;
 use crate::workspace::Workspace;
 
 /// 问题从哪条连接来，回答交回哪里。
@@ -156,9 +158,9 @@ impl Workspace {
                 .respond(prompt.id, ConnectionPromptReply::Cancel);
             return false;
         };
-        let subtitle = {
+        let head = {
             let card = card.read(cx);
-            prompt_subtitle(
+            prompt_head(
                 card.name(),
                 &prompt.kind,
                 card.remote_target().map(|target| &target.login),
@@ -168,7 +170,7 @@ impl Workspace {
         let remote = self.services.remote_terminals.clone();
         let workspace = cx.weak_entity();
         let layer = open_prompt_dialog(
-            subtitle,
+            head,
             prompt.kind,
             move |reply, window, cx| {
                 remote.respond(id, reply);
@@ -199,14 +201,14 @@ impl Workspace {
         if tab.read(cx).generation() != generation {
             return false;
         }
-        let subtitle = {
+        let head = {
             let tab = tab.read(cx);
-            prompt_subtitle(tab.host().name.clone(), prompt.kind(), Some(tab.login()))
+            prompt_head(tab.host().name.clone(), prompt.kind(), Some(tab.login()))
         };
         let request = prompt.request_id();
         let workspace = cx.weak_entity();
         let layer = open_prompt_dialog(
-            subtitle,
+            head,
             prompt.kind().clone(),
             move |reply, window, cx| {
                 tab.read(cx).reply_to_prompt(request, reply);
@@ -239,37 +241,45 @@ impl Workspace {
     }
 }
 
-/// 问答框标题后面的灰字：卡片名或主机名；问密码时再加上是以谁登录哪台，跳板主机问的写跳板主机的
-/// （工单 15：问题的正文已经写明是哪台跳板主机）。
-fn prompt_subtitle(
+/// 问答弹窗的头部（26 号 `.cp-h`）：卡片名，后面淡字写被问的是哪个登录。认证问题写那个登录的
+/// `user@地址:端口`（问的是跳板主机时写跳板主机的）；主机密钥的问题写服务器的 `地址:端口`。
+fn prompt_head(
     name: SharedString,
     kind: &ConnectionPromptKind,
     target: Option<&HostLogin>,
-) -> SharedString {
-    let (ConnectionPromptKind::Authentication(question), Some(target)) = (kind, target) else {
-        return name;
+) -> ModalHead {
+    let detail = match kind {
+        ConnectionPromptKind::UnknownHost(prompt) => {
+            Some(format!("{}:{}", prompt.host(), prompt.port()))
+        }
+        ConnectionPromptKind::HostKeyChanged(prompt) => {
+            Some(format!("{}:{}", prompt.host(), prompt.port()))
+        }
+        ConnectionPromptKind::Authentication(question) => target
+            .and_then(|target| match (question.jump_host(), &target.route) {
+                (None, _) => Some(target),
+                (Some(jump), LoginRoute::Jump(hops)) => hops.iter().find_map(|hop| match hop {
+                    JumpLogin::Host { name, login } if name == jump => Some(&**login),
+                    _ => None,
+                }),
+                (Some(_), _) => None,
+            })
+            .map(|login| format!("{}@{}:{}", login.user, login.host, login.port)),
     };
-    let login = match (question.jump_host(), &target.route) {
-        (None, _) => Some(target),
-        (Some(jump), LoginRoute::Jump(hops)) => hops.iter().find_map(|hop| match hop {
-            JumpLogin::Host { name, login } if name == jump => Some(&**login),
-            _ => None,
-        }),
-        (Some(_), _) => None,
-    };
-    match login {
-        Some(login) => format!("{name} \u{b7} {}@{}", login.user, login.host).into(),
-        None => name,
+    ModalHead {
+        icon: CatalogIcon::Server,
+        title: name,
+        detail: detail.map(Into::into),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::prompt_subtitle;
+    use super::prompt_head;
     use crate::backend::{
         AuthenticationRequest, ConnectionPromptKind, HostLogin, JumpLogin, LoginRoute,
     };
-    use qishell_ssh::LoginMethod;
+    use micaterm_ssh::LoginMethod;
 
     fn password(jump_host: Option<&str>) -> ConnectionPromptKind {
         ConnectionPromptKind::authentication(AuthenticationRequest::Password {
@@ -279,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn a_password_asked_at_a_jump_host_names_the_jump_hosts_login() {
+    fn the_head_names_the_login_being_asked_about() {
         let jump = HostLogin::new("203.0.113.7", 2222, "admin", LoginMethod::Password);
         let target = HostLogin::new("10.0.2.8", 22, "root", LoginMethod::Password).with_route(
             LoginRoute::Jump(vec![JumpLogin::Host {
@@ -287,22 +297,27 @@ mod tests {
                 login: Box::new(jump),
             }]),
         );
-        let subtitle = |kind| prompt_subtitle("db-master".into(), &kind, Some(&target));
+        let detail = |kind| {
+            let head = prompt_head("db-master".into(), &kind, Some(&target));
+            assert_eq!(head.title.as_ref(), "db-master");
+            head.detail.map(|detail| detail.to_string())
+        };
 
-        assert_eq!(subtitle(password(None)), "db-master · root@10.0.2.8");
+        assert_eq!(detail(password(None)).as_deref(), Some("root@10.0.2.8:22"));
         assert_eq!(
-            subtitle(password(Some("jp-gateway"))),
-            "db-master · admin@203.0.113.7"
+            detail(password(Some("jp-gateway"))).as_deref(),
+            Some("admin@203.0.113.7:2222")
         );
-        // 主机密钥的问题只写卡片名。
+        // 主机密钥的问题写服务器的地址和端口。
         assert_eq!(
-            subtitle(ConnectionPromptKind::unknown_host(
+            detail(ConnectionPromptKind::unknown_host(
                 "203.0.113.7",
                 2222,
                 "ssh-ed25519",
                 "SHA256:abc"
-            )),
-            "db-master"
+            ))
+            .as_deref(),
+            Some("203.0.113.7:2222")
         );
     }
 }

@@ -6,10 +6,10 @@
 
 use std::time::Duration;
 
-use qishell::app::{ConnectHost, ReconnectCard};
-use qishell::backend::{ProbeFailure, RemoteTerminalId};
-use qishell_hosts::HostId;
-use qishell_terminal::TerminalLifecycle;
+use micaterm::app::{ConnectHost, ReconnectCard};
+use micaterm::backend::{ProbeFailure, RemoteTerminalId};
+use micaterm_hosts::HostId;
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -62,6 +62,7 @@ fn visible(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &'static str
 }
 
 fn status(cx: &mut TestAppContext, handle: WindowHandle<Root>, card: u64) -> String {
+    // 状态栏从连接状态读起（名称在卡片顶行）。
     label(cx, handle, ("card-status", card as usize)).unwrap_or_default()
 }
 
@@ -172,7 +173,7 @@ fn a_locked_vault_opens_the_card_waiting_and_unlocking_connects_it_in_place(
         Some("正在连接 root@10.0.1.12:22…")
     );
     assert!(
-        status(cx, handle, 1).starts_with("等待解锁保险库 · root@10.0.1.12:22 · "),
+        status(cx, handle, 1).starts_with("等待解锁保险库 · ~ · "),
         "{}",
         status(cx, handle, 1)
     );
@@ -210,11 +211,11 @@ fn cancelling_the_unlock_leaves_the_card_disconnected_and_reconnecting_asks_agai
     assert!(connections(&remote).is_empty());
     assert_eq!(card_names(cx, &workspace), [["web-01"]]);
     assert_eq!(
-        label(cx, handle, ("card-disconnected", 1usize)).as_deref(),
-        Some("连接已断开 · 保险库没有解锁 · Enter 重新连接 · Space 关闭")
+        ended_notice(cx, &workspace, 1).as_deref(),
+        Some("[连接已断开] 保险库没有解锁")
     );
     assert!(
-        status(cx, handle, 1).starts_with("已断开 · root@10.0.1.12:22 · 保险库没有解锁"),
+        status(cx, handle, 1).starts_with("已断开 保险库没有解锁 · "),
         "{}",
         status(cx, handle, 1)
     );
@@ -226,7 +227,7 @@ fn cancelling_the_unlock_leaves_the_card_disconnected_and_reconnecting_asks_agai
     press(cx, handle, "enter");
     assert!(visible(cx, handle, "vault-unlock"));
     assert!(status(cx, handle, 1).starts_with("等待解锁保险库"));
-    assert_eq!(label(cx, handle, ("card-disconnected", 1usize)), None);
+    assert_eq!(ended_notice(cx, &workspace, 1), None);
     assert!(connections(&remote).is_empty());
 
     // 再取消一次也一样；右键菜单的「重新连接」也再问。
@@ -244,23 +245,27 @@ fn cancelling_the_unlock_leaves_the_card_disconnected_and_reconnecting_asks_agai
     assert!(status(cx, handle, 1).starts_with("已连接"));
 }
 
-/// 解锁框开着时又要连一台锁着的主机（分屏）：共用这一个框，一起解开或一起取消。
+/// 解锁框开着时又要连一台锁着的主机（另一个标签；弹窗开着时不能分屏）：共用这一个框，一起解开或一起取消。
 #[gpui_kit::test]
 fn cards_waiting_together_share_one_unlock(cx: &mut TestAppContext) {
     let vault = locked_vault();
     let (handle, workspace, remote) = open_with_vault(cx, &vault);
 
     dispatch(cx, handle, ConnectHost(HostId(1)));
+    // 解锁框开着时分屏什么都不做（新卡片会抢走框的键盘）。
     dispatch(cx, handle, SplitRight);
-    assert_eq!(card_names(cx, &workspace), [["web-01", "web-01"]]);
+    assert_eq!(card_names(cx, &workspace), [["web-01"]]);
+    dispatch(cx, handle, ConnectHost(HostId(1)));
+    assert_eq!(card_names(cx, &workspace), [["web-01"], ["web-01"]]);
     assert!(status(cx, handle, 2).starts_with("等待解锁保险库"));
     assert!(connections(&remote).is_empty());
 
     // 只有一个框：一次取消，两张都没连。
     click(cx, handle, "vault-unlock-cancel");
     assert!(!visible(cx, handle, "vault-unlock"));
-    assert!(status(cx, handle, 1).starts_with("已断开"));
     assert!(status(cx, handle, 2).starts_with("已断开"));
+    dispatch(cx, handle, micaterm::app::SwitchToTab(1));
+    assert!(status(cx, handle, 1).starts_with("已断开"));
 
     // 都原地重连，再一起解开。
     dispatch(cx, handle, ReconnectCard(CardId(1)));
@@ -298,7 +303,7 @@ fn reconnecting_after_a_failed_probe_waits_for_a_locked_vault(cx: &mut TestAppCo
     click(cx, handle, "lock-vault");
     assert_eq!(vault.status(), VaultStatus::Locked);
 
-    remote.emit(qishell::backend::RemoteEvent::ProbeFailed {
+    remote.emit(micaterm::backend::RemoteEvent::ProbeFailed {
         host: HostId(1),
         terminals: vec![RemoteTerminalId(1)],
         failure: ProbeFailure::ConnectionLost,
@@ -325,7 +330,7 @@ fn reusing_a_live_connection_never_waits_for_the_vault(cx: &mut TestAppContext) 
     click(cx, handle, "lock-vault");
     assert_eq!(vault.status(), VaultStatus::Locked);
 
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     dispatch(cx, handle, ConnectHost(HostId(1)));
     assert!(!visible(cx, handle, "vault-unlock"));
     assert_eq!(connections(&remote), [(1, 1), (2, 1), (3, 1)]);

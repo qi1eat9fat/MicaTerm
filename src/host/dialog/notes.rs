@@ -1,19 +1,20 @@
-//! 主机对话框的「备注」组：写点什么，悬停主机时显示。
+//! 主机表单的备注：一行（26 号，用户定：备注单行，所以在表单里按 Enter 就是保存），悬停主机时显示。
 
-use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 
-use qishell_hosts::HostDraft;
+use micaterm_hosts::HostDraft;
 
 use super::HostDialog;
 use crate::i18n::t;
 use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, form_group};
+use crate::ui::form::{FieldErrors, form_field, form_group};
+use crate::ui::modal::{ModalInputKind, modal_input};
 
 pub const FIELD_NOTES: &str = "host-notes";
 
 pub(super) struct NotesSection {
-    notes: Entity<TextareaState>,
+    notes: Entity<InputState>,
 }
 
 impl NotesSection {
@@ -23,11 +24,11 @@ impl NotesSection {
         cx: &mut Context<HostDialog>,
     ) -> Self {
         Self {
+            // 以前存的多行备注合成一行。
             notes: cx.new(|cx| {
-                TextareaState::new(window, cx)
-                    .auto_grow(2, 6)
+                InputState::new(window, cx)
                     .placeholder(t!("host.dialog.notes_placeholder"))
-                    .default_value(draft.notes.clone())
+                    .default_value(draft.notes.replace(['\r', '\n'], " "))
             }),
         }
     }
@@ -36,20 +37,28 @@ impl NotesSection {
         draft.notes = self.notes.read(cx).value();
     }
 
-    pub(super) fn render(&self, _: &FieldErrors, tokens: &Tokens) -> AnyElement {
-        form_group(
-            t!("host.dialog.notes"),
-            [div()
-                .id(FIELD_NOTES)
-                .test_support()
-                .mb(px(10.))
-                .child(
-                    Textarea::new(&self.notes)
-                        .aria_label(t!("host.dialog.notes"))
-                        .text_size(px(13.)),
-                )
-                .into_any_element()],
+    pub(super) fn render(
+        &self,
+        _: &FieldErrors,
+        tokens: &Tokens,
+        window: &Window,
+        cx: &App,
+    ) -> AnyElement {
+        let label = t!("host.dialog.notes");
+        form_group([form_field(
+            Some(label.clone()),
+            modal_input(
+                FIELD_NOTES,
+                label,
+                &self.notes,
+                ModalInputKind::Text,
+                false,
+                tokens,
+                window,
+                cx,
+            ),
+            Vec::new(),
             tokens,
-        )
+        )])
     }
 }

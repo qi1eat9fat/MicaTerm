@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use qishell_terminal::TerminalLifecycle;
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -65,23 +65,23 @@ fn card_tile(cx: &mut TestAppContext, workspace: &Entity<Workspace>, card: u64) 
     cx.update(|cx| workspace.read(cx).card_tile(CardId(card), cx))
 }
 
-fn tab_tiles(cx: &mut TestAppContext, workspace: &Entity<Workspace>, tab: u64) -> Vec<String> {
-    cx.update(|cx| workspace.read(cx).tab_tiles(TabId(tab), cx))
+fn tab_tile(cx: &mut TestAppContext, workspace: &Entity<Workspace>, tab: u64) -> Option<String> {
+    cx.update(|cx| workspace.read(cx).tab_tile(TabId(tab), cx))
 }
 
 #[gpui_kit::test]
 fn the_tile_of_a_card_follows_its_foreground_program(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_tab(cx);
-    assert_eq!(tab_tiles(cx, &workspace, 1), ["pwsh"]);
+    assert_eq!(tab_tile(cx, &workspace, 1).as_deref(), Some("pwsh"));
 
     factory.foreground(1, Some("nvim"));
     assert!(wait_until(cx, handle, |cx| card_tile(cx, &workspace, 1)
         == Some("Neovim".into())));
-    assert_eq!(tab_tiles(cx, &workspace, 1), ["Neovim"]);
+    assert_eq!(tab_tile(cx, &workspace, 1).as_deref(), Some("Neovim"));
 
-    // 头部和标签上画出来的图块是同一个程序。
+    // 标签上画出来的图块就是它（卡片没有头部，图块只在标签上）。
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find(("card-tile", 1usize)).label(), Some("Neovim"));
+        assert!(window.try_find(("card-tile", 1usize)).is_none());
         assert_eq!(window.find(("tab-tiles", 1usize)).label(), Some("Neovim"));
     });
 
@@ -91,12 +91,14 @@ fn the_tile_of_a_card_follows_its_foreground_program(cx: &mut TestAppContext) {
         == Some("pwsh".into())));
 }
 
-/// 一个标签里四张卡片：标签上叠三块，焦点卡片的在最前面，其余按从左到右的顺序。
+/// 一个标签里四张卡片：标签上只画焦点卡片的那一块（用户定：不叠放），焦点换了它跟着换。
+/// 标签前面叠放每张卡片的图块（2026-11-14 用户定）：焦点卡片在最前，其余按分屏里的顺序，最多 3 块。
+/// 卡片顶行正中写它在跑的程序。
 #[gpui_kit::test]
-fn a_tab_stacks_the_tiles_of_its_cards_with_the_focused_one_in_front(cx: &mut TestAppContext) {
+fn a_tab_stacks_the_tiles_of_its_cards_with_the_focused_one_first(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_tab(cx);
     for _ in 0..3 {
-        dispatch(cx, handle, SplitRight);
+        split_again(cx, handle, SplitRight);
     }
     factory.foreground(1, Some("vim"));
     factory.foreground(2, Some("htop"));
@@ -109,20 +111,36 @@ fn a_tab_stacks_the_tiles_of_its_cards_with_the_focused_one_in_front(cx: &mut Te
     }));
 
     // 焦点在新开的第 4 张（shell 在提示符下）。
-    assert_eq!(tab_tiles(cx, &workspace, 1), ["pwsh", "Vim", "Activity"]);
+    assert_eq!(tab_tile(cx, &workspace, 1).as_deref(), Some("pwsh"));
+    let stacked = |window: &mut gpui_kit::Window| -> Vec<String> {
+        let tiles = window.within(("tab-tiles", 1usize));
+        (0..4_usize)
+            .filter_map(|index| tiles.try_find(("tab-tile", index)))
+            .filter_map(|tile| tile.label().map(str::to_owned))
+            .collect()
+    };
     in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find(("tab-tiles", 1usize)).label(), Some("pwsh"));
+        assert_eq!(stacked(window), ["pwsh", "Vim", "Activity"]);
+        // 顶行：在跑的程序写在正中，回到提示符的卡片没有。
         assert_eq!(
-            window.find(("tab-tiles", 1usize)).label(),
-            Some("pwsh · Vim · Activity")
+            window.find(("card-title", 1usize)).label(),
+            Some("pwsh · Vim")
         );
+        assert!(window.find(("card-title-program", 1usize)).visible());
+        assert!(window.try_find(("card-title-program", 4usize)).is_none());
     });
 
-    // 点第 1 张：它的图块到最前面，后面是其余的前两张。
+    // 点第 1 张：标签前换成它的图块。
     in_frame(cx, handle, |window, cx| {
         window.click(("terminal", 1usize), cx)
     });
     cx.update(|cx| assert_eq!(workspace.read(cx).focused_card(cx), Some(CardId(1))));
-    assert_eq!(tab_tiles(cx, &workspace, 1), ["Vim", "Activity", "Git"]);
+    assert_eq!(tab_tile(cx, &workspace, 1).as_deref(), Some("Vim"));
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find(("tab-tiles", 1usize)).label(), Some("Vim"));
+        assert_eq!(stacked(window), ["Vim", "Activity", "Git"]);
+    });
 }
 
 fn card_dot(
@@ -145,12 +163,12 @@ fn a_program_printing_shows_the_busy_dot_until_it_goes_quiet(cx: &mut TestAppCon
     assert!(wait_until(cx, handle, |cx| card_tile(cx, &workspace, 1)
         == Some("Cargo".into())));
 
-    factory.print(1, "Compiling qishell\r\n");
+    factory.print(1, "Compiling micaterm\r\n");
     assert!(wait_until(cx, handle, |cx| card_dot(cx, &workspace, 1)
         == Some(StatusDot::Busy)));
     assert_eq!(tab_dot(cx, &workspace, 1), Some(StatusDot::Busy));
+    // 点只画在标签上（卡片没有头部；状态栏写前台程序名）。
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find(("card-dot", 1usize)).label(), Some("有输出"));
         assert_eq!(window.find(("tab-dot", 1usize)).label(), Some("有输出"));
     });
 
@@ -159,7 +177,6 @@ fn a_program_printing_shows_the_busy_dot_until_it_goes_quiet(cx: &mut TestAppCon
     assert_eq!(card_dot(cx, &workspace, 1), Some(StatusDot::None));
     assert_eq!(tab_dot(cx, &workspace, 1), Some(StatusDot::None));
     in_frame(cx, handle, |window, _| {
-        assert!(window.try_find(("card-dot", 1usize)).is_none());
         assert!(window.try_find(("tab-dot", 1usize)).is_none());
     });
 }
@@ -245,7 +262,7 @@ fn a_bell_with_the_window_away_asks_for_attention_over_the_busy_dot(cx: &mut Tes
 #[gpui_kit::test]
 fn a_card_hidden_by_zoom_is_out_of_sight(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_tab(cx);
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     dispatch(cx, handle, ToggleZoomCard);
     cx.update(|cx| assert_eq!(workspace.read(cx).zoomed_card(), Some(CardId(2))));
 
@@ -268,7 +285,7 @@ fn a_card_hidden_by_zoom_is_out_of_sight(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_notice_of_a_card_hidden_by_zoom_brings_it_back_into_sight(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_tab(cx);
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     dispatch(cx, handle, ToggleZoomCard);
     cx.update(|cx| assert_eq!(workspace.read(cx).zoomed_card(), Some(CardId(2))));
     VisualTestContext::from_window(handle.into(), cx).deactivate_window();
@@ -299,9 +316,9 @@ fn a_notice_of_a_card_hidden_by_zoom_brings_it_back_into_sight(cx: &mut TestAppC
     assert_eq!(card_dot(cx, &workspace, 1), Some(StatusDot::None));
 }
 
-/// 悬停标签时，状态点让位给 ×。
+/// 状态点在名称后面一直亮着，× 在最右，悬停时才出现（spec 第 3 节「标签外观」）。
 #[gpui_kit::test]
-fn hovering_a_tab_puts_its_close_button_over_the_dot(cx: &mut TestAppContext) {
+fn the_tab_dot_stays_beside_the_name_and_the_cross_shows_on_hover(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_tab(cx);
     dispatch(cx, handle, NewLocalTerminalTab);
     factory.print(1, "\x07");
@@ -313,7 +330,10 @@ fn hovering_a_tab_puts_its_close_button_over_the_dot(cx: &mut TestAppContext) {
     });
     in_frame(cx, handle, |window, cx| window.hover(("tab", 1usize), cx));
     in_frame(cx, handle, |window, _| {
-        assert!(!window.find(("tab-dot", 1usize)).visible());
-        assert!(window.find(("tab-close", 1usize)).visible());
+        let dot = window.find(("tab-dot", 1usize));
+        let close = window.find(("tab-close", 1usize));
+        assert!(dot.visible());
+        assert!(close.visible());
+        assert!(dot.bounds().right() <= close.bounds().left());
     });
 }

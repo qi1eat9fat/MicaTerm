@@ -66,6 +66,8 @@ vault.unlock.confirm:
   zh-CN: 解锁
 vault.unlock.working:
   zh-CN: 解锁中…
+vault.unlock.remember_note:
+  zh-CN: 之后在这台电脑上自动解锁
 vault.error.wrong_password:
   zh-CN: 主密码不对
 vault.error.failed:
@@ -73,7 +75,7 @@ vault.error.failed:
 vault.error.damaged:
   zh-CN: 保险库文件已损坏：%{why}
 vault.error.too_new:
-  zh-CN: 保险库文件来自更新版本的 QiShell（格式 %{format}），这个版本打不开
+  zh-CN: 保险库文件来自更新版本的 MicaTerm（格式 %{format}），这个版本打不开
 vault.error.open_failed:
   zh-CN: 保险库打不开，这次运行保存的密码只在内存里，退出后丢失：%{error}
 vault.reset.title:
@@ -100,12 +102,14 @@ vault.sidebar.lock:
   zh-CN: 锁定保险库
 vault.sidebar.unlock:
   zh-CN: 解锁保险库
+vault.sidebar.unlocked:
+  zh-CN: 保险库已解锁
+vault.sidebar.locked:
+  zh-CN: 保险库已锁定
 vault.field.locked:
   zh-CN: 已保存，保险库锁定中 · 解锁后修改
 vault.field.unlock:
   zh-CN: 解锁…
-vault.field.first_hint:
-  zh-CN: 第一次保存秘密时会问你要不要设主密码，可以跳过
 settings.category.security:
   zh-CN: 安全
 settings.security.vault:
@@ -127,7 +131,7 @@ settings.security.change_master:
 settings.security.remember:
   zh-CN: 在本机记住
 settings.security.remember_note:
-  zh-CN: 数据密钥存进系统钥匙串，在这台电脑上自动解锁
+  zh-CN: 数据密钥存进 Windows 凭据管理器，在这台电脑上自动解锁
 settings.security.lock:
   zh-CN: 锁定保险库
 settings.security.lock_note:
@@ -142,5 +146,7 @@ settings.security.reset_note:
   zh-CN: 忘了主密码只能这样做：主机和凭据都保留，清空所有保存的密码、口令和私钥
 settings.security.reset_button:
   zh-CN: 重置保险库…
+settings.security.vault_file:
+  zh-CN: 保险库文件：data/vault.json（Argon2id 派生包裹密钥 · XChaCha20-Poly1305 逐条加密）
 settings.security.no_vault:
   zh-CN: 这次运行没有打开保险库，保存的密码只在内存里

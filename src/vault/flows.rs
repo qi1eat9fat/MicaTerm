@@ -11,7 +11,7 @@
 
 use gpui_kit::*;
 
-use qishell_hosts::{SecretRef, VaultStatus};
+use micaterm_hosts::{SecretRef, VaultStatus};
 
 use super::confirm::{Confirm, open_confirm_dialog};
 use super::password::{PasswordMode, open_password_dialog};

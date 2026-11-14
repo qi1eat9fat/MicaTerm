@@ -1,17 +1,19 @@
-//! `TerminalCard`：一张卡片，持有它的终端，画头部、终端和状态栏。本地卡片和远程卡片共用它，
+//! `TerminalCard`：一张卡片（26 号的窗格），持有它的终端，从上到下画顶行（名称、在跑的程序、分屏和关闭按钮，
+//! 2026-11-14 用户定）、终端和底部状态栏。本地卡片和远程卡片共用它，
 //! 不同的地方按 `CardKind` 分支（远程的那一部分在 `remote.rs`）。
 //! 卡片外壳照 Rex 的卡片新写；行为参考 since2006/shell-rs @ b2a307a 的
 //! `src/terminal/local_terminal_panel.rs`（目录事件的转发）和 `src/terminal/terminal_panel.rs`
 //! （远程面板：原地重连、断开、右键菜单）。
 
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use qishell_hosts::{Host, HostId, HostOs};
-use qishell_terminal::{
+use micaterm_hosts::{Host, HostId, HostOs};
+use micaterm_terminal::{
     LocalLaunch, LocalShell, LocalShellInfo, SharedLocalTerminalTransportProvider,
     SharedTerminalTransportFactory, TerminalEvent, TerminalFont, TerminalMenuItems, TerminalNotice,
     TerminalView,
@@ -19,16 +21,25 @@ use qishell_terminal::{
 
 use super::CardId;
 use super::directory::{display_directory, home_dir, reported_path};
-use super::header::{HeaderState, render_header};
+use super::fit::measure_width;
 use super::holding::holding_factory;
 use super::remote::{RemoteCard, RemoteLaunch, RemoteState, RemoteUpdate, VaultHold};
-use super::status_bar::{StatusBar, StatusTone, render_status_bar};
+use super::status_bar::{StatusBar, StatusState, render_status_bar};
 use super::status_dot::{ACTIVE_FOR, StatusDot};
-use crate::app::{CloseCard, CopyCardAddress, DisconnectCard, OpenCardSftp, ReconnectCard};
+use super::title_row::{CardPlace, Paint, TitleRow, render_title_row};
+use crate::app::{
+    CloseCard, CloseFocusedCard, CopyCardAddress, DisconnectCard, MoveCardToNewTab, OpenCardSftp,
+    ReconnectCard, ToggleZoomCard, ZoomCard,
+};
 use crate::backend::{ConnectionId, RemoteTarget};
 use crate::i18n::t;
 use crate::programs::{Program, program_of, shell_program};
-use crate::theme::{CARD_RADIUS, Tokens};
+use crate::theme::{Tokens, TypeScale};
+
+/// 终端文字离顶行、窗格左右两边的距离（26 号：顶行下面 `.term` 的上边距收到 4，左右 20）。
+/// 终端自己四周留 0.5 rem，上边距不会比它小。
+const TERMINAL_TOP: Pixels = px(8.);
+const TERMINAL_SIDE: Pixels = px(20.);
 
 /// 卡片告诉持有它的人（窗口壳）的事。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,8 +48,6 @@ pub enum CardEvent {
     Changed,
     /// 程序结束了（前台从别的程序回到 shell），或者响铃了：卡片看不见时，窗口壳给它亮橙点（工单 06）。
     WantsAttention,
-    /// 远程卡片连上了（认证成功、shell 通道开好；每次重连都有）：窗口壳记进最近连接（工单 12、18）。
-    Connected,
 }
 
 /// 卡片里跑的是什么。
@@ -59,17 +68,18 @@ pub struct TerminalCard {
     /// 终端的焦点：焦点在它里面就是这张卡片聚焦。
     focus: FocusHandle,
     /// 窗口壳的焦点：按钮经它派发 action。
-    target: FocusHandle,
     /// 启动时的目录；没有就是主目录。
     launch_directory: Option<PathBuf>,
     /// shell 自己报告的目录（OSC 7 等），优先。
     reported_directory: Option<PathBuf>,
     /// 本机说 shell 在的目录。
     working_directory: Option<PathBuf>,
-    /// 是不是所在标签的焦点卡片：强调色描边、头部按钮常显、内容不变淡。由标签按分屏树告诉它。
+    /// 是不是所在标签的焦点卡片：顶行按钮常显。由标签按分屏树告诉它。
     focused: bool,
-    /// 是不是放大着：头部的放大按钮换成还原。
+    /// 是不是放大着：顶行多一个「还原」，右键菜单的「放大卡片」换成「还原卡片」。
     zoomed: bool,
+    /// 是不是标签里唯一的一张：顶行不放「关闭」，右键菜单的「移到新标签」变灰。
+    alone: bool,
     /// 前台程序（本机看到的进程名）；`None` 是 shell 自己在提示符下（工单 06）。
     program: Option<String>,
     /// 最近一次有输出的时候（执行器的时钟，测试能拨它）。
@@ -80,6 +90,8 @@ pub struct TerminalCard {
     shown_dot: StatusDot,
     /// 上一次告诉窗口壳的连接状态（远程卡片）：变了才再说，标签上的图块跟着变灰。
     shown_state: Option<RemoteState>,
+    /// 上一帧量到的卡片宽度：顶行、状态栏正中那一段放不放得下看它（还没量过是 0）。
+    width: Rc<Cell<f32>>,
     /// 绿点到点熄灭的定时器，和它是不是还在等。
     _quiet_task: Option<Task<()>>,
     quiet_scheduled: bool,
@@ -91,12 +103,10 @@ impl EventEmitter<CardEvent> for TerminalCard {}
 
 impl TerminalCard {
     /// 一张本地卡片：按 `launch` 起 shell，传输由 `provider` 建（测试注入假的）。
-    /// `target` 是窗口壳的焦点，卡片上的按钮经它派发 action。
     pub fn local(
         id: CardId,
         launch: LocalLaunch,
         provider: SharedLocalTerminalTransportProvider,
-        target: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -129,7 +139,7 @@ impl TerminalCard {
             shell: launch.shell,
             info: None,
         };
-        let mut card = Self::with_terminal(id, kind, terminal, target, window, cx);
+        let mut card = Self::with_terminal(id, kind, terminal, window, cx);
         card.launch_directory = launch.directory;
         card._info_task = Some(info_task);
         card
@@ -140,7 +150,6 @@ impl TerminalCard {
     pub fn remote(
         id: CardId,
         launch: RemoteLaunch,
-        target: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -163,7 +172,7 @@ impl TerminalCard {
             view
         });
         let kind = CardKind::Remote(Box::new(RemoteCard::new(host, remote)));
-        let mut card = Self::with_terminal(id, kind, terminal, target, window, cx);
+        let mut card = Self::with_terminal(id, kind, terminal, window, cx);
         card.shown_state = card.remote_state(cx);
         card
     }
@@ -174,7 +183,6 @@ impl TerminalCard {
         id: CardId,
         host: Host,
         remote: RemoteTarget,
-        target: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -183,7 +191,7 @@ impl TerminalCard {
             target: remote,
             factory: holding_factory(),
         };
-        let mut card = Self::remote(id, launch, target, window, cx);
+        let mut card = Self::remote(id, launch, window, cx);
         if let CardKind::Remote(remote) = &mut card.kind {
             remote.hold_for_vault(VaultHold::Waiting);
         }
@@ -195,11 +203,15 @@ impl TerminalCard {
         id: CardId,
         kind: CardKind,
         terminal: Entity<TerminalView>,
-        target: FocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus = terminal.read(cx).focus_handle();
+        set_card_items(&terminal, id, false, true, cx);
+        // 查找浮卡按窗格的边摆，不是按终端的边。
+        terminal.update(cx, |terminal, _| {
+            terminal.set_text_inset(TERMINAL_TOP, TERMINAL_SIDE)
+        });
         let subscriptions = vec![
             cx.observe(&terminal, |this, terminal, cx| {
                 this.refresh_remote_state(cx);
@@ -215,29 +227,28 @@ impl TerminalCard {
                 cx.notify();
             }),
             cx.subscribe(&terminal, Self::on_terminal_event),
-            // 聚焦与否换描边和按钮：终端拿到或失去焦点时重画卡片。
+            // 聚焦与否换光标、顶行和状态栏的颜色：终端拿到或失去焦点时重画卡片。
             cx.on_focus_in(&focus, window, |_, _, cx| cx.notify()),
             cx.on_focus_out(&focus, window, |_, _, _, cx| cx.notify()),
-            // 窗口失活时非焦点卡片更淡。
-            cx.observe_window_activation(window, |_, _, cx| cx.notify()),
         ];
         Self {
             id,
             kind,
             terminal,
             focus,
-            target,
             launch_directory: None,
             reported_directory: None,
             working_directory: None,
             // 新卡片总是它所在标签的焦点卡片（新标签、分屏都把焦点给新卡片）。
             focused: true,
             zoomed: false,
+            alone: true,
             program: None,
             output_at: None,
             attention: false,
             shown_dot: StatusDot::None,
             shown_state: None,
+            width: Rc::new(Cell::new(0.)),
             _quiet_task: None,
             quiet_scheduled: false,
             _info_task: None,
@@ -312,12 +323,18 @@ impl TerminalCard {
     fn refresh_remote_state(&mut self, cx: &mut Context<Self>) {
         let state = self.remote_state(cx);
         if state != self.shown_state {
-            let connected = state == Some(RemoteState::Connected);
-            self.shown_state = state;
-            cx.emit(CardEvent::Changed);
-            if connected {
-                cx.emit(CardEvent::Connected);
+            let was_ended = matches!(self.shown_state, Some(RemoteState::Disconnected(_)));
+            self.shown_state = state.clone();
+            if let Some(RemoteState::Disconnected(reason)) = &state
+                && !was_ended
+            {
+                // 断开了：像普通输出一样在终端末尾写两三行（26 号，用户定），不另画覆盖层。
+                let notice =
+                    ended_notice(reason, &chrono::Local::now().format("%H:%M:%S").to_string());
+                self.terminal
+                    .update(cx, |terminal, cx| terminal.append_output(&notice, cx));
             }
+            cx.emit(CardEvent::Changed);
         }
     }
 
@@ -439,11 +456,15 @@ impl TerminalCard {
         self.focus.contains_focused(window, cx)
     }
 
-    /// 标签按分屏树告诉卡片：它是不是焦点卡片、是不是放大着。
-    pub fn set_place(&mut self, focused: bool, zoomed: bool, cx: &mut Context<Self>) {
-        if (self.focused, self.zoomed) != (focused, zoomed) {
+    /// 标签按分屏树告诉卡片：它是不是焦点卡片、是不是放大着、是不是标签里唯一的一张。
+    pub fn set_place(&mut self, focused: bool, zoomed: bool, alone: bool, cx: &mut Context<Self>) {
+        if (self.focused, self.zoomed, self.alone) != (focused, zoomed, alone) {
+            if (self.zoomed, self.alone) != (zoomed, alone) {
+                set_card_items(&self.terminal, self.id, zoomed, alone, cx);
+            }
             self.focused = focused;
             self.zoomed = zoomed;
+            self.alone = alone;
             cx.notify();
         }
     }
@@ -456,17 +477,6 @@ impl TerminalCard {
     /// 是不是放大着。
     pub fn is_zoomed(&self) -> bool {
         self.zoomed
-    }
-
-    /// 终端内容的不透明度：焦点卡片 1，其余 0.85，窗口失活时 0.7。
-    pub fn content_opacity(&self, window: &Window) -> f32 {
-        if self.focused {
-            1.
-        } else if window.is_window_active() {
-            0.85
-        } else {
-            0.7
-        }
     }
 
     /// 本地卡片跑的 shell。
@@ -600,9 +610,9 @@ impl TerminalCard {
             return;
         };
         remote.hold_for_vault(VaultHold::Declined);
-        let message = t!("card.remote.vault_not_unlocked");
+        // 原因写在断开提示里（`refresh_remote_state`），这里不再追加一行。
         self.terminal
-            .update(cx, |terminal, cx| terminal.stop(&message, cx));
+            .update(cx, |terminal, cx| terminal.stop("", cx));
         self.refresh_remote_state(cx);
         cx.notify();
     }
@@ -625,9 +635,8 @@ impl TerminalCard {
             return;
         };
         remote.stopped();
-        let message = t!("card.remote.stopped");
         self.terminal
-            .update(cx, |terminal, cx| terminal.stop(&message, cx));
+            .update(cx, |terminal, cx| terminal.stop("", cx));
         self.refresh_remote_state(cx);
         cx.notify();
     }
@@ -684,61 +693,98 @@ impl TerminalCard {
             .update(cx, |terminal, cx| terminal.shutdown(cx));
     }
 
+    /// 顶行：名称和前台在跑的程序。
+    fn title_row(&self) -> TitleRow {
+        TitleRow {
+            remote: self.remote_part().is_some(),
+            name: self.name(),
+            program: self
+                .running_program()
+                .map(|program| SharedString::from(program.name)),
+        }
+    }
+
     fn status_bar(&self, cx: &App) -> StatusBar {
         let status = self.terminal.read(cx).status(cx);
         let (columns, rows) = (status.columns(), status.rows());
         match &self.kind {
-            CardKind::Local { info, .. } => StatusBar {
-                state: t!("card.local.title"),
-                tone: StatusTone::Ok,
-                details: info
-                    .as_ref()
-                    .map(|info| info.label().to_string().into())
-                    .into_iter()
-                    .collect(),
-                reason: None,
+            // 本地卡片：路径是 shell 所在的目录，没有连接状态和系统。
+            CardKind::Local { .. } => StatusBar {
+                directory: self.directory_label().into(),
+                state: StatusState::Local,
+                os: None,
                 columns,
                 rows,
             },
-            CardKind::Remote(remote) => match remote.state(status.lifecycle()) {
-                RemoteState::Connecting => StatusBar {
-                    state: t!("card.remote.connecting"),
-                    tone: StatusTone::Pending,
-                    details: vec![remote.endpoint()],
-                    reason: None,
-                    columns,
-                    rows,
+            CardKind::Remote(remote) => StatusBar {
+                directory: remote
+                    .directory()
+                    .map(SharedString::from)
+                    .unwrap_or_else(|| "~".into()),
+                state: match remote.state(status.lifecycle()) {
+                    RemoteState::Connecting => StatusState::Pending(t!("card.remote.connecting")),
+                    RemoteState::WaitingForVault => {
+                        StatusState::Pending(t!("card.remote.waiting_for_vault"))
+                    }
+                    RemoteState::Connected => StatusState::Connected {
+                        latency: remote.latency_label(),
+                    },
+                    RemoteState::Disconnected(reason) => StatusState::Disconnected { reason },
                 },
-                RemoteState::WaitingForVault => StatusBar {
-                    state: t!("card.remote.waiting_for_vault"),
-                    tone: StatusTone::Pending,
-                    details: vec![remote.endpoint()],
-                    reason: None,
-                    columns,
-                    rows,
-                },
-                RemoteState::Connected => StatusBar {
-                    state: t!("card.remote.connected"),
-                    tone: StatusTone::Ok,
-                    details: std::iter::once(remote.endpoint())
-                        .chain(remote.latency_label())
-                        .chain(std::iter::once(remote.os_label()))
-                        .collect(),
-                    reason: None,
-                    columns,
-                    rows,
-                },
-                RemoteState::Disconnected(reason) => StatusBar {
-                    state: t!("card.remote.disconnected"),
-                    tone: StatusTone::Bad,
-                    details: vec![remote.endpoint()],
-                    reason: Some(reason),
-                    columns,
-                    rows,
-                },
+                os: remote.os().map(|os| os.label().into()),
+                columns,
+                rows,
             },
         }
     }
+}
+
+/// 终端右键菜单的最后一组（spec 第 3 节：卡片没有头部，放大、移到新标签、关闭放在这里）。
+/// 标签里只有这一张时「移到新标签」变灰。
+fn set_card_items(
+    terminal: &Entity<TerminalView>,
+    id: CardId,
+    zoomed: bool,
+    alone: bool,
+    cx: &mut App,
+) {
+    let zoom = if zoomed {
+        t!("card.restore")
+    } else {
+        t!("card.zoom")
+    };
+    terminal.update(cx, |terminal, _| {
+        terminal.set_card_items(Rc::new(move |menu| {
+            menu.menu(zoom.clone(), Box::new(ZoomCard(id)))
+                .keys_of(Box::new(ToggleZoomCard))
+                .menu_with_disabled(
+                    t!("card.move_to_new_tab"),
+                    Box::new(MoveCardToNewTab(id)),
+                    alone,
+                )
+                .menu(t!("card.close"), Box::new(CloseCard(id)))
+                .keys_of(Box::new(CloseFocusedCard))
+        }))
+    });
+}
+
+/// 断开时写进终端的几行（26 号「已断开」）：`[连接已断开]` 用终端红色，后面淡色写原因和时间；
+/// 下面两行「按 Enter 重新连接」「按 Space 关闭」，Enter、Space 用终端黄色，其余淡色。
+/// 颜色都是终端主题的 ANSI 色（红 31、黄 33、淡色用亮黑 90），跟着终端配色变。
+fn ended_notice(reason: &str, time: &str) -> String {
+    const RED: &str = "\x1b[31m";
+    const YELLOW: &str = "\x1b[33m";
+    const DIM: &str = "\x1b[90m";
+    const RESET: &str = "\x1b[0m";
+    let ended = t!("card.remote.ended");
+    let press = t!("card.remote.ended_press");
+    let reconnect = t!("card.remote.ended_reconnect");
+    let close = t!("card.remote.ended_close");
+    format!(
+        "\r\n\r\n{RED}[{ended}]{RESET} {DIM}{reason} · {time}{RESET}\r\n\
+         {DIM}{press} {RESET}{YELLOW}Enter{RESET}{DIM} {reconnect}{RESET}\r\n\
+         {DIM}{press} {RESET}{YELLOW}Space{RESET}{DIM} {close}{RESET}"
+    )
 }
 
 /// 远程终端右键菜单里卡片加的项：「复制」下面的复制 IP（域名时叫复制主机名），最后的重新连接、
@@ -754,7 +800,8 @@ fn remote_menu_items(id: CardId, host: &Host) -> TerminalMenuItems {
         commands: Rc::new(move |menu, lifecycle| {
             menu.menu(t!("card.menu.open_sftp"), Box::new(OpenCardSftp(id)))
                 .menu(t!("card.menu.reconnect"), Box::new(ReconnectCard(id)))
-                .menu_with_disabled(
+                // 断开连接是红字（26 号 `.mi.danger`）。
+                .danger(
                     t!("card.menu.disconnect"),
                     Box::new(DisconnectCard(id)),
                     !lifecycle.accepts_input(),
@@ -777,91 +824,46 @@ fn render_connecting(
         .test_support()
         .aria_label(line.clone())
         .absolute()
-        .top(px(6.))
-        .left(px(14.))
-        .right(px(14.))
+        .top(px(14.))
+        .left(px(20.))
+        .right(px(20.))
         .truncate()
         .when_some(font.family, |line, family| line.font_family(family))
         .text_size(font.size)
-        .text_color(tokens.faint)
+        .text_color(tokens.st_dim)
         .child(line)
-}
-
-/// 远程卡片断开时卡片里的提示（原型 `.discon`）：「● 连接已断开 原因 · Enter 重新连接 · Space 关闭」。
-fn render_disconnected(id: CardId, reason: SharedString, tokens: &Tokens) -> impl IntoElement {
-    let key = |text: &'static str| {
-        div()
-            .px(px(5.))
-            .rounded(px(4.))
-            .border_1()
-            .border_color(tokens.line)
-            .bg(tokens.field)
-            .text_color(tokens.text)
-            .child(text)
-    };
-    div()
-        .id(id.element("card-disconnected"))
-        .test_support()
-        .aria_label(t!("card.remote.ended_label", reason = reason))
-        .absolute()
-        .left(px(12.))
-        .right(px(12.))
-        .bottom(px(12.))
-        .flex()
-        .items_center()
-        .gap(px(10.))
-        .px(px(14.))
-        .py(px(10.))
-        .rounded(px(10.))
-        .bg(tokens.panel)
-        .border_1()
-        .border_color(tokens.bad.opacity(0.3))
-        .text_size(px(12.5))
-        .child(
-            div()
-                .flex_none()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(tokens.bad)
-                .child(format!("● {}", t!("card.remote.ended"))),
-        )
-        .child(
-            div()
-                .min_w_0()
-                .truncate()
-                .text_color(tokens.muted)
-                .child(reason),
-        )
-        .child(
-            div()
-                .ml_auto()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap(px(5.))
-                .text_color(tokens.muted)
-                .child(key("Enter"))
-                .child(t!("card.remote.reconnect_hint"))
-                .child("·")
-                .child(key("Space"))
-                .child(t!("card.remote.close_hint")),
-        )
 }
 
 impl Render for TerminalCard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
-        let focused = self.focused;
-        let opacity = self.content_opacity(window);
+        let scale = TypeScale::current(cx);
+        // 顶行、状态栏的深浅看终端有没有焦点（不只是标签的焦点卡片）：和光标是实心还是空心一致。
+        let focused = self.focused && self.focus.contains_focused(window, cx);
         let id = self.id;
-        let name = self.name();
-        let directory = self.directory_label();
+        let place = CardPlace {
+            focused,
+            active: self.focused,
+            zoomed: self.zoomed,
+            alone: self.alone,
+        };
+        let width = self.width.get();
+        let paint = Paint {
+            target: &self.focus,
+            window,
+            tokens: &tokens,
+            scale,
+        };
+        let title = self.title_row();
         let status = self.status_bar(cx);
         let state = self.remote_state(cx);
         let terminal = self.terminal.clone();
         let focus = self.focus.clone();
+        let terminal_margin = window.rem_size() * 0.5;
         div()
             .id(id.element("card"))
             .test_support()
+            .aria_label(self.title())
             .group("card")
             .flex()
             .flex_col()
@@ -869,82 +871,37 @@ impl Render for TerminalCard {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .rounded(CARD_RADIUS)
-            .bg(if focused {
-                tokens.card_focused
-            } else {
-                tokens.card
-            })
-            .border_1()
-            .border_color(if focused {
-                tokens.card_focused_border
-            } else {
-                tokens.card_border
-            })
-            .shadow(vec![BoxShadow {
-                color: if focused {
-                    tokens.shadow_focused
-                } else {
-                    tokens.shadow
-                },
-                offset: point(px(0.), px(6.)),
-                blur_radius: px(22.),
-                spread_radius: px(-2.),
-                inset: false,
-            }])
-            // 点卡片的任何地方（头部、状态栏）都把焦点交给终端。
+            .relative()
+            .bg(tokens.content)
+            // 点窗格的任何地方（顶行、状态栏）都把焦点交给终端。
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 window.focus(&focus, cx)
             })
-            .child(render_header(
-                id,
-                name,
-                directory,
-                HeaderState {
-                    focused,
-                    zoomed: self.zoomed,
-                    program: self.tile_program(),
-                    dot: self.status_dot(cx),
-                    offline: state
-                        .as_ref()
-                        .is_some_and(|state| *state != RemoteState::Connected),
-                    tooltip: self
-                        .remote_part()
-                        .and_then(|remote| remote.activity.title.clone())
-                        .map(SharedString::from),
-                },
-                &self.target,
-                &tokens,
-            ))
+            .child(render_title_row(id, &title, place, width, &paint))
             .child(
-                // 圆角只按矩形裁剪：内容四周留边。
+                // 文字离顶行 8、左右 20。终端自己四周留 0.5 rem（rem 跟着界面字号），这里补上差的那些。
                 div()
                     .relative()
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .px(px(4.))
-                    .pb(px(4.))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_1()
-                            .min_w_0()
-                            .opacity(opacity)
-                            .child(terminal),
-                    )
+                    .pt(if TERMINAL_TOP > terminal_margin {
+                        TERMINAL_TOP - terminal_margin
+                    } else {
+                        px(0.)
+                    })
+                    .px(TERMINAL_SIDE - terminal_margin)
+                    .child(div().flex().flex_1().min_w_0().child(terminal))
                     .when_some(state, |body, state| match state {
-                        RemoteState::Disconnected(reason) => {
-                            body.child(render_disconnected(id, reason, &tokens))
-                        }
                         RemoteState::Connecting | RemoteState::WaitingForVault => {
                             body.children(self.remote_part().map(|remote| {
                                 render_connecting(id, remote.connecting_line(), &tokens, cx)
                             }))
                         }
-                        RemoteState::Connected => body,
+                        RemoteState::Connected | RemoteState::Disconnected(_) => body,
                     }),
             )
-            .child(render_status_bar(id, &status, &tokens))
+            .child(render_status_bar(id, &status, focused, width, &paint))
+            .child(measure_width(self.width.clone(), cx.entity_id()))
     }
 }

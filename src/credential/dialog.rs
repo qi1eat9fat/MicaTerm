@@ -17,28 +17,32 @@
 //!
 //! 叠在主机对话框上新建时（「使用凭据」下拉里的「新建凭据…」），保存后调 `on_saved`，主机对话框
 //! 自动选上新凭据；Esc 只关最上面这一层。
+//!
+//! 样子是共用的 `ui::modal` 弹窗（26 号）：头部钥匙图标 + 「新建凭据」「编辑凭据」+ 淡字，字段照新建主机的
+//! 写法（字段名在上、框在下，高 30），底部「取消 Esc」「保存 Enter」。单行框里回车就是保存。
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
-use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _};
-use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::*;
 use zeroize::Zeroizing;
 
+use crate::app::CatalogIcon;
 use crate::host::{
     CredentialDraft, CredentialDraftError, CredentialId, CredentialKind, DEFAULT_USER,
     GeneratedKey, HostStore, KeyAlgorithm, PastedKey, PastedKeyError, read_small,
 };
 use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
-use crate::theme::Tokens;
+use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, size, ui_text};
 use crate::ui::DialogLayer;
-use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret, text_input};
+use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret};
+use crate::ui::modal::{
+    ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button, modal_dialog, modal_input,
+    modal_textarea, render_modal,
+};
 use crate::vault::{SecretField, VaultStore, asks_before_saving, before_saving_secret};
 
 pub const FIELD_NAME: &str = "credential-name";
@@ -55,9 +59,11 @@ const ALGORITHM_CHOICE: &str = "credential-key-algorithm";
 /// 「生成新密钥」还在生成、生成失败、保存时加密失败：写在公钥那一行。
 const KEY_PROBLEM: &str = "credential-key-problem";
 
-/// 对话框的宽（原型 `.dlg.small`）和内容区最高的高度。
-const WIDTH: Pixels = px(470.);
-const MAX_BODY_HEIGHT: Pixels = px(520.);
+/// 正文最高能多高：窗口高扣掉弹窗距顶 72、头部 40、底部 44，下面再留 48；再高就在里面滚动。
+/// 窗口再矮也至少 240（宽是弹窗统一的 448）。
+fn max_body_height(window: &Window) -> Pixels {
+    (window.viewport_size().height - px(72. + 40. + 44. + 48.)).max(px(240.))
+}
 
 /// 保存了一条凭据：叠在主机对话框上新建时，主机对话框据此自动选上它。
 pub type CredentialSaved = Box<dyn FnOnce(CredentialId, &mut Window, &mut App)>;
@@ -242,7 +248,7 @@ impl CredentialDialog {
                 }
             },
         )];
-        // 改了哪个字段，就先收起它的错误；生成的公钥的注释跟着名称走。
+        // 改了哪个字段，就先收起它的错误；生成的公钥的注释跟着名称走。单行框里回车就是保存。
         for (field, state) in [
             (FIELD_NAME, name.clone()),
             (FIELD_USER, user.clone()),
@@ -250,13 +256,16 @@ impl CredentialDialog {
             (FIELD_FILE, file.clone()),
             (FIELD_PASSPHRASE, passphrase.input().clone()),
         ] {
-            subscriptions.push(cx.subscribe(
+            subscriptions.push(cx.subscribe_in(
                 &state,
-                move |this: &mut Self, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Change) {
+                window,
+                move |this: &mut Self, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => {
                         this.errors.clear(field);
                         cx.notify();
                     }
+                    InputEvent::PressEnter { .. } => this.save(window, cx),
+                    _ => {}
                 },
             ));
         }
@@ -623,66 +632,25 @@ impl CredentialDialog {
         (self.hosts > 0).then(|| t!("credential.dialog.usage", count = self.hosts))
     }
 
-    fn render_header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let (title, subtitle) = match (&self.editing_name, self.stacked) {
-            (Some(name), _) => (t!("credential.dialog.title_edit"), name.clone()),
+    /// 头部（26 号 `.cp-h`）：钥匙图标 + 「新建凭据」「编辑凭据」，淡字是编辑的那条的名字，
+    /// 叠在主机对话框上新建时是「保存后自动选上」。
+    fn head(&self) -> ModalHead {
+        let (title, detail) = match (&self.editing_name, self.stacked) {
+            (Some(name), _) => (t!("credential.dialog.title_edit"), Some(name.clone())),
             (None, true) => (
                 t!("credential.dialog.title_new"),
-                t!("credential.dialog.subtitle_stacked"),
+                Some(t!("credential.dialog.subtitle_stacked")),
             ),
-            (None, false) => (t!("credential.dialog.title_new"), SharedString::default()),
+            (None, false) => (t!("credential.dialog.title_new"), None),
         };
-        let hover = tokens.hover;
-        let text = tokens.text;
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(8.))
-            .h(px(46.))
-            .pl(px(18.))
-            .pr(px(8.))
-            .child(
-                div()
-                    .id("credential-dialog-title")
-                    .test_support()
-                    .aria_label(title.clone())
-                    .flex_none()
-                    .text_size(px(14.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(title),
-            )
-            .child(
-                div()
-                    .id("credential-dialog-subtitle")
-                    .test_support()
-                    .aria_label(subtitle.clone())
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(12.))
-                    .text_color(tokens.faint)
-                    .child(subtitle),
-            )
-            .child(
-                div()
-                    .id("credential-dialog-close")
-                    .test_support()
-                    .aria_label(t!("credential.dialog.close"))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(26.))
-                    .rounded(px(10.))
-                    .text_color(tokens.icon)
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(hover).text_color(text))
-                    .on_click(cx.listener(|this, _, window, cx| this.close(window, cx)))
-                    .child(Icon::new(IconName::Close).size(px(16.))),
-            )
+        ModalHead {
+            icon: CatalogIcon::KeyRound,
+            title,
+            detail,
+        }
     }
 
-    fn render_body(&self, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
+    fn render_body(&self, tokens: &Tokens, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let kind = self.kind;
         let dialog = cx.entity().downgrade();
         let choose_kind: OnChoose = Rc::new(move |index, _, cx| {
@@ -695,12 +663,15 @@ impl CredentialDialog {
         let mut rows = vec![
             form_field(
                 Some(t!("credential.dialog.name")),
-                text_input(
+                modal_input(
                     FIELD_NAME,
                     t!("credential.dialog.name"),
                     &self.name,
+                    ModalInputKind::Text,
                     self.errors.get(FIELD_NAME).is_some(),
                     tokens,
+                    window,
+                    cx,
                 ),
                 FieldNote::error_of(FIELD_NAME, &self.errors)
                     .into_iter()
@@ -727,12 +698,15 @@ impl CredentialDialog {
             ),
             form_field(
                 Some(t!("credential.dialog.user")),
-                text_input(
+                modal_input(
                     FIELD_USER,
                     t!("credential.dialog.user"),
                     &self.user,
+                    ModalInputKind::Text,
                     false,
                     tokens,
+                    window,
+                    cx,
                 ),
                 Vec::new(),
                 tokens,
@@ -743,13 +717,17 @@ impl CredentialDialog {
                 Secret::Password,
                 t!("credential.dialog.password"),
                 tokens,
+                window,
+                cx,
             )),
             CredentialKind::Key => {
-                rows.extend(self.render_key(tokens, cx));
+                rows.extend(self.render_key(tokens, window, cx));
                 rows.push(self.render_secret(
                     Secret::Passphrase,
                     t!("credential.dialog.passphrase"),
                     tokens,
+                    window,
+                    cx,
                 ));
             }
             CredentialKind::Agent => {
@@ -774,11 +752,18 @@ impl CredentialDialog {
                 tokens,
             ));
         }
-        form_group(t!("credential.dialog.group"), rows, tokens)
+        form_group(rows)
     }
 
     /// 密码框、口令框：锁着又存过时换成「已保存，保险库锁定中 · 解锁…」。
-    fn render_secret(&self, which: Secret, label: SharedString, tokens: &Tokens) -> AnyElement {
+    fn render_secret(
+        &self,
+        which: Secret,
+        label: SharedString,
+        tokens: &Tokens,
+        window: &Window,
+        cx: &App,
+    ) -> AnyElement {
         let (field, id) = match which {
             Secret::Password => (&self.password, FIELD_PASSWORD),
             Secret::Passphrase => (&self.passphrase, FIELD_PASSPHRASE),
@@ -786,12 +771,15 @@ impl CredentialDialog {
         let control = if field.is_locked() {
             locked_secret(which.locked_id(), "credential-secret-unlock", tokens).into_any_element()
         } else {
-            text_input(
+            modal_input(
                 id,
                 label.clone(),
                 field.input(),
+                ModalInputKind::Secret,
                 self.errors.get(id).is_some(),
                 tokens,
+                window,
+                cx,
             )
             .into_any_element()
         };
@@ -804,7 +792,12 @@ impl CredentialDialog {
     }
 
     /// 密钥的几行：私钥来源，本机文件 / 粘贴的文字 / 生成的算法，公钥。
-    fn render_key(&self, tokens: &Tokens, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn render_key(
+        &self,
+        tokens: &Tokens,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let source = self.source;
         let dialog = cx.entity().downgrade();
         let sources = self.sources.clone();
@@ -833,7 +826,7 @@ impl CredentialDialog {
         match source {
             KeySource::Kept => {
                 if let Some(line) = &self.kept_public_key {
-                    rows.push(self.render_public_key(line.clone(), false, tokens, cx));
+                    rows.push(self.render_public_key(line.clone(), false, tokens, window, cx));
                 }
                 rows.push(form_field(
                     None,
@@ -857,40 +850,44 @@ impl CredentialDialog {
                         .flex()
                         .items_center()
                         .gap(px(8.))
-                        .child(div().flex_1().min_w_0().child(text_input(
+                        .child(div().flex_1().min_w_0().child(modal_input(
                             FIELD_FILE,
                             t!("credential.dialog.file"),
                             &self.file,
+                            ModalInputKind::Text,
                             self.errors.get(FIELD_FILE).is_some(),
                             tokens,
+                            window,
+                            cx,
                         )))
-                        .child(
-                            Button::new("credential-key-choose")
-                                .small()
-                                .label(t!("credential.dialog.choose_file"))
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.choose_file(window, cx)),
-                                ),
-                        ),
+                        .child(modal_button(
+                            "credential-key-choose",
+                            t!("credential.dialog.choose_file"),
+                            None,
+                            ModalButtonTone::Line,
+                            Some(Box::new(cx.listener(|this, _, window, cx| {
+                                this.choose_file(window, cx)
+                            }))),
+                            tokens,
+                            window,
+                            cx,
+                        )),
                     notes,
                     tokens,
                 ));
             }
             KeySource::Paste => {
-                let invalid = self.errors.get(FIELD_KEY_TEXT).is_some();
                 rows.push(form_field(
                     Some(t!("credential.dialog.key_text")),
-                    div()
-                        .id(FIELD_KEY_TEXT)
-                        .test_support()
-                        .w_full()
-                        .rounded(px(8.))
-                        .when(invalid, |field| field.border_1().border_color(tokens.bad))
-                        .child(
-                            Textarea::new(&self.key_text)
-                                .text_size(px(11.5))
-                                .font_family(cx.theme().mono_font_family.clone()),
-                        ),
+                    modal_textarea(
+                        FIELD_KEY_TEXT,
+                        t!("credential.dialog.key_text"),
+                        &self.key_text,
+                        self.errors.get(FIELD_KEY_TEXT).is_some(),
+                        tokens,
+                        window,
+                        cx,
+                    ),
                     FieldNote::error_of(FIELD_KEY_TEXT, &self.errors)
                         .into_iter()
                         .collect(),
@@ -899,7 +896,7 @@ impl CredentialDialog {
                 if let Some(Ok(pasted)) = &self.pasted
                     && let Some(line) = pasted.public_key_line()
                 {
-                    rows.push(self.render_public_key(line.into(), false, tokens, cx));
+                    rows.push(self.render_public_key(line.into(), false, tokens, window, cx));
                 }
             }
             KeySource::Generate => {
@@ -932,7 +929,7 @@ impl CredentialDialog {
                 let row = match (&self.generated, self.ready_key()) {
                     (_, Some(key)) => {
                         let line = key.public_key_line(&self.name.read(cx).value());
-                        self.render_public_key(line.into(), true, tokens, cx)
+                        self.render_public_key(line.into(), true, tokens, window, cx)
                     }
                     (Some((_, Generated::Failed(error))), _) => form_field(
                         Some(t!("credential.dialog.public_key")),
@@ -968,12 +965,14 @@ impl CredentialDialog {
         rows
     }
 
-    /// 公钥一行（原型 `.pub`）：等宽小字，下面是「复制公钥」和「贴进服务器的 authorized_keys」。
+    /// 公钥一行（样子同弹窗里的指纹框 `.cp-fp`：内容底、细边、圆角 6，等宽小字），
+    /// 下面是「复制公钥」和「贴进服务器的 authorized_keys」。
     fn render_public_key(
         &self,
         line: SharedString,
         hint: bool,
         tokens: &Tokens,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let copied = line.clone();
@@ -990,12 +989,14 @@ impl CredentialDialog {
                         .aria_label(line.clone())
                         .px(px(10.))
                         .py(px(7.))
-                        .rounded(px(8.))
-                        .bg(tokens.field)
-                        .text_color(tokens.muted)
-                        .text_size(px(11.))
-                        .line_height(relative(1.4))
-                        .font_family(cx.theme().mono_font_family.clone())
+                        .rounded(size::RADIUS)
+                        .bg(tokens.content)
+                        .border_1()
+                        .border_color(tokens.line)
+                        .text_color(tokens.text2)
+                        .text_size(TypeScale::current(cx).mono_small)
+                        .line_height(relative(1.5))
+                        .font_family(MONO_FONT_FAMILY)
                         .child(line),
                 )
                 .child(
@@ -1003,20 +1004,22 @@ impl CredentialDialog {
                         .flex()
                         .items_center()
                         .gap(px(8.))
-                        .child(
-                            Button::new("credential-copy-public-key")
-                                .small()
-                                .icon(IconName::Copy)
-                                .label(t!("credential.dialog.copy_public_key"))
-                                .on_click(move |_, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(
-                                        copied.to_string(),
-                                    ))
-                                }),
-                        )
+                        .child(modal_button(
+                            "credential-copy-public-key",
+                            t!("credential.dialog.copy_public_key"),
+                            None,
+                            ModalButtonTone::Line,
+                            Some(Box::new(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string()))
+                            })),
+                            tokens,
+                            window,
+                            cx,
+                        ))
                         .children(hint.then(|| {
                             div()
-                                .text_size(px(11.5))
+                                .min_w_0()
+                                .truncate()
                                 .text_color(tokens.faint)
                                 .child(t!("credential.dialog.public_key_hint"))
                         })),
@@ -1026,36 +1029,40 @@ impl CredentialDialog {
         )
     }
 
-    fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// 底部（26 号 `.cp-f`）：「取消 Esc」「保存 Enter」；读私钥、加密时保存按钮写「正在保存…」、点不了。
+    fn render_footer(&self, tokens: &Tokens, window: &Window, cx: &mut Context<Self>) -> Div {
         let saving = self.saving.is_some();
         div()
             .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(8.))
-            .pt(px(12.))
-            .pb(px(14.))
-            .pl(px(18.))
-            .pr(px(14.))
-            .child(div().flex_1())
-            .child(
-                Button::new("credential-dialog-cancel")
-                    .label(t!("credential.dialog.cancel"))
-                    .small()
-                    .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
-            )
-            .child(
-                Button::new("credential-dialog-save")
-                    .primary()
-                    .small()
-                    .label(if saving {
-                        t!("credential.dialog.saving")
-                    } else {
-                        t!("credential.dialog.save")
-                    })
-                    .disabled(saving)
-                    .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
-            )
+            .gap(px(6.))
+            .child(modal_button(
+                "credential-dialog-cancel",
+                t!("credential.dialog.cancel"),
+                Some("Esc"),
+                ModalButtonTone::Plain,
+                Some(Box::new(
+                    cx.listener(|this, _, window, cx| this.close(window, cx)),
+                )),
+                tokens,
+                window,
+                cx,
+            ))
+            .child(modal_button(
+                "credential-dialog-save",
+                if saving {
+                    t!("credential.dialog.saving")
+                } else {
+                    t!("credential.dialog.save")
+                },
+                Some("Enter"),
+                ModalButtonTone::Primary,
+                (!saving).then(|| -> OnClick {
+                    Box::new(cx.listener(|this, _, window, cx| this.save(window, cx)))
+                }),
+                tokens,
+                window,
+                cx,
+            ))
     }
 }
 
@@ -1147,10 +1154,9 @@ fn note(id: &'static str, text: SharedString, tokens: &Tokens) -> AnyElement {
         .id(id)
         .test_support()
         .aria_label(text.clone())
-        .py(px(4.))
-        .text_size(px(11.5))
+        .text_size(ui_text())
         .line_height(relative(1.5))
-        .text_color(tokens.faint)
+        .text_color(tokens.st_dim)
         .child(text)
         .into_any_element()
 }
@@ -1162,39 +1168,27 @@ impl Focusable for CredentialDialog {
 }
 
 impl Render for CredentialDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
-        let body = self.render_body(&tokens, cx);
-        div()
+        // 字段多（生成密钥时有七行）：正文再高就在里面滚动，头部和底部不动。
+        let body = div()
+            .id("credential-dialog-body")
+            .flex()
+            .flex_col()
+            .max_h(max_body_height(window))
+            .overflow_y_scroll()
+            .child(self.render_body(&tokens, window, cx))
+            .test_support();
+        let footer = self.render_footer(&tokens, window, cx);
+        render_modal(Some(self.head()), body, footer, &tokens, window, cx)
             .id("credential-dialog")
             .test_support()
             .track_focus(&self.focus_handle)
-            .flex()
-            .flex_col()
-            .w_full()
-            .text_color(tokens.text)
-            .child(self.render_header(&tokens, cx))
-            .child(
-                div()
-                    .id("credential-dialog-body")
-                    .flex()
-                    .flex_col()
-                    .max_h(MAX_BODY_HEIGHT)
-                    .px(px(18.))
-                    .pt(px(12.))
-                    .pb(px(10.))
-                    .border_t_1()
-                    .border_b_1()
-                    .border_color(tokens.line)
-                    .overflow_y_scrollbar()
-                    .child(body),
-            )
-            .child(self.render_footer(cx))
     }
 }
 
 /// 打开新建（`editing` 为 `None`）或编辑凭据的对话框。`on_saved`：叠在主机对话框上新建时，
-/// 保存后要做的事（选上新凭据）。对话框不点遮罩关闭，用右上角的按钮、「取消」或 Esc 关。
+/// 保存后要做的事（选上新凭据）。对话框不点遮罩关闭，用「取消」或 Esc 关。
 pub fn open_credential_dialog(
     store: Entity<HostStore>,
     editing: Option<CredentialId>,
@@ -1209,12 +1203,9 @@ pub fn open_credential_dialog(
     let dismissed = view.downgrade();
     layer.open_dismissable(
         move |dialog, _, _| {
-            dialog
-                .w(WIDTH)
-                .p_0()
-                .rounded(px(14.))
-                .close_button(false)
-                .overlay_closable(false)
+            modal_dialog(dialog)
+                // 回车由单行框自己处理（保存，读私钥在后台）：gpui-component 的 `Confirm` 不关框。
+                .on_ok(|_, _, _| false)
                 .child(view.clone())
         },
         // Esc 关掉的：明文一样现在就放掉。

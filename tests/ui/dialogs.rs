@@ -7,8 +7,8 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _,
     TestSupportExt as _, div,
 };
-use qishell::ui::DialogLayer;
-use qishell::ui::confirm::{
+use micaterm::ui::DialogLayer;
+use micaterm::ui::confirm::{
     Choice, ChoiceButton, ChoiceOutcome, ChoiceTone, ConfirmLine, open_choice_dialog,
 };
 

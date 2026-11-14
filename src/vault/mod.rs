@@ -1,4 +1,4 @@
-//! 保险库的界面（工单 13）：保险库（`qishell_hosts::Vault`）的 GPUI 外壳 [`VaultStore`]、
+//! 保险库的界面（工单 13）：保险库（`micaterm_hosts::Vault`）的 GPUI 外壳 [`VaultStore`]、
 //! 设置主密码框、解锁小卡片、重置确认，以及「用到秘密之前」的流程。
 //!
 //! - `store`：[`VaultStore`]，保险库的状态（未设 / 没设主密码 / 打不开 / 已锁定 / 已解锁），
@@ -34,5 +34,5 @@ pub use password::open_master_password_dialog;
 pub use store::{VaultStore, VaultStoreEvent};
 pub use unlock::open_unlock_dialog;
 
-// 保险库核心的类型，界面不必直接依赖 qishell-hosts。
-pub use qishell_hosts::{Vault, VaultStatus};
+// 保险库核心的类型，界面不必直接依赖 micaterm-hosts。
+pub use micaterm_hosts::{Vault, VaultStatus};

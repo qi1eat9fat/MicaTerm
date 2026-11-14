@@ -15,11 +15,11 @@ use gpui_kit::WindowAppearance;
 use gpui_kit::component::ThemeMode;
 use serde::{Deserialize, Serialize};
 
-use qishell_ssh::sftp::{DEFAULT_PARALLEL_TRANSFERS, PARALLEL_TRANSFERS_RANGE};
-use qishell_terminal::TerminalTheme;
-pub use qishell_terminal::{RightClick, TerminalCursorStyle, TerminalInteraction};
+use micaterm_ssh::sftp::{DEFAULT_PARALLEL_TRANSFERS, PARALLEL_TRANSFERS_RANGE};
+use micaterm_terminal::TerminalTheme;
+pub use micaterm_terminal::{RightClick, TerminalCursorStyle, TerminalInteraction};
 
-use crate::sftp_tab::{FileIconStyle, ShowHiddenFiles};
+use crate::sftp_tab::ShowHiddenFiles;
 
 /// 全部设置。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ use crate::sftp_tab::{FileIconStyle, ShowHiddenFiles};
 pub struct AppSettings {
     /// 外观 → 应用外观。
     pub appearance: Appearance,
-    /// 外观 → 界面字号。
+    /// 外观 → Mica 背景。
     pub interface: InterfaceSettings,
     /// 外观 → 浅色、深色终端主题。
     pub terminal_theme: TerminalThemeSettings,
@@ -62,7 +62,6 @@ impl AppSettings {
     /// 把每个数值收进应用接受的范围。读文件和每次改动都要过一遍，
     /// 这样手改的文件或者输入的值都不会让终端字号变成 0。
     pub fn normalized(mut self) -> Self {
-        self.interface = self.interface.normalized();
         self.terminal_font = self.terminal_font.normalized();
         self.local_terminal.shell = self
             .local_terminal
@@ -74,7 +73,8 @@ impl AppSettings {
     }
 }
 
-/// SFTP：同时传输数量、本地默认打开目录、文件图标风格、显示隐藏文件。
+/// SFTP：同时传输数量、本地默认打开目录、显示隐藏文件。
+/// 旧文件里的 `file_icon_style`（图标风格，工单 12 去掉了）读的时候忽略。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SftpSettings {
@@ -82,8 +82,6 @@ pub struct SftpSettings {
     pub parallel: usize,
     /// 本地一侧从哪里开始；`None` 是「下载」文件夹，不把本机的路径写进文件（数据目录能拷到别的电脑）。
     pub local_directory: Option<PathBuf>,
-    /// 文件列表的图标：彩色或单色。
-    pub file_icon_style: FileIconStyle,
     /// 显示隐藏文件，本地和远程各一个开关。
     pub show_hidden: ShowHiddenFiles,
 }
@@ -93,7 +91,6 @@ impl Default for SftpSettings {
         Self {
             parallel: DEFAULT_PARALLEL_TRANSFERS,
             local_directory: None,
-            file_icon_style: FileIconStyle::default(),
             show_hidden: ShowHiddenFiles::default(),
         }
     }
@@ -134,47 +131,19 @@ impl Appearance {
     }
 }
 
-/// 界面字号的范围，单位像素。
-pub const INTERFACE_FONT_SIZE_RANGE: RangeInclusive<f32> = 12.0..=20.0;
-/// 默认界面字号：Windows 上 14，对齐系统 9pt 正文；其他平台 16。
-pub const DEFAULT_INTERFACE_FONT_SIZE: f32 = if cfg!(windows) { 14.0 } else { 16.0 };
-
-/// 外观 → 常规。
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// 外观 → 常规。界面字号不是设置（用户定，见 `theme::INTERFACE_FONT_SIZE`）；
+/// 旧文件里的 `font_size` 读的时候不认，下次写文件就没了。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct InterfaceSettings {
-    /// 界面的基准字号（像素）。终端有自己的字号。
-    pub font_size: f32,
     /// Mica 背景（默认关，工单 26）。只在 Windows 11 22H2 及以上生效，别处开着也不起作用。
     pub mica: bool,
 }
 
-impl Default for InterfaceSettings {
-    fn default() -> Self {
-        Self {
-            font_size: DEFAULT_INTERFACE_FONT_SIZE,
-            mica: false,
-        }
-    }
-}
-
-impl InterfaceSettings {
-    /// 整像素，收进范围；不是数字时取默认值。
-    fn normalized(mut self) -> Self {
-        self.font_size = clamp_or(
-            self.font_size,
-            INTERFACE_FONT_SIZE_RANGE,
-            DEFAULT_INTERFACE_FONT_SIZE,
-        )
-        .round();
-        self
-    }
-}
-
 /// 默认的浅色终端主题。主题 key 发布后不能改：它写进 `settings.json`。
-pub const DEFAULT_LIGHT_THEME: &str = "qishell-light";
+pub const DEFAULT_LIGHT_THEME: &str = "micaterm-light";
 /// 默认的深色终端主题。
-pub const DEFAULT_DARK_THEME: &str = "qishell-dark";
+pub const DEFAULT_DARK_THEME: &str = "micaterm-dark";
 
 /// 外观 → 终端主题：浅色和深色各选一套（从内置的 4 对里选），按 key 存。
 /// 这个版本不认识的 key 由使用方退回默认主题，不让整个文件读失败。
@@ -217,16 +186,16 @@ impl TerminalThemeSettings {
     }
 }
 
-/// 终端默认字体：随包附带的 JetBrains Mono（`assets/fonts/`）。
-pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = qishell_terminal::DEFAULT_FONT_FAMILY;
-/// 终端默认字号，单位像素（gorex 的取值）。
-pub const DEFAULT_TERMINAL_FONT_SIZE: f32 = qishell_terminal::DEFAULT_FONT_SIZE;
+/// 终端默认字体：Maple Mono Normal NL NF CN（本机没装时退回随包的 JetBrains Mono，见 `settings::apply`）。
+pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = micaterm_terminal::DEFAULT_FONT_FAMILY;
+/// 终端默认字号，单位像素（26 号原型）。
+pub const DEFAULT_TERMINAL_FONT_SIZE: f32 = micaterm_terminal::DEFAULT_FONT_SIZE;
 /// 终端默认行高，字号的倍数。
-pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = qishell_terminal::DEFAULT_LINE_HEIGHT;
+pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = micaterm_terminal::DEFAULT_LINE_HEIGHT;
 /// 终端接受的字号。
-pub const TERMINAL_FONT_SIZE_RANGE: RangeInclusive<f32> = qishell_terminal::FONT_SIZE_RANGE;
+pub const TERMINAL_FONT_SIZE_RANGE: RangeInclusive<f32> = micaterm_terminal::FONT_SIZE_RANGE;
 /// 终端接受的行高。
-pub const TERMINAL_LINE_HEIGHT_RANGE: RangeInclusive<f32> = qishell_terminal::LINE_HEIGHT_RANGE;
+pub const TERMINAL_LINE_HEIGHT_RANGE: RangeInclusive<f32> = micaterm_terminal::LINE_HEIGHT_RANGE;
 
 /// 终端 → 字体。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -258,7 +227,7 @@ impl TerminalFontSettings {
             .unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY)
     }
 
-    /// 字号保留一位小数（默认 11.6 不能被取整掉），行高保留两位，都收进范围；
+    /// 字号保留一位小数（11.6 这类不能被取整掉），行高保留两位，都收进范围；
     /// 不是数字的取默认值；空白的字体名等于没设。
     fn normalized(mut self) -> Self {
         self.size = (clamp_or(
@@ -310,10 +279,13 @@ mod tests {
         let settings: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings, AppSettings::default());
         assert_eq!(settings.appearance, Appearance::System);
-        assert_eq!(settings.terminal_font.family(), "JetBrains Mono");
-        assert_eq!(settings.terminal_font.size, 11.6);
-        assert_eq!(settings.terminal_theme.light, "qishell-light");
-        assert_eq!(settings.terminal_theme.dark, "qishell-dark");
+        assert_eq!(
+            settings.terminal_font.family(),
+            "Maple Mono Normal NL NF CN"
+        );
+        assert_eq!(settings.terminal_font.size, 13.);
+        assert_eq!(settings.terminal_theme.light, "micaterm-light");
+        assert_eq!(settings.terminal_theme.dark, "micaterm-dark");
         assert_eq!(settings.terminal_interaction.right_click, RightClick::Menu);
         assert!(!settings.terminal_interaction.copy_on_select);
         assert!(settings.terminal_interaction.cursor_blinking);
@@ -330,11 +302,6 @@ mod tests {
         let json = r#"{ "interface": { "mica": true }, "window": { "remember": false } }"#;
         let settings: AppSettings = serde_json::from_str(json).unwrap();
         assert!(settings.interface.mica);
-        // 只写了 Mica：界面字号还是默认值。
-        assert_eq!(
-            settings.interface.font_size,
-            super::DEFAULT_INTERFACE_FONT_SIZE
-        );
         assert!(!settings.window.remember);
         let again: AppSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
@@ -357,10 +324,6 @@ mod tests {
             settings.sftp.local_directory.as_deref(),
             Some(std::path::Path::new("D:/Work"))
         );
-        assert_eq!(
-            settings.sftp.file_icon_style,
-            crate::sftp_tab::FileIconStyle::Monochrome
-        );
         assert!(settings.sftp.show_hidden.local && !settings.sftp.show_hidden.remote);
     }
 
@@ -368,7 +331,7 @@ mod tests {
     fn the_file_keeps_its_keys() {
         let json = r#"{
             "appearance": "dark",
-            "interface": { "font_size": 15 },
+            "interface": { "font_size": 14, "mica": true },
             "terminal_theme": { "light": "tokyo-day", "dark": "rose-pine" },
             "terminal_font": { "family": "Cascadia Mono", "size": 13.5, "line_height": 1.2 },
             "terminal_interaction": {
@@ -381,7 +344,13 @@ mod tests {
         }"#;
         let settings: AppSettings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.appearance, Appearance::Dark);
-        assert_eq!(settings.interface.font_size, 15.);
+        // 以前的界面字号不再是设置：读的时候不认，写回去也没有它。
+        assert!(settings.interface.mica);
+        assert!(
+            !serde_json::to_string(&settings)
+                .unwrap()
+                .contains("\"font_size\":14")
+        );
         assert_eq!(settings.terminal_theme.dark, "rose-pine");
         assert_eq!(settings.terminal_font.family(), "Cascadia Mono");
         assert_eq!(settings.terminal_font.line_height, 1.2);
@@ -407,32 +376,30 @@ mod tests {
     fn each_column_falls_back_to_its_default_theme() {
         use gpui_kit::component::ThemeMode;
         let mut themes = super::TerminalThemeSettings::default();
-        assert_eq!(themes.theme(ThemeMode::Light).name(), "QiShell Light");
-        assert_eq!(themes.theme(ThemeMode::Dark).name(), "QiShell Dark");
+        assert_eq!(themes.theme(ThemeMode::Light).name(), "MicaTerm Light");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "MicaTerm Dark");
         themes.light = "solarized-light".into();
         themes.dark = "tokyo-day".into();
-        assert_eq!(themes.theme(ThemeMode::Light).name(), "QiShell Light");
-        assert_eq!(themes.theme(ThemeMode::Dark).name(), "QiShell Dark");
+        assert_eq!(themes.theme(ThemeMode::Light).name(), "MicaTerm Light");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "MicaTerm Dark");
 
-        let rose_pine = qishell_terminal::TerminalTheme::find("rose-pine").unwrap();
+        let rose_pine = micaterm_terminal::TerminalTheme::find("rose-pine").unwrap();
         themes.choose(rose_pine);
         assert_eq!(themes.dark, "rose-pine");
-        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Rosé Pine");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Rosé Pine Moon");
         assert_eq!(themes.light, "solarized-light");
     }
 
     #[test]
     fn numbers_out_of_range_are_brought_back() {
         let mut settings = AppSettings::default();
-        settings.interface.font_size = 99.;
         settings.terminal_font.size = 11.63;
         settings.terminal_font.line_height = f32::NAN;
         settings.terminal_font.family = Some("   ".into());
         settings.local_terminal.shell = Some("  ".into());
         let settings = settings.normalized();
-        assert_eq!(settings.interface.font_size, 20.);
         assert_eq!(settings.terminal_font.size, 11.6);
-        assert_eq!(settings.terminal_font.line_height, 1.45);
+        assert_eq!(settings.terminal_font.line_height, 1.6);
         assert_eq!(settings.terminal_font.family, None);
         assert_eq!(settings.local_terminal.shell, None);
         // 默认值本身不被改动。

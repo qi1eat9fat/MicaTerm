@@ -18,8 +18,6 @@ host.store.not_saved.save_credential:
   zh-CN: 保存凭据未能保存到本地数据库：%{error}
 host.store.not_saved.delete_credential:
   zh-CN: 删除凭据未能保存到本地数据库：%{error}
-host.store.not_saved.recent:
-  zh-CN: 记录最近连接未能保存到本地数据库：%{error}
 host.store.not_saved.host_os:
   zh-CN: 记录主机系统未能保存到本地数据库：%{error}
 host.store.not_saved.new_snippet:
@@ -45,7 +43,7 @@ host.store.secret.key_lost:
 host.store.open_failed:
   zh-CN: 主机数据库打不开，这次的改动不会保存：%{error}
 host.store.newer_database:
-  zh-CN: 数据库来自更新版本的 QiShell（结构版本 %{version}，这个版本最高认 %{supported}）
+  zh-CN: 数据库来自更新版本的 MicaTerm（结构版本 %{version}，这个版本最高认 %{supported}）
 
 # 主机表单的错误
 host.draft.address:
@@ -72,10 +70,6 @@ host.list.no_match:
 # 主机右键菜单
 host.menu.connect:
   zh-CN: 连接
-host.menu.split_right:
-  zh-CN: 在右侧分屏打开
-host.menu.split_down:
-  zh-CN: 在下方分屏打开
 host.menu.open_sftp:
   zh-CN: 打开 SFTP
 host.menu.edit:
@@ -93,13 +87,7 @@ host.menu.delete:
 host.dialog.title_new:
   zh-CN: 新建主机
 host.dialog.title_edit:
-  zh-CN: 编辑主机
-host.dialog.subtitle_new:
-  zh-CN: 建好后自动选上
-host.dialog.close:
-  zh-CN: 关闭
-host.dialog.general:
-  zh-CN: 常规
+  zh-CN: 编辑 %{name}
 host.dialog.name:
   zh-CN: 名称
 host.dialog.name_placeholder:
@@ -111,7 +99,7 @@ host.dialog.address_placeholder:
 host.dialog.port:
   zh-CN: 端口
 host.dialog.auth:
-  zh-CN: 认证
+  zh-CN: 认证方式
 host.dialog.auth_password:
   zh-CN: 密码
 host.dialog.auth_credential:
@@ -145,7 +133,7 @@ host.dialog.route_direct:
 host.dialog.notes:
   zh-CN: 备注
 host.dialog.notes_placeholder:
-  zh-CN: 写点什么，悬停主机时显示
+  zh-CN: 悬停主机时显示
 host.dialog.test_connection:
   zh-CN: 测试连接
 host.dialog.testing:

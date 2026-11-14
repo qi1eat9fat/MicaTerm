@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gpui_kit::AsKeystroke as _;
-use qishell::app::{OpenHostSftp, SftpAction, SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
-use qishell::backend::sftp::{PermissionEdit, RemoteOperation, RemotePath, SftpEvent};
-use qishell::sftp_tab::{CardSide, NewEntryKind, SftpTab};
+use micaterm::app::{OpenHostSftp, SftpAction, SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
+use micaterm::backend::sftp::{PermissionEdit, RemoteOperation, RemotePath, SftpEvent};
+use micaterm::sftp_tab::{CardSide, NewEntryKind, SftpTab};
 
 use crate::support::*;
 
@@ -836,10 +836,11 @@ fn hidden_files_have_a_switch_for_each_side(cx: &mut TestAppContext) {
     }
     assert!(!is_listed(cx, &fixture, false, ".bashrc"));
     assert!(!is_listed(cx, &fixture, true, ".bashrc"));
+    // 状态栏不写隐藏了几项（26 号）。
     assert!(
-        label_of(cx, &fixture, "local-status")
+        !label_of(cx, &fixture, "local-status")
             .unwrap()
-            .ends_with("隐藏 2 项")
+            .contains("隐藏")
     );
 
     // 本地的开关（Ctrl+Alt+H）只管本地，写进设置。
@@ -1023,4 +1024,61 @@ fn the_menu_commands_show_the_keys_of_the_prototype(cx: &mut TestAppContext) {
             assert_eq!(binding.keystrokes()[0].as_keystroke().key, key);
         }
     });
+}
+
+// ---------- 点行、右键菜单（UI 重做工单 10，26 号「SFTP」） ----------
+
+/// 菜单里文字是 `text` 的那一项。
+fn menu_item(cx: &mut TestAppContext, fixture: &Fixture, text: &'static str) -> Option<usize> {
+    in_frame(cx, fixture.handle, move |window, _| {
+        let popup = window.within("popup-menu");
+        (0..20_usize).find(|item| {
+            popup
+                .try_find(*item)
+                .is_some_and(|item| item.label() == Some(text))
+        })
+    })
+}
+
+/// 整行是一个项目：点大小那一格也选中这一行。
+#[gpui_kit::test]
+fn a_click_anywhere_on_a_row_selects_it(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.within("remote-card").click("size:文件 甲.txt", cx)
+    });
+    assert_eq!(selected(cx, &fixture, true), ["文件 甲.txt"]);
+}
+
+/// 右键一行先选中它，开文件的菜单（编辑在最前，删除是红字的那项）；右键 `..` 当空白处，
+/// 开空白处的菜单，「显示隐藏文件」是勾选项。
+#[gpui_kit::test]
+fn a_right_click_selects_the_row_and_blank_space_has_its_own_menu(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    select(cx, &fixture, true, "目录");
+    in_frame(cx, fixture.handle, |window, cx| {
+        window
+            .within("remote-card")
+            .right_click("size:文件 甲.txt", cx)
+    });
+    assert_eq!(selected(cx, &fixture, true), ["文件 甲.txt"]);
+    assert_eq!(menu_item(cx, &fixture, "编辑"), Some(0));
+    assert!(menu_item(cx, &fixture, "删除").is_some());
+    assert_eq!(menu_item(cx, &fixture, "新建文件夹…"), None);
+    press(cx, &fixture, "escape");
+    assert!(!visible(cx, &fixture, "popup-menu"));
+
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.within("remote-card").right_click("name-cell:..", cx)
+    });
+    assert_eq!(menu_item(cx, &fixture, "新建文件夹…"), Some(0));
+    let hidden = menu_item(cx, &fixture, "显示隐藏文件").expect("没有「显示隐藏文件」");
+    let checked = in_frame(cx, fixture.handle, move |window, _| {
+        window.within("popup-menu").find(hidden).selected()
+    });
+    assert_eq!(checked, Some(false));
+    in_frame(cx, fixture.handle, move |window, cx| {
+        window.within("popup-menu").click(hidden, cx)
+    });
+    assert!(cx.update(|cx| micaterm::sftp_tab::ShowHiddenFiles::get(CardSide::Remote, cx)));
 }

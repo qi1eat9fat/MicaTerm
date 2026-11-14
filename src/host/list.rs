@@ -2,13 +2,17 @@
 // 裁剪：主机平铺，没有分组树（不用 gpui-component 的 TreeState）；行的样式按全部界面原型的 `.host`；
 // 右键菜单不用 gpui-component 的 `context_menu`（它会泄漏菜单实体，照 `TabRail` 自己开关）。
 
-//! 主机栏里的搜索框和平铺主机列表（原型 `.search`、`.slist`、`.host`）。
+//! 主机栏里的搜索框和平铺主机列表（26 号 `.dks`、`.hi`）。
 //!
-//! - 每行是系统徽章、名称，下一行 `user@地址[:端口]`；悬停提示 `用户@地址:端口` 和备注；
-//!   开着远程卡片的主机，右侧用绿色数字显示张数（工单 16，窗口壳经 `set_open_cards` 告诉列表）；
-//! - 单击选中，双击或选中后回车连接（派发 `ConnectHost`）；选中项和悬停项是胶囊形底色；
-//! - 搜索按名称、地址、用户名，空格隔开的几个词都要匹配；自动高亮第一个，↑↓ 移动，回车连接
-//!   高亮的那台，Esc 清空；
+//! - 每台两行高（`ROW_HEIGHT` 48，用户定），行和行之间空 2：左边淡底系统徽章占两行（24 方块），
+//!   右边上一行名称（13px/400），下一行地址（IP 或主机名，次要小字、淡色）；连着的主机右边一个绿点；
+//!   在连接时徽章换成转圈、断开或连不上时换成红 ×（26 号 `.hi .slot`）。
+//!   窗口壳每次重画时经 `set_open_cards` 告诉列表每台主机的卡片（工单 16）；
+//!   悬停提示 `用户@地址:端口` 和备注；
+//! - 单击选中，双击或选中后回车连接（派发 `ConnectHost`）；选中项是 `--sel` 底，悬停 `--hover` 底；
+//! - 搜索框常驻在列表上面，Ctrl+Shift+H 聚焦它。按名称、地址、用户名搜索，
+//!   空格隔开的几个词都要匹配；自动高亮第一个，↑↓ 移动，回车连接高亮的那台，Esc 清空，
+//!   空着再按 Esc 焦点回到列表；
 //! - 不在搜索时可以拖动排序，有插入线；搜索时暂停拖动；
 //! - 右键菜单见 `menu`。
 //!
@@ -19,25 +23,61 @@ use std::collections::{HashMap, HashSet};
 
 use gpui_kit::base::POPUP_PRIORITY;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
-use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{Icon, IconName, Sizable as _};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use micaterm_ui::Menu;
 
-use qishell_hosts::{Host, HostDrop, HostId, host_matches};
+use micaterm_hosts::{Host, HostDrop, HostId, host_matches};
 
 use super::mark::HostMark;
 use super::menu::build_host_menu;
 use super::store::HostStore;
 use crate::app::{ConnectHost, MoveHost};
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, TypeScale, size};
 use crate::ui::drag::{DragSlot, DropEdge, fade_while_dragged, render_drop_line};
 
-/// 行高（`.host`）。
-const ROW_HEIGHT: Pixels = px(42.);
-/// 徽章直径（`.host .badge`）。
+/// 一台主机一行的高：名称一行、空 2、地址一行，上下各留 6。
+const ROW_HEIGHT: Pixels = px(48.);
+/// 名称、地址两行各自的行高。
+const NAME_LINE: Pixels = px(18.);
+const ADDRESS_LINE: Pixels = px(16.);
+/// 徽章边长：占名称、地址两行（用户定）。转圈、红 × 也放在这么大的槽里。
 const BADGE: Pixels = px(24.);
+/// 转圈、红 × 的图标大小。
+const SLOT_ICON: Pixels = px(16.);
+/// 一台主机开着的远程卡片，窗口壳汇总后告诉列表。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostCards {
+    /// 开着几张远程卡片（断开的也算，卡片还在）。
+    pub count: usize,
+    /// 这些卡片合起来的连接状态。
+    pub link: Option<HostLink>,
+}
+
+/// 主机栏那一行显示的连接状态：几张卡片里有连着的就是连着，否则有在连的就是在连，否则是断开。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HostLink {
+    /// 断开了或者连不上：徽章换成红 ×。
+    Failed,
+    /// 在连接：徽章换成转圈。
+    Connecting,
+    /// 连着：右边一个绿点。
+    Connected,
+}
+
+impl HostCards {
+    /// 再算上一张卡片；`link` 是它的状态（等保险库解锁的卡片是 `None`，不改变显示）。
+    pub fn add(&mut self, link: Option<HostLink>) {
+        self.count += 1;
+        self.link = self.link.max(link);
+    }
+}
+
+/// 转圈一圈的时间（26 号 `.spin`）。
+const SPIN: std::time::Duration = std::time::Duration::from_millis(1200);
+
 /// 列表的键上下文：选中一行后回车连接。
 const HOST_LIST_KEY_CONTEXT: &str = "HostList";
 
@@ -59,8 +99,8 @@ pub struct HostList {
     drag: DragSlot<DragState>,
     menu: Option<OpenMenu>,
     scroll: ScrollHandle,
-    /// 每台主机开着几张远程卡片（工单 16）：窗口壳每次重画时告诉列表，行右侧显示绿色数字。
-    open_cards: HashMap<HostId, usize>,
+    /// 每台主机开着的远程卡片（工单 16）：窗口壳每次重画时告诉列表。
+    open_cards: HashMap<HostId, HostCards>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -74,7 +114,7 @@ struct DragState {
 struct OpenMenu {
     host: HostId,
     position: Point<Pixels>,
-    view: Entity<PopupMenu>,
+    view: Entity<Menu>,
     _dismiss: Subscription,
 }
 
@@ -127,8 +167,12 @@ impl HostList {
         }
     }
 
-    /// 窗口壳告诉列表每台主机开着几张远程卡片；变了才重画。
-    pub fn set_open_cards(&mut self, open_cards: HashMap<HostId, usize>, cx: &mut Context<Self>) {
+    /// 窗口壳告诉列表每台主机开着的远程卡片；变了才重画。
+    pub fn set_open_cards(
+        &mut self,
+        open_cards: HashMap<HostId, HostCards>,
+        cx: &mut Context<Self>,
+    ) {
         if self.open_cards != open_cards {
             self.open_cards = open_cards;
             cx.notify();
@@ -159,10 +203,17 @@ impl HostList {
             .collect()
     }
 
-    /// 焦点给搜索框（Ctrl+Shift+H）。
+    /// 把焦点给搜索框（Ctrl+Shift+H）。
     pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search
             .update(cx, |search, cx| search.focus(window, cx));
+        cx.notify();
+    }
+
+    /// 离开搜索框（空着按 Esc），焦点回到列表。
+    fn leave_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
     }
 
     /// 选中一台主机并滚进视野。
@@ -232,7 +283,7 @@ impl HostList {
         }
     }
 
-    /// 在 `position`（窗口坐标）为 `host` 开右键菜单，顺带选中它；之前开着的那个放掉。
+    /// 在 `position`（窗口坐标）为 `host` 开右键菜单；之前开着的那个放掉。选中项不变。
     fn open_menu(
         &mut self,
         host: HostId,
@@ -252,7 +303,7 @@ impl HostList {
         let dismiss = cx.subscribe_in(
             &view,
             window,
-            |this, menu: &Entity<PopupMenu>, _: &DismissEvent, window, cx| {
+            |this, menu: &Entity<Menu>, _: &DismissEvent, window, cx| {
                 if this.menu.as_ref().is_some_and(|open| &open.view == menu) {
                     this.menu = None;
                     // 菜单项把焦点交给了别处（分屏打开的新卡片、对话框）就不抢回来。
@@ -269,7 +320,7 @@ impl HostList {
             },
         );
         window.focus(&view.focus_handle(cx), cx);
-        self.selected = Some(host);
+        // 选中项不变：被右键的那一行只描一圈细边（26 号「主机右键」，用户定）。
         self.menu = Some(OpenMenu {
             host,
             position,
@@ -290,9 +341,12 @@ impl HostList {
         }
     }
 
+    /// 搜索框（26 号 `.dks`，照 Zed 面板顶部的过滤框）：高 28、细边、比侧栏深一档；
+    /// 字（连同提示文字）是界面字号。
     fn render_search(
         &self,
         tokens: &Tokens,
+        scale: TypeScale,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -303,28 +357,21 @@ impl HostList {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(6.))
-            .mx(px(2.))
-            .mb(px(8.))
-            .h(px(30.))
+            .gap(px(8.))
+            .mt(px(2.))
+            .h(size::BUTTON)
             .px(px(8.))
-            .rounded(px(8.))
-            .text_size(px(12.5))
-            .text_color(tokens.faint)
-            .map(|search| {
-                if focused {
-                    search.bg(tokens.field_focused).shadow(vec![BoxShadow {
-                        color: tokens.accent,
-                        offset: point(px(0.), px(0.)),
-                        blur_radius: px(0.),
-                        spread_radius: px(1.5),
-                        inset: true,
-                    }])
-                } else {
-                    search.bg(tokens.hover)
-                }
+            .rounded(size::RADIUS)
+            .bg(tokens.input)
+            .border_1()
+            .border_color(if focused {
+                tokens.line_strong
+            } else {
+                tokens.line
             })
-            // 搜索框里的 ↑↓、Esc 先到这里：移动高亮、清空搜索，不交给输入框，也不冒泡到终端。
+            .text_size(scale.ui)
+            .text_color(tokens.st_dim)
+            // 搜索框里的 ↑↓、Esc 先到这里：移动高亮、清空或收起搜索，不交给输入框，也不冒泡到终端。
             .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
                 if this.searching() {
                     this.move_highlight(-1, cx);
@@ -340,8 +387,10 @@ impl HostList {
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.searching() {
                     this.clear_search(window, cx);
-                    cx.stop_propagation();
+                } else {
+                    this.leave_search(window, cx);
                 }
+                cx.stop_propagation();
             }))
             .child(Icon::new(IconName::Search).size(px(14.)))
             .child(
@@ -350,34 +399,35 @@ impl HostList {
                         .id("host-search")
                         .aria_label(t!("host.list.search"))
                         .appearance(false)
-                        .small(),
+                        .small()
+                        // 和图标的间距由外层的 gap 给；Input 自己的左右内边距清掉，不然隔得太开。
+                        .px_0()
+                        // `.small()` 的字是 0.875rem（约 10.5）；跟界面字号走。
+                        .text_size(scale.ui),
                 ),
             )
-            .map(|search| {
-                if searching {
-                    let hover = tokens.pressed;
-                    search.child(
-                        div()
-                            .id("host-search-clear")
-                            .test_support()
-                            .aria_label(t!("host.list.clear_search"))
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .justify_center()
-                            .size(px(20.))
-                            .rounded(px(7.))
-                            .cursor_pointer()
-                            .hover(move |style| style.bg(hover))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.clear_search(window, cx);
-                                this.focus_search(window, cx);
-                            }))
-                            .child(Icon::new(IconName::Close).size(px(12.))),
-                    )
-                } else {
-                    search.child(render_kbd(search_shortcut(), tokens))
-                }
+            .when(searching, |search| {
+                let hover = tokens.hover;
+                let text = tokens.text;
+                search.child(
+                    div()
+                        .id("host-search-clear")
+                        .test_support()
+                        .aria_label(t!("host.list.clear_search"))
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .justify_center()
+                        .size(px(18.))
+                        .rounded(px(4.))
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(hover).text_color(text))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.clear_search(window, cx);
+                            this.focus_search(window, cx);
+                        }))
+                        .child(Icon::new(IconName::Close).size(px(12.))),
+                )
             })
     }
 
@@ -386,6 +436,7 @@ impl HostList {
         host: &Host,
         index: usize,
         tokens: &Tokens,
+        scale: TypeScale,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let id = host.id;
@@ -402,10 +453,9 @@ impl HostList {
             _ => None,
         });
         let hover = tokens.hover;
-        let shadow = tokens.shadow;
         let mark = HostMark::of(host);
-        let address = list_address(host);
-        let open_cards = self.open_cards.get(&id).copied().filter(|count| *count > 0);
+        let dark = cx.theme().is_dark();
+        let cards = self.open_cards.get(&id).copied().unwrap_or_default();
         let tooltip = HostTooltip {
             endpoint: host.endpoint().into(),
             notes: host.notes.clone(),
@@ -424,39 +474,29 @@ impl HostList {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(9.))
+            .gap(px(12.))
             .h(ROW_HEIGHT)
-            .pl(px(9.))
-            .pr(px(12.))
-            .rounded_full()
+            .px(px(8.))
+            .rounded(size::RADIUS_LG)
+            .text_size(scale.side)
+            .text_color(tokens.label)
             .cursor_pointer()
             .map(|row| {
-                if selected {
-                    row.bg(tokens.tab_active).shadow(vec![
-                        BoxShadow {
-                            color: shadow,
-                            offset: point(px(0.), px(1.)),
-                            blur_radius: px(2.),
-                            spread_radius: px(0.),
-                            inset: false,
-                        },
-                        BoxShadow {
-                            color: shadow,
-                            offset: point(px(0.), px(2.)),
-                            blur_radius: px(8.),
-                            spread_radius: px(0.),
-                            inset: false,
-                        },
-                    ])
-                } else if highlighted {
-                    row.bg(tokens.selection)
+                if selected || highlighted {
+                    row.bg(tokens.sel).text_color(tokens.text)
                 } else {
                     row.hover(move |style| style.bg(hover))
                 }
             })
-            .when(pressed && !selected, |row| row.bg(tokens.pressed))
+            // 被右键的那一行描一圈细边，选中项不变（26 号主机右键菜单）。
+            .when(pressed, |row| {
+                row.border_1().border_color(tokens.line_strong)
+            })
             .map(|row| fade_while_dragged(row, dragged))
-            .tooltip(move |_, cx| cx.new(|_| tooltip.clone()).into())
+            // 开着右键菜单时不出悬停提示，免得盖住菜单。
+            .when(self.menu.is_none(), |row| {
+                row.tooltip(move |_, cx| cx.new(|_| tooltip.clone()).into())
+            })
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 window.focus(&this.focus_handle, cx);
                 this.selected = Some(id);
@@ -469,6 +509,9 @@ impl HostList {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     this.open_menu(id, event.position, window, cx);
+                    // 焦点已经给了菜单：别让外面列表的 track_focus 在冒泡时又把它抢回去，
+                    // 否则 Esc 到不了菜单。
+                    window.prevent_default();
                 }),
             )
             .when(!searching, |row| {
@@ -509,18 +552,26 @@ impl HostList {
                         cx.notify();
                     }))
             })
-            .child(mark.render(("host-badge", id.0 as usize).into(), BADGE))
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .size(BADGE)
+                    .child(render_slot(&mark, id, cards.link, dark, tokens)),
+            )
             .child(
                 div()
                     .flex()
                     .flex_col()
+                    .gap(px(2.))
                     .flex_1()
                     .min_w_0()
+                    .whitespace_nowrap()
                     .child(
                         div()
-                            .text_size(px(13.))
-                            .line_height(relative(1.3))
-                            .whitespace_nowrap()
+                            .line_height(NAME_LINE)
                             .overflow_hidden()
                             .text_ellipsis()
                             .child(host.name.clone()),
@@ -529,30 +580,32 @@ impl HostList {
                         div()
                             .id(("host-address", id.0 as usize))
                             .test_support()
-                            .aria_label(address.clone())
-                            .text_size(px(11.5))
-                            .text_color(tokens.faint)
-                            .whitespace_nowrap()
+                            .aria_label(host.address.clone())
+                            .text_size(scale.small)
+                            .line_height(ADDRESS_LINE)
+                            .text_color(if selected || highlighted {
+                                tokens.text2
+                            } else {
+                                tokens.st_dim
+                            })
                             .overflow_hidden()
                             .text_ellipsis()
-                            .child(address),
+                            .child(host.address.clone()),
                     ),
             )
-            .children(open_cards.map(|count| {
-                // 原型 `.host .cnt`：绿色数字，底色是 14% 的绿。
-                div()
-                    .id(("host-open-cards", id.0 as usize))
-                    .test_support()
-                    .aria_label(count.to_string())
-                    .flex_none()
-                    .px(px(6.))
-                    .py(px(1.))
-                    .rounded_full()
-                    .text_size(px(11.))
-                    .text_color(tokens.busy)
-                    .bg(tokens.busy.opacity(0.14))
-                    .child(count.to_string())
-            }))
+            .when(cards.link == Some(HostLink::Connected), |row| {
+                // 已连接：右边一个绿点（26 号 `.dot.up`）。无障碍名称是开着几张卡片。
+                row.child(
+                    div()
+                        .id(("host-open-cards", id.0 as usize))
+                        .test_support()
+                        .aria_label(cards.count.to_string())
+                        .flex_none()
+                        .size(size::DOT)
+                        .rounded_full()
+                        .bg(tokens.ok),
+                )
+            })
             .children(line.map(|edge| {
                 let id = ("host-drop-line", id.0 as usize).into();
                 render_drop_line(id, edge, px(12.), px(0.), tokens)
@@ -571,6 +624,7 @@ impl Render for HostList {
         // 拖动在别处放下或取消了：插入线和变淡都收掉。
         self.drag.settle(cx);
         let tokens = Tokens::current(cx);
+        let scale = TypeScale::current(cx);
         let hosts: Vec<Host> = self
             .store
             .read(cx)
@@ -583,20 +637,20 @@ impl Render for HostList {
         let rows: Vec<AnyElement> = hosts
             .iter()
             .enumerate()
-            .map(|(index, host)| self.render_row(host, index, &tokens, cx).into_any_element())
+            .map(|(index, host)| {
+                self.render_row(host, index, &tokens, scale, cx)
+                    .into_any_element()
+            })
             .collect();
         let list = if total == 0 {
-            render_empty(
-                t!("workspace.host_sidebar.empty"),
-                Some(t!("workspace.host_sidebar.empty_hint")),
-                &tokens,
-            )
-            .into_any_element()
+            render_empty(t!("workspace.host_sidebar.empty"), true, &tokens, scale)
+                .into_any_element()
         } else if rows.is_empty() {
             render_empty(
                 t!("host.list.no_match", query = self.query.trim()),
-                None,
+                false,
                 &tokens,
+                scale,
             )
             .into_any_element()
         } else {
@@ -607,9 +661,9 @@ impl Render for HostList {
                 .on_key_down(cx.listener(Self::on_list_key))
                 .flex()
                 .flex_col()
+                .gap(px(2.))
                 .flex_1()
                 .min_h_0()
-                .pt(px(2.))
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
                 .children(rows)
@@ -622,7 +676,9 @@ impl Render for HostList {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .child(self.render_search(&tokens, window, cx))
+            .child(self.render_search(&tokens, scale, window, cx))
+            // 搜索框和第一台主机之间留 8（26 号 `.side-gap`）。
+            .child(div().flex_none().h(px(8.)))
             .child(list)
             .children(self.menu.as_ref().map(|menu| {
                 deferred(
@@ -636,11 +692,44 @@ impl Render for HostList {
     }
 }
 
-/// 列表里没有行时的那句话（原型 `.noresult`）。
+/// 行最前面的槽：平时是系统徽章；在连接时是转圈，断开或连不上时是红 ×（26 号 `.hi .slot`）。
+fn render_slot(
+    mark: &HostMark,
+    id: HostId,
+    link: Option<HostLink>,
+    dark: bool,
+    tokens: &Tokens,
+) -> AnyElement {
+    match link {
+        Some(HostLink::Connecting) => Icon::new(IconName::LoaderCircle)
+            .size(SLOT_ICON)
+            .text_color(tokens.text2)
+            .with_animation(
+                ("host-connecting", id.0 as usize),
+                Animation::new(SPIN).repeat(),
+                |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
+            )
+            .into_any_element(),
+        Some(HostLink::Failed) => div()
+            .id(("host-failed", id.0 as usize))
+            .test_support()
+            .flex()
+            .text_color(tokens.err)
+            .child(Icon::new(IconName::Close).size(SLOT_ICON))
+            .into_any_element(),
+        _ => mark
+            .render(("host-badge", id.0 as usize).into(), BADGE, dark)
+            .into_any_element(),
+    }
+}
+
+/// 列表里没有行时的那句话。一台主机都没有时（`centered`）居中、偏上一点（26 号 `.se`）；
+/// 搜索没有匹配时贴在上面。
 fn render_empty(
     text: SharedString,
-    hint: Option<SharedString>,
+    centered: bool,
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> impl IntoElement {
     div()
         .id("host-list-empty")
@@ -649,49 +738,17 @@ fn render_empty(
         .flex()
         .flex_col()
         .items_center()
-        .gap(px(4.))
-        .pt(px(24.))
-        .px(px(10.))
-        .text_size(px(12.5))
-        .text_color(tokens.faint)
-        .child(text)
-        .when_some(hint, |empty, hint| {
-            empty.child(div().text_size(px(11.5)).child(hint))
+        .px(px(8.))
+        .text_size(scale.ui)
+        .text_color(tokens.st_dim)
+        .map(|empty| {
+            if centered {
+                empty.flex_1().justify_center().pb(px(40.))
+            } else {
+                empty.pt(px(16.))
+            }
         })
-}
-
-/// 按键提示（原型 `.kbd`）。
-fn render_kbd(keys: &'static str, tokens: &Tokens) -> impl IntoElement {
-    div()
-        .flex_none()
-        .px(px(6.))
-        .py(px(1.))
-        .rounded(px(5.))
-        .bg(tokens.field)
-        .border_1()
-        .border_color(tokens.field_border)
-        .text_size(px(11.))
-        .text_color(tokens.muted)
-        .whitespace_nowrap()
-        .child(keys)
-}
-
-/// 搜索框里提示的快捷键：聚焦主机搜索（spec 第 8 节）。
-fn search_shortcut() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "\u{21e7}\u{2318}H"
-    } else {
-        "Ctrl+Shift+H"
-    }
-}
-
-/// 名称下面那一行：`user@地址`，端口不是 22 时加 `:端口`（原型 `hAddr`）。
-pub fn list_address(host: &Host) -> SharedString {
-    if host.port == qishell_hosts::SSH_PORT {
-        format!("{}@{}", host.user, host.address).into()
-    } else {
-        format!("{}@{}:{}", host.user, host.address, host.port).into()
-    }
+        .child(text)
 }
 
 /// 拖着的主机，和跟着鼠标的那块预览。
@@ -707,11 +764,11 @@ impl Render for DraggedHost {
         div()
             .px(px(10.))
             .py(px(4.))
-            .rounded(px(8.))
-            .bg(tokens.panel)
+            .rounded(size::RADIUS_LG)
+            .bg(tokens.popup)
             .border_1()
-            .border_color(tokens.panel_border)
-            .text_size(px(12.5))
+            .border_color(tokens.line_strong)
+            .text_size(TypeScale::current(cx).side)
             .text_color(tokens.text)
             .child(self.name.clone())
     }
@@ -738,14 +795,41 @@ impl Render for HostTooltip {
             .aria_label(label)
             .flex()
             .flex_col()
-            .px(px(9.))
-            .py(px(5.))
-            .rounded(px(7.))
+            .px(px(8.))
+            .py(px(4.))
+            .rounded(size::RADIUS)
             .bg(tokens.tooltip)
             .text_color(tokens.tooltip_text)
-            .text_size(px(11.5))
+            .text_size(TypeScale::current(cx).ui)
             .line_height(relative(1.45))
             .child(self.endpoint.clone())
             .when(!self.notes.is_empty(), |tip| tip.child(self.notes.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HostCards, HostLink};
+
+    #[test]
+    fn a_connected_card_wins_then_connecting_then_failed() {
+        let mut cards = HostCards::default();
+        cards.add(Some(HostLink::Failed));
+        assert_eq!(cards.link, Some(HostLink::Failed));
+        cards.add(Some(HostLink::Connecting));
+        assert_eq!(cards.link, Some(HostLink::Connecting));
+        cards.add(None);
+        cards.add(Some(HostLink::Connected));
+        cards.add(Some(HostLink::Failed));
+        assert_eq!(cards.link, Some(HostLink::Connected));
+        assert_eq!(cards.count, 5);
+    }
+
+    #[test]
+    fn a_card_waiting_for_the_vault_leaves_the_badge_alone() {
+        let mut cards = HostCards::default();
+        cards.add(None);
+        assert_eq!(cards.link, None);
+        assert_eq!(cards.count, 1);
     }
 }

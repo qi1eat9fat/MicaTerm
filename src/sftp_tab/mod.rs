@@ -15,7 +15,6 @@
 mod file_card;
 mod file_dialogs;
 mod file_icons;
-mod file_icons_table;
 mod file_listing;
 mod file_menu;
 mod file_open;
@@ -34,8 +33,7 @@ mod transfer_queue;
 mod transfers;
 
 pub use file_card::{CardSide, ConnectionState, FileCard, LoadIntent};
-pub use file_icons::{FileIcon, FileIconKind, FileIconStyle};
-pub use file_icons_table::FILE_ICON_ASSETS;
+pub use file_icons::{FileIcon, FileIconKind};
 pub use file_listing::FileListing;
 pub use model::*;
 pub use operations::FileOperation;

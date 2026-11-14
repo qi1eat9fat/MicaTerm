@@ -1,19 +1,18 @@
 // 来自 since2006/shell-rs @ b2a307a: src/explorer/marquee.rs
-//! How the SFTP lists take the pointer, as WinSCP's do without full row
-//! select: the name cells are the items, which clicks select; everything
-//! else in the list is empty space, where a click clears the selection and a
-//! drag draws a rectangle that selects the rows it covers, scrolling the list
-//! past its edges.
+//! How the SFTP lists take the pointer, as Explorer's details view does: a
+//! click anywhere on a row selects it; dragging a name's icon and text moves
+//! the files, and dragging from anywhere else (the rest of a row, or the
+//! empty space below the rows) draws a rectangle that selects the rows it
+//! covers, scrolling the list past its edges. A click on the empty space
+//! clears the selection.
 
 use super::{
     Selection,
     selection::{row_at, swept_rows},
 };
-use gpui_kit::component::{
-    ActiveTheme as _,
-    table::{TableDelegate, TableState},
-};
 use gpui_kit::*;
+
+use crate::theme::Tokens;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -33,17 +32,16 @@ pub(super) struct ListGeometry {
     pub pressed: Cell<Pressed>,
 }
 
-/// What a press in the list landed on. As in WinSCP without full row select,
-/// everything but the name cells and the column titles is empty space:
-/// clicking there clears the selection, and dragging from there draws a
+/// What a press in the list landed on: a click on a row selects it, a click
+/// on empty space clears the selection; dragging from either draws a
 /// rectangle.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Pressed {
     #[default]
     Empty,
-    /// A name cell, which clicks and right-clicks select. Dragging its icon
-    /// and text moves files, in a pane; dragging the rest of it draws a
-    /// rectangle.
+    /// A row, away from its name's icon and text.
+    Row,
+    /// A name's icon and text: dragging them moves the files.
     Name,
     /// A column title.
     Title,
@@ -105,9 +103,7 @@ pub(super) struct ListMarquee {
 
 /// A view whose list has a selection rectangle.
 pub(super) trait MarqueeList: Sized + 'static {
-    type Rows: TableDelegate;
-
-    fn table(&self) -> &Entity<TableState<Self::Rows>>;
+    fn scroll_handle(&self) -> &UniformListScrollHandle;
     fn list_marquee(&self) -> &ListMarquee;
     fn list_marquee_mut(&mut self) -> &mut ListMarquee;
     fn selection(&self, cx: &App) -> Selection;
@@ -137,7 +133,7 @@ impl ListMarquee {
 
     /// The rectangle as drawn, in the list's own coordinates and inside it;
     /// goes after the table, over it.
-    pub(super) fn rectangle(&self, cx: &App) -> Option<impl IntoElement + use<>> {
+    pub(super) fn rectangle(&self, tokens: &Tokens) -> Option<impl IntoElement + use<>> {
         let marquee = self.marquee.as_ref()?;
         let list = self.geometry.list.get()?;
         let (first_row, _) = self.geometry.rows.get()?;
@@ -151,9 +147,8 @@ impl ListMarquee {
         let (a, b) = (clamp(anchor), clamp(marquee.pointer));
         let origin = point(a.x.min(b.x), a.y.min(b.y)) - list.origin;
         let size = size((a.x - b.x).abs(), (a.y - b.y).abs());
-        let theme = cx.theme();
-        // The colors of a selected name: the rectangle is about to select
-        // what it covers.
+        // The colors of a selected row: the rectangle is about to select what
+        // it covers.
         Some(
             div()
                 .id("selection-rectangle")
@@ -163,8 +158,8 @@ impl ListMarquee {
                 .w(size.width)
                 .h(size.height)
                 .border_1()
-                .border_color(theme.table_active_border)
-                .bg(theme.tokens.table_active),
+                .border_color(tokens.line_strong)
+                .bg(tokens.sel.opacity(0.5)),
         )
     }
 }
@@ -297,14 +292,7 @@ fn scroll_marquee<T: MarqueeList>(list: &mut T, delta: Pixels, cx: &mut Context<
         list.list_marquee_mut().scroll.stop();
         return;
     }
-    let scroll = list
-        .table()
-        .read(cx)
-        .vertical_scroll_handle
-        .0
-        .borrow()
-        .base_handle
-        .clone();
+    let scroll = list.scroll_handle().0.borrow().base_handle.clone();
     let offset = scroll.offset();
     let lowest = -scroll.max_offset().y;
     let y = (offset.y - delta).clamp(lowest, px(0.));

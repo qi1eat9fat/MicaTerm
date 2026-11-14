@@ -1,15 +1,14 @@
-//! 图标资源：gpui-kit 默认的那批 Lucide 图标，加上 QiShell 额外要用的。
+//! 图标资源：gpui-kit 默认的那批 Lucide 图标，加上 MicaTerm 额外要用的。
 // 参考 since2006/shell-rs @ b2a307a: src/app/assets.rs
 
 use std::borrow::Cow;
 
 use gpui_kit::assets::icon_assets;
 use gpui_kit::{AssetSource, Result, SharedString};
-use qishell_terminal::TerminalIcons;
 
 // 默认组件图标包以外的图标，从 gpui-kit-assets 自带的 Lucide 目录里挑。要用新图标就加在这里。
-// Terminal：开始卡片「新建本地终端」；CodeXml：右侧栏「命令片段」；KeyRound：右侧栏「凭据」。
-// Columns2 / Rows2 / Maximize2 / Minimize2：卡片头部的向右分屏、向下分屏、放大、还原（工单 05）。
+// Terminal：新标签页「新建本地终端」；CodeXml：右侧栏「命令片段」；KeyRound：右侧栏「凭据」。
+// Columns2 / Rows2 / Maximize2 / Minimize2：分屏、放大、还原（工单 05）。
 icon_assets!(
     ExtraIcons,
     [
@@ -33,10 +32,17 @@ icon_assets!(
         Lock,
         LockOpen,
         Shield,
+        // 主机密钥变了的警示（26 号 `shieldx`，UI 重做工单 06）。
+        ShieldX,
         // 设置 › 应用（工单 26）。
         AppWindow,
+        // 设置标签：改过的设置标题后面的「恢复默认」，导航里的「终端」（UI 重做工单 12，26 号 `undo`、`term`）。
+        Undo2,
+        SquareTerminal,
         // SFTP 标签、编辑器标签、预览（M3，工单 20 一次加全）。
         ArrowUpRight,
+        // 编辑器查找浮卡的「替换」那一行（UI 重做工单 11，26 号 `replace`）。
+        ArrowRightLeft,
         CircleMinus,
         Download,
         Eraser,
@@ -158,27 +164,49 @@ fn os_icon(path: &str) -> Option<Cow<'static, [u8]>> {
         .map(|(_, bytes)| Cow::Borrowed(*bytes))
 }
 
-/// 文件列表的彩色图标（工单 20，`crate::sftp_tab`）：Material Icon Theme，MIT，许可见
-/// `assets/icons/files/LICENSE`。
-fn file_icon(path: &str) -> Option<Cow<'static, [u8]>> {
-    crate::sftp_tab::FILE_ICON_ASSETS
-        .iter()
-        .find(|(name, _)| *name == path)
-        .map(|(_, bytes)| Cow::Borrowed(*bytes))
-}
+/// MicaTerm 自己的标志（30 号原型：两张错开叠放的薄片，前面那张里是提示符和实心块光标；
+/// 原图在 `.scratch/qishell-design/brand/micaterm/`），两种笔画粗细：
+/// 主机栏 18 的用 1.7，新标签页 88 的水印用 1.1。
+pub const MARK_ICON: &str = "icons/micaterm/mark.svg";
+pub const MARK_THIN_ICON: &str = "icons/micaterm/mark-thin.svg";
+/// 分组标题后面的实心小三角（26 号 `.gh .tri`）：展开时朝下、收起时朝右。
+pub const TRIANGLE_DOWN_ICON: &str = "icons/micaterm/triangle-down.svg";
+pub const TRIANGLE_RIGHT_ICON: &str = "icons/micaterm/triangle-right.svg";
+/// 主机栏顶部的「新建主机」：Lucide 的 server，下面那台截短，右下角一个加号（Lucide 里没有现成的，
+/// 照它的 24 格、2 线宽自己画的）。
+pub const SERVER_PLUS_ICON: &str = "icons/micaterm/server-plus.svg";
+const MARK_ICONS: &[(&str, &[u8])] = &[
+    (
+        MARK_ICON,
+        include_bytes!("../../assets/icons/micaterm/mark.svg"),
+    ),
+    (
+        MARK_THIN_ICON,
+        include_bytes!("../../assets/icons/micaterm/mark-thin.svg"),
+    ),
+    (
+        TRIANGLE_DOWN_ICON,
+        include_bytes!("../../assets/icons/micaterm/triangle-down.svg"),
+    ),
+    (
+        TRIANGLE_RIGHT_ICON,
+        include_bytes!("../../assets/icons/micaterm/triangle-right.svg"),
+    ),
+    (
+        SERVER_PLUS_ICON,
+        include_bytes!("../../assets/icons/micaterm/server-plus.svg"),
+    ),
+];
 
 /// 图标名，凡是建 `Icon` 的地方都能用（`ExtraIcons` 和默认图标包里的都在里面）。
 pub use gpui_kit::assets::IconName as CatalogIcon;
 
-/// 应用的资源来源：先查额外图标和终端右键菜单的图标，再回落到默认组件图标包。
+/// 应用的资源来源：先查额外图标，再回落到默认组件图标包。
 pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if let Some(bytes) = ExtraIcons.load(path)? {
-            return Ok(Some(bytes));
-        }
-        if let Some(bytes) = TerminalIcons.load(path)? {
             return Ok(Some(bytes));
         }
         if let Some(bytes) = brand_icon(path) {
@@ -187,8 +215,8 @@ impl AssetSource for AppAssets {
         if let Some(bytes) = os_icon(path) {
             return Ok(Some(bytes));
         }
-        if let Some(bytes) = file_icon(path) {
-            return Ok(Some(bytes));
+        if let Some((_, bytes)) = MARK_ICONS.iter().find(|(name, _)| *name == path) {
+            return Ok(Some(Cow::Borrowed(*bytes)));
         }
         gpui_kit::assets::Assets.load(path)
     }
@@ -196,7 +224,6 @@ impl AssetSource for AppAssets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(ExtraIcons.list(path)?);
-        paths.extend(TerminalIcons.list(path)?);
         paths.extend(
             BRAND_ICONS
                 .iter()
@@ -206,13 +233,6 @@ impl AssetSource for AppAssets {
         );
         paths.extend(
             OS_ICONS
-                .iter()
-                .map(|(name, _)| *name)
-                .filter(|name| name.starts_with(path))
-                .map(SharedString::from),
-        );
-        paths.extend(
-            crate::sftp_tab::FILE_ICON_ASSETS
                 .iter()
                 .map(|(name, _)| *name)
                 .filter(|name| name.starts_with(path))
@@ -233,7 +253,7 @@ mod tests {
     /// 每种系统的徽章图标都加载得出来（工单 11）。
     #[test]
     fn every_host_os_icon_loads() {
-        for os in qishell_hosts::HostOs::ALL {
+        for os in micaterm_hosts::HostOs::ALL {
             let bytes = AppAssets.load(os.icon_path()).unwrap();
             assert!(
                 bytes.is_some_and(|bytes| bytes.starts_with(b"<svg")),
@@ -242,19 +262,24 @@ mod tests {
         }
     }
 
-    /// 文件列表的每个彩色图标都加载得出来（工单 20）。
+    /// MicaTerm 自己画的图标（标志、小三角、服务器加号）都加载得出来。
     #[test]
-    fn every_file_icon_loads() {
-        for (path, _) in crate::sftp_tab::FILE_ICON_ASSETS {
+    fn every_own_icon_loads() {
+        for (path, _) in super::MARK_ICONS {
             let bytes = AppAssets.load(path).unwrap();
             assert!(
                 bytes.is_some_and(|bytes| bytes.starts_with(b"<svg")),
                 "{path}"
             );
         }
+        assert!(
+            super::MARK_ICONS
+                .iter()
+                .any(|(path, _)| *path == super::SERVER_PLUS_ICON)
+        );
     }
 
-    /// 程序名表里的每个图标都加载得出来：Lucide 的在 gpui-kit 的图标包里，品牌的是 QiShell 自带的。
+    /// 程序名表里的每个图标都加载得出来：Lucide 的在 gpui-kit 的图标包里，品牌的是 MicaTerm 自带的。
     #[test]
     fn every_program_glyph_loads() {
         for glyph in crate::programs::glyphs() {

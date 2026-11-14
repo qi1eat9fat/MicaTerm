@@ -1,6 +1,7 @@
-//! 主机对话框（工单 11）的 UI 测试：新建的三个入口、保存、校验出错、编辑、密码进保险库。
+//! 主机表单（工单 11；UI 重做工单 07 起在标签页里打开）的 UI 测试：新建的入口、保存、校验出错、编辑、
+//! 密码进保险库，以及表单标签的开关。
 
-use qishell::app::{EditHost, NewHost};
+use micaterm::app::{EditHost, NewHost};
 
 use crate::support::*;
 
@@ -24,9 +25,11 @@ fn fill(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str, text: 
 }
 
 fn save(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
-    in_frame(cx, handle, |window, cx| {
-        window.click("host-dialog-save", cx)
-    });
+    click_host_save(cx, handle);
+}
+
+fn tab_labels(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> Vec<TabId> {
+    cx.update(|cx| workspace.read(cx).tab_ids())
 }
 
 fn error_of(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str) -> Option<String> {
@@ -74,7 +77,7 @@ fn the_plus_after_the_host_count_opens_a_new_host_dialog(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
-fn ctrl_shift_n_and_the_start_card_open_it_too(cx: &mut TestAppContext) {
+fn ctrl_shift_n_and_the_new_tab_page_open_it_too(cx: &mut TestAppContext) {
     let (handle, _) = open_workspace(cx);
 
     in_frame(cx, handle, |window, cx| window.press("ctrl-shift-n", cx));
@@ -82,7 +85,9 @@ fn ctrl_shift_n_and_the_start_card_open_it_too(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
     assert!(!dialog_open(cx, handle));
 
-    in_frame(cx, handle, |window, cx| window.click("start-new-host", cx));
+    in_frame(cx, handle, |window, cx| {
+        window.click("new-tab-new-host", cx)
+    });
     assert!(dialog_open(cx, handle));
 }
 
@@ -181,7 +186,10 @@ fn editing_a_host_starts_from_what_it_has_and_saves_the_change(cx: &mut TestAppC
 
     dispatch(cx, handle, EditHost(HostId(4)));
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("host-dialog-title").label(), Some("编辑主机"));
+        assert_eq!(
+            window.find("host-dialog-title").label(),
+            Some("编辑 staging-api")
+        );
     });
 
     fill(cx, handle, "host-name", "staging");
@@ -221,4 +229,75 @@ fn clearing_the_saved_password_deletes_it(cx: &mut TestAppContext) {
     save(cx, handle);
 
     assert!(secrets.get(&web01.password_secret()).unwrap().is_none());
+}
+
+/// 新建主机在标签页里打开（26 号「新建主机」）：标签写「新建主机」；再要新建就切回这个标签，
+/// 不再开一个；Esc 关掉标签。
+#[gpui_kit::test]
+fn new_host_opens_one_tab_and_escape_closes_it(cx: &mut TestAppContext) {
+    let (handle, workspace) = open_workspace(cx);
+
+    dispatch(cx, handle, NewHost);
+    assert_eq!(tab_labels(cx, &workspace), [TabId(1)]);
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(
+            window.find(("tab", 1usize)).label().map(str::trim),
+            Some("新建主机")
+        );
+        // 在标签页里，不是叠在上面的对话框。
+        assert!(window.try_find("dialog").is_none());
+    });
+
+    // 先开一个终端标签，再要新建主机：切回原来那个表单标签。
+    dispatch(cx, handle, NewLocalTerminalTab);
+    dispatch(cx, handle, NewHost);
+    assert_eq!(tab_labels(cx, &workspace), [TabId(1), TabId(2)]);
+    cx.update(|cx| assert_eq!(workspace.read(cx).active_tab(), Some(TabId(1))));
+
+    in_frame(cx, handle, |window, cx| window.press("escape", cx));
+    assert!(!dialog_open(cx, handle));
+    assert_eq!(tab_labels(cx, &workspace), [TabId(2)]);
+}
+
+/// 「取消」关掉表单标签，什么都不存；回车就是保存（备注是一行，回车不用换行）。
+#[gpui_kit::test]
+fn cancel_closes_the_tab_and_enter_saves(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_with_seed(cx);
+    let before = host_names(cx, &workspace).len();
+
+    dispatch(cx, handle, NewHost);
+    fill(cx, handle, "host-address", "10.0.9.9");
+    in_frame(cx, handle, |window, cx| {
+        window.click("host-dialog-cancel", cx)
+    });
+    assert!(!dialog_open(cx, handle));
+    assert_eq!(host_names(cx, &workspace).len(), before);
+
+    dispatch(cx, handle, NewHost);
+    fill(cx, handle, "host-address", "10.0.9.9");
+    in_frame(cx, handle, |window, cx| window.press("enter", cx));
+    assert!(!dialog_open(cx, handle));
+    assert_eq!(host_names(cx, &workspace).len(), before + 1);
+    assert!(cx.update(|cx| workspace.read(cx).tab_ids().is_empty()));
+}
+
+/// 编辑一台主机开它自己的标签，写「编辑 主机名」；和新建的标签互不顶替。
+#[gpui_kit::test]
+fn editing_a_host_opens_its_own_tab(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_with_seed(cx);
+
+    dispatch(cx, handle, NewHost);
+    dispatch(cx, handle, EditHost(HostId(1)));
+    dispatch(cx, handle, EditHost(HostId(1)));
+    assert_eq!(tab_labels(cx, &workspace), [TabId(1), TabId(2)]);
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(
+            window.find(("tab", 2usize)).label().map(str::trim),
+            Some("编辑 web-01")
+        );
+        assert_eq!(
+            window.find("host-dialog-title").label(),
+            Some("编辑 web-01")
+        );
+    });
 }

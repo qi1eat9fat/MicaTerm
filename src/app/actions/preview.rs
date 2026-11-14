@@ -4,20 +4,20 @@ use gpui_kit::Action;
 
 /// 放大一档。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
-#[action(namespace = qishell, no_json)]
+#[action(namespace = micaterm, no_json)]
 pub struct ZoomPreviewIn;
 
 /// 缩小一档。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
-#[action(namespace = qishell, no_json)]
+#[action(namespace = micaterm, no_json)]
 pub struct ZoomPreviewOut;
 
 /// 适合窗口。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
-#[action(namespace = qishell, no_json)]
+#[action(namespace = micaterm, no_json)]
 pub struct FitPreview;
 
 /// 原图（100%）。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
-#[action(namespace = qishell, no_json)]
+#[action(namespace = micaterm, no_json)]
 pub struct ActualSizePreview;

@@ -7,10 +7,10 @@
 
 use std::time::Duration;
 
-use qishell::app::ConnectHost;
-use qishell::backend::{AuthenticationRequest, ConnectionPromptField, ConnectionPromptKind};
-use qishell_hosts::HostId;
-use qishell_terminal::TerminalLifecycle;
+use micaterm::app::ConnectHost;
+use micaterm::backend::{AuthenticationRequest, ConnectionPromptField, ConnectionPromptKind};
+use micaterm_hosts::HostId;
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -182,7 +182,7 @@ fn after_unlocking_the_host_key_question_takes_the_keyboard(cx: &mut TestAppCont
     assert!(terminal_focused(cx, handle, 1));
 }
 
-/// 几张卡片一起等解锁（分屏、另一个标签）：解开后它们的问题排着队，一个答完下一个接着拿焦点，
+/// 几张卡片一起等解锁（几个标签）：解开后它们的问题排着队，一个答完下一个接着拿焦点，
 /// 都能直接打字回答。
 #[gpui_kit::test]
 fn several_waiting_cards_queue_their_questions_and_each_takes_the_keyboard(
@@ -192,9 +192,9 @@ fn several_waiting_cards_queue_their_questions_and_each_takes_the_keyboard(
     let (handle, workspace, remote) = open_with_vault(cx, &vault);
 
     dispatch(cx, handle, ConnectHost(HostId(1)));
-    dispatch(cx, handle, SplitRight);
     dispatch(cx, handle, ConnectHost(HostId(1)));
-    cx.update(|cx| assert_eq!(workspace.read(cx).tab_ids().len(), 2));
+    dispatch(cx, handle, ConnectHost(HostId(1)));
+    cx.update(|cx| assert_eq!(workspace.read(cx).tab_ids().len(), 3));
     unlock(cx, handle);
     assert!(!visible(cx, handle, "vault-unlock"));
 
@@ -308,6 +308,6 @@ fn without_a_question_a_new_card_takes_focus_as_usual(cx: &mut TestAppContext) {
 
     dispatch(cx, handle, ConnectHost(HostId(2)));
     assert!(terminal_focused(cx, handle, 2));
-    dispatch(cx, handle, SplitRight);
+    split_again(cx, handle, SplitRight);
     assert!(terminal_focused(cx, handle, 3));
 }

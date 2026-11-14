@@ -6,6 +6,7 @@ use std::rc::Rc;
 use gpui_kit::*;
 
 use crate::ui::DialogLayer;
+use crate::ui::modal::modal_dialog;
 
 /// 对话框的回答：`true` 是做成了（设好了、解开了、重置了），`false` 是取消（包括 Esc）。
 type Answer = Box<dyn FnOnce(bool, &mut Window, &mut App)>;
@@ -50,10 +51,9 @@ pub(super) fn close_and_reply(reply: &Reply, done: bool, window: &mut Window, cx
     reply.send(done, window, cx);
 }
 
-/// 叠一个居中的小对话框：不点遮罩关闭；Esc 关掉时回答「取消」。焦点给 `focus`。
+/// 叠一个弹窗（26 号的共用外框）：不点遮罩关闭；Esc 关掉时回答「取消」。焦点给 `focus`。
 pub(super) fn open_small_dialog<V: Render>(
     view: Entity<V>,
-    width: Pixels,
     reply: Reply,
     focus: FocusHandle,
     window: &mut Window,
@@ -62,12 +62,7 @@ pub(super) fn open_small_dialog<V: Render>(
     let layer = reply.layer.clone();
     layer.open_dismissable(
         move |dialog, _, _| {
-            dialog
-                .w(width)
-                .p_0()
-                .rounded(px(14.))
-                .close_button(false)
-                .overlay_closable(false)
+            modal_dialog(dialog)
                 // 回车由框里的输入框自己处理（解锁、设主密码在后台算完才关）：gpui-component 的
                 // `Confirm` 不关框，否则还没算完就当成取消关掉了（工单 33 发现）。
                 .on_ok(|_, _, _| false)

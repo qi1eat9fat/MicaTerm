@@ -10,12 +10,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use qishell_hosts::HostId;
-use qishell_ssh::{
+use micaterm_hosts::HostId;
+use micaterm_ssh::{
     ConnectionPromptKind, ConnectionPromptReply, HostLogin, Latency, ProbedHost,
     SharedSecretSource, SshConnector,
 };
-use qishell_terminal::SharedTerminalTransportFactory;
+use micaterm_terminal::SharedTerminalTransportFactory;
 
 use super::pool::ConnectionPool;
 use super::transport::RemoteTransportFactory;

@@ -1,21 +1,22 @@
-//! 主机对话框的「常规」组：名称（留空时用地址）、地址、端口。
+//! 主机表单的第一组：名称（留空时用地址）；地址和端口并排（26 号「新建主机」）。
 
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 
-use qishell_hosts::HostDraft;
+use micaterm_hosts::HostDraft;
 
 use super::HostDialog;
 use crate::i18n::t;
 use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, text_input};
+use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, form_pair};
+use crate::ui::modal::{ModalInputKind, modal_input};
 
 pub const FIELD_NAME: &str = "host-name";
 pub const FIELD_ADDRESS: &str = "host-address";
 pub const FIELD_PORT: &str = "host-port";
 
-/// 端口输入框的宽度（原型 `.in.narrow`）。
-const PORT_WIDTH: Pixels = px(80.);
+/// 端口那一栏的宽度（26 号 `.mf-two .mf:has(.port)`）。
+pub(super) const PORT_WIDTH: Pixels = px(96.);
 
 pub(super) struct GeneralSection {
     pub(super) name: Entity<InputState>,
@@ -42,7 +43,7 @@ impl GeneralSection {
             }),
             port: cx.new(|cx| {
                 InputState::new(window, cx)
-                    .placeholder(qishell_hosts::SSH_PORT.to_string())
+                    .placeholder(micaterm_hosts::SSH_PORT.to_string())
                     .default_value(draft.port.to_string())
             }),
         }
@@ -83,55 +84,39 @@ impl GeneralSection {
         }
     }
 
-    pub(super) fn render(&self, errors: &FieldErrors, tokens: &Tokens) -> AnyElement {
-        let address_error = errors.get(FIELD_ADDRESS).is_some();
-        let port_error = errors.get(FIELD_PORT).is_some();
-        form_group(
-            t!("host.dialog.general"),
-            [
-                form_field(
-                    Some(t!("host.dialog.name")),
-                    text_input(
-                        FIELD_NAME,
-                        t!("host.dialog.name"),
-                        &self.name,
-                        false,
-                        tokens,
-                    ),
-                    Vec::new(),
+    pub(super) fn render(
+        &self,
+        errors: &FieldErrors,
+        tokens: &Tokens,
+        window: &Window,
+        cx: &App,
+    ) -> AnyElement {
+        let invalid = |field| errors.get(field).is_some();
+        let field = |field: &'static str, label: SharedString, input: &Entity<InputState>| {
+            form_field(
+                Some(label.clone()),
+                modal_input(
+                    field,
+                    label,
+                    input,
+                    ModalInputKind::Text,
+                    invalid(field),
                     tokens,
+                    window,
+                    cx,
                 ),
-                form_field(
-                    Some(t!("host.dialog.address")),
-                    div()
-                        .flex()
-                        .gap(px(6.))
-                        .child(div().flex_1().min_w_0().child(text_input(
-                            FIELD_ADDRESS,
-                            t!("host.dialog.address"),
-                            &self.address,
-                            address_error,
-                            tokens,
-                        )))
-                        .child(div().flex_none().w(PORT_WIDTH).child(text_input(
-                            FIELD_PORT,
-                            t!("host.dialog.port"),
-                            &self.port,
-                            port_error,
-                            tokens,
-                        ))),
-                    [
-                        FieldNote::error_of(FIELD_ADDRESS, errors),
-                        FieldNote::error_of(FIELD_PORT, errors),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect(),
-                    tokens,
-                ),
-            ],
-            tokens,
-        )
+                FieldNote::error_of(field, errors).into_iter().collect(),
+                tokens,
+            )
+        };
+        form_group([
+            field(FIELD_NAME, t!("host.dialog.name"), &self.name),
+            form_pair(
+                field(FIELD_ADDRESS, t!("host.dialog.address"), &self.address),
+                field(FIELD_PORT, t!("host.dialog.port"), &self.port),
+                Some(PORT_WIDTH),
+            ),
+        ])
     }
 }
 

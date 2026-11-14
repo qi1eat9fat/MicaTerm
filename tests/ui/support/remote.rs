@@ -8,12 +8,12 @@ use std::sync::{Arc, Mutex};
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
-use qishell::backend::{
+use micaterm::backend::{
     ConnectionId, ConnectionPromptKind, ConnectionPromptReply, ConnectionTester, LoginTest,
     PromptId, RemoteEvent, RemotePrompt, RemoteTarget, RemoteTerminalId, RemoteTerminals,
     TrustAsker,
 };
-use qishell_terminal::SharedTerminalTransportFactory;
+use micaterm_terminal::SharedTerminalTransportFactory;
 
 use super::terminal::FakeTerminalFactory;
 

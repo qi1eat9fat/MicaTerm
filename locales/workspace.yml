@@ -9,65 +9,37 @@ workspace.window.close:
   zh-CN: 关闭
 workspace.title_bar.new_local_terminal:
   zh-CN: 新建本地终端
-workspace.title_bar.quick_connect:
-  zh-CN: 快速连接
+workspace.title_bar.to_dark:
+  zh-CN: 切换到深色
+workspace.title_bar.to_light:
+  zh-CN: 切换到浅色
+workspace.title_bar.settings:
+  zh-CN: 设置
 workspace.host_sidebar.title:
   zh-CN: 主机
-workspace.host_sidebar.collapse:
-  zh-CN: 收起主机栏
 workspace.host_sidebar.expand:
   zh-CN: 展开主机栏
 workspace.host_sidebar.new_host:
   zh-CN: 新建主机
 workspace.host_sidebar.empty:
   zh-CN: 还没有主机
-workspace.host_sidebar.empty_hint:
-  zh-CN: 点上面的 + 新建一台
-workspace.host_sidebar.settings:
-  zh-CN: 设置
 workspace.right_sidebar.files:
   zh-CN: 文件
 workspace.right_sidebar.snippets:
-  zh-CN: 命令片段
+  zh-CN: 片段
 workspace.right_sidebar.credentials:
   zh-CN: 凭据
-workspace.start.title:
-  zh-CN: 欢迎使用 QiShell
-workspace.start.hint:
-  zh-CN: 先新建一台主机，或者直接开一个本地终端。
-workspace.start.new_local_terminal:
-  zh-CN: 新建本地终端
-workspace.start.new_local_terminal_hint:
-  zh-CN: 在本机打开 shell
-workspace.start.new_host:
-  zh-CN: 新建主机
-workspace.start.new_host_hint:
-  zh-CN: 保存一台 SSH 主机
-workspace.start.quick_connect:
-  zh-CN: 快速连接
 # 开始卡片的最近连接（工单 18）
-workspace.start.recent:
-  zh-CN: 最近连接
-workspace.start.recent_empty:
-  zh-CN: 连过的主机会列在这里，双击或回车再连
 # 最近连接每行右边的连接时间（原型「10 分钟前」「今天 09:12」「昨天」「3 天前」）
-workspace.start.connected_just_now:
-  zh-CN: 刚刚
-workspace.start.connected_minutes_ago:
-  zh-CN: "%{count} 分钟前"
-workspace.start.connected_today:
-  zh-CN: "今天 %{time}"
-workspace.start.connected_yesterday:
-  zh-CN: 昨天
-workspace.start.connected_days_ago:
-  zh-CN: "%{count} 天前"
-workspace.start.connected_on:
-  zh-CN: "%{month} 月 %{day} 日"
-workspace.start.connected_on_year:
-  zh-CN: "%{year} 年 %{month} 月 %{day} 日"
 
 # 终端的通知和响铃（工单 03）：标题以卡片名称开头
 workspace.notice.titled:
   zh-CN: "%{card}：%{title}"
 workspace.notice.bell:
   zh-CN: "%{card}：响铃"
+workspace.new_tab.title:
+  zh-CN: 新标签页
+workspace.new_tab.new_host:
+  zh-CN: 新建主机
+workspace.new_tab.local_terminal:
+  zh-CN: 本地终端

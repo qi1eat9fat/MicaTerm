@@ -1,10 +1,10 @@
 _version: 2
 snippets.panel.title:
-  zh-CN: 命令片段
+  zh-CN: 片段
 snippets.panel.target:
   zh-CN: → %{card}
 snippets.panel.new:
-  zh-CN: 新建命令片段
+  zh-CN: 新建片段
 snippets.panel.search:
   zh-CN: 按名称或命令搜索
 snippets.panel.empty:
@@ -18,9 +18,9 @@ snippets.panel.no_terminal:
 snippets.panel.no_terminal_hint:
   zh-CN: 切到终端标签后，点片段会发到焦点卡片
 snippets.panel.runs_on_click:
-  zh-CN: 点击就执行
+  zh-CN: 直接执行（单击这一行也会执行）
 snippets.panel.types_on_click:
-  zh-CN: 点击只输入
+  zh-CN: 直接执行（单击这一行只输入）
 snippets.menu.enter:
   zh-CN: 输入到终端
 snippets.menu.copy:

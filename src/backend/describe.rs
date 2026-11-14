@@ -9,7 +9,7 @@
 
 use std::error::Error;
 
-use qishell_ssh::{
+use micaterm_ssh::{
     AgentProblem, AgentUnreachable, AuthError, AuthenticationPrompt, AuthenticationRequest,
     ChannelError, ConnectError, ConnectionPromptField, ForwardProblem, HostKeyChangedPrompt,
     KnownHostsError, Latency, MissingCredential, PasswordWanted, PrivateKeySource, ProxyError,
@@ -59,24 +59,15 @@ pub fn latency_label(latency: Latency) -> String {
     }
 }
 
-/// 第一次见到的主机密钥：确认框里说「第一次连接 地址:端口」那一句（跳板主机的要说是哪一台）。
+/// 第一次见到的主机密钥：确认框里的那一句（跳板主机的要说是哪一台）。地址和端口写在弹窗头部，
+/// 这句不再重复（26 号「连接提示」）。
 pub fn unknown_host_lead(prompt: &UnknownHostPrompt) -> String {
-    let lead = t!(
-        "ssh.unknown_host.lead",
-        host = prompt.host(),
-        port = prompt.port()
-    );
-    with_jump_host(lead.into(), prompt.jump_host())
+    with_jump_host(t!("ssh.unknown_host.lead").into(), prompt.jump_host())
 }
 
-/// 主机密钥变了：告警框里的那一句（跳板主机的要说是哪一台）。
+/// 主机密钥变了：告警框里的那一句（跳板主机的要说是哪一台）。地址和端口写在弹窗头部。
 pub fn host_key_changed_lead(prompt: &HostKeyChangedPrompt) -> String {
-    let lead = t!(
-        "ssh.host_key_changed.lead",
-        host = prompt.host(),
-        port = prompt.port()
-    );
-    with_jump_host(lead.into(), prompt.jump_host())
+    with_jump_host(t!("ssh.host_key_changed.lead").into(), prompt.jump_host())
 }
 
 /// 认证框的标题：服务器自己的问题用服务器给的名字，没有就叫「输入验证码」。
@@ -445,7 +436,7 @@ pub fn describe_channel_error(error: &ChannelError) -> String {
     .into()
 }
 
-/// 服务器没有一个 `kind` 类的算法和 QiShell 的一样，它有的是 `theirs`。
+/// 服务器没有一个 `kind` 类的算法和 MicaTerm 的一样，它有的是 `theirs`。
 fn no_common_algorithm(kind: &russh::AlgorithmKind, theirs: &str) -> String {
     match kind {
         russh::AlgorithmKind::Kex => t!("ssh.error.no_common.kex", theirs = theirs),
@@ -478,7 +469,7 @@ mod tests {
     use std::time::Duration;
 
     use anyhow::anyhow;
-    use qishell_ssh::{ConnectionPromptKind, SavedKey, find_cause, wrap};
+    use micaterm_ssh::{ConnectionPromptKind, SavedKey, find_cause, wrap};
 
     use super::*;
 
@@ -508,13 +499,10 @@ mod tests {
             ConnectionPromptKind::UnknownHost(prompt) => unknown_host_lead(&prompt),
             _ => unreachable!("an unknown host stays one"),
         };
-        assert_eq!(
-            lead(None),
-            "第一次连接 10.0.0.5:22，请核对服务器的主机密钥："
-        );
+        assert_eq!(lead(None), "第一次连接这台主机，请核对它的主机密钥：");
         assert_eq!(
             lead(Some("堡垒机")),
-            "跳板主机「堡垒机」：第一次连接 10.0.0.5:22，请核对服务器的主机密钥："
+            "跳板主机「堡垒机」：第一次连接这台主机，请核对它的主机密钥："
         );
     }
 

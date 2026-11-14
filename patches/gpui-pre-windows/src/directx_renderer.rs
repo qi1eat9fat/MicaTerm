@@ -1494,7 +1494,7 @@ fn create_blend_state(device: &ID3D11Device) -> Result<ID3D11BlendState> {
     desc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    // QiShell 补丁（工单 30）：上游 0.3.2 这里是 `D3D11_BLEND_ONE`，alpha 相加，
+    // MicaTerm 补丁（工单 30）：上游 0.3.2 这里是 `D3D11_BLEND_ONE`，alpha 相加，
     // 半透明窗口底（Mica）上画的抗锯齿边缘 alpha 偏高，DWM 透出的 Mica 变少，浅色下成了深边。
     // 改成标准的 source-over（与 path 的混合状态一致），同 zed-industries/zed#65571（e18de65）。
     desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
@@ -1558,7 +1558,7 @@ fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11Ble
     desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    // QiShell 补丁（工单 30）：上游 0.3.2 这里是 `D3D11_BLEND_ONE`。path 精灵是预乘颜色，
+    // MicaTerm 补丁（工单 30）：上游 0.3.2 这里是 `D3D11_BLEND_ONE`。path 精灵是预乘颜色，
     // alpha 也该按 source-over 合成；同 zed-industries/zed#65571（e18de65）里这一处的改法。
     desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;

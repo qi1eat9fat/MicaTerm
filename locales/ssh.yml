@@ -90,7 +90,7 @@ ssh.exec.send_failed:
 ssh.exec.timeout:
   zh-CN: 命令超时
 ssh.host_key_changed.lead:
-  zh-CN: "服务器 %{host}:%{port} 的密钥和记下的不一致。可能是重装了系统、换了密钥，也可能是有人冒充。"
+  zh-CN: 服务器的密钥和记下的不一致。可能是重装了系统、换了密钥，也可能是有人冒充。
 ssh.jump.deleted:
   zh-CN: 第 %{number} 台跳板主机已被删除，请编辑这台主机的连接方式
 ssh.jump.failed:
@@ -234,4 +234,4 @@ ssh.test.host_key_declined:
 ssh.test.unresolved:
   zh-CN: 无法解析主机 %{host}
 ssh.unknown_host.lead:
-  zh-CN: "第一次连接 %{host}:%{port}，请核对服务器的主机密钥："
+  zh-CN: 第一次连接这台主机，请核对它的主机密钥：

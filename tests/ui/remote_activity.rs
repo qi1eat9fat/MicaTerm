@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
-use qishell::app::ConnectHost;
-use qishell::backend::{ProbedHost, RemoteEvent, RemoteTerminalId};
-use qishell::programs::program_of;
-use qishell_terminal::TerminalLifecycle;
+use micaterm::app::ConnectHost;
+use micaterm::backend::{ProbedHost, RemoteEvent, RemoteTerminalId};
+use micaterm::programs::program_of;
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -121,8 +121,8 @@ fn a_command_the_shell_integration_reports_becomes_the_cards_tile(cx: &mut TestA
     let htop = program_of("htop").name;
     assert!(wait_until(cx, handle, |cx| tile(cx, &workspace) == Some(htop.clone())));
     assert_eq!(
-        cx.update(|cx| workspace.read(cx).tab_tiles(TabId(1), cx)),
-        std::slice::from_ref(&htop)
+        cx.update(|cx| workspace.read(cx).tab_tile(TabId(1), cx)),
+        Some(htop.clone())
     );
 
     // 回到提示符：换回系统徽章。
@@ -209,9 +209,7 @@ fn with_the_probe_off_and_never_probed_a_bash_title_still_shows_the_folder(
 }
 
 #[gpui_kit::test]
-fn without_reports_the_folder_comes_from_the_title_which_the_header_tip_shows_in_full(
-    cx: &mut TestAppContext,
-) {
+fn without_reports_the_folder_comes_from_the_title(cx: &mut TestAppContext) {
     let (handle, workspace, remote) = open_remote(cx);
     connect(cx, handle, &workspace);
     probe(&remote, cx);
@@ -241,11 +239,11 @@ fn without_reports_the_folder_comes_from_the_title_which_the_header_tip_shows_in
             Some("root@web-01: ~/src/app".into())
         )
     );
-    // 头部固定是「主机名 + 目录」。
-    let header = in_frame(cx, handle, |window, _| {
+    // 卡片的名称固定是「主机名 + 目录」（卡片没有头部，它是无障碍名称和标签的名称）。
+    let name = in_frame(cx, handle, |window, _| {
         window
-            .try_find(("card-header", 1usize))
+            .try_find(("card", 1usize))
             .and_then(|element| element.label().map(str::to_owned))
     });
-    assert_eq!(header.as_deref(), Some("web-01 ~/src/app"));
+    assert_eq!(name.as_deref(), Some("web-01 ~/src/app"));
 }

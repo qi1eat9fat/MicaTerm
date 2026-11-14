@@ -1,4 +1,4 @@
-//! 多语言：QiShell 的界面文案，v1 只有简体中文，但文案全部走翻译表。
+//! 多语言：MicaTerm 的界面文案，v1 只有简体中文，但文案全部走翻译表。
 //!
 //! 文案放在 `locales/<模块>.yml`，一个模块一个文件（`workspace.yml`、`settings.yml`……），
 //! 每个键下面写 `zh-CN:`。代码里用 `t!("键")` 取文案，返回 `SharedString`。

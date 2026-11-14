@@ -1,5 +1,5 @@
 // 参考 since2006/shell-rs @ b2a307a: src/terminal/terminal_panel.rs（远程面板的连接状态、
-// `remote_menu_items`、主机快照）重写：外壳是 QiShell 的卡片，连接的事件由窗口壳转来。
+// `remote_menu_items`、主机快照）重写：外壳是 MicaTerm 的卡片，连接的事件由窗口壳转来。
 
 //! 远程卡片的那一部分：连到哪台主机（打开时的快照，编辑或删除主机不影响已开的卡片）、
 //! 连接的状态、延迟、探测出的系统和 `uname -n`、远程 shell 报告的目录。
@@ -13,9 +13,9 @@
 //!   图块用 `badge`。SFTP 标签和分屏回到原目录用 `RemoteActivity::start_directory`。
 
 use gpui_kit::SharedString;
-use qishell_hosts::{Host, HostOs, mark_color};
-use qishell_ssh::{JumpLogin, LoginRoute};
-use qishell_terminal::{
+use micaterm_hosts::{Host, HostOs, mark_color};
+use micaterm_ssh::{JumpLogin, LoginRoute};
+use micaterm_terminal::{
     ReportedDirectory, SharedTerminalTransportFactory, ShellActivity, ShellCommand,
     TerminalLifecycle,
 };
@@ -54,7 +54,7 @@ pub struct RemoteActivity {
     pub directory: Option<String>,
     /// 能用作 SFTP 标签和分屏初始目录的：报告的；标题里的只有 `/` 或 `~/` 开头才算。
     pub start_directory: Option<String>,
-    /// 现在的窗口标题：悬停卡片头部时显示完整的。
+    /// 现在的窗口标题。
     pub title: Option<String>,
 }
 
@@ -318,14 +318,6 @@ impl RemoteCard {
         self.latency.map(|latency| latency_label(latency).into())
     }
 
-    /// 状态栏上的系统：还没探测出时写「未探测」。
-    pub(super) fn os_label(&self) -> SharedString {
-        match self.os {
-            Some(os) => os.label().into(),
-            None => t!("card.remote.unknown_os"),
-        }
-    }
-
     /// 拿不到程序名时卡片和标签上的图块：主机的系统徽章；还没探测出系统时是名称的首字，
     /// 底色按地址取（和主机栏的徽章一样）。
     pub(super) fn badge(&self) -> Program {
@@ -400,7 +392,7 @@ pub fn host_badge(host: &Host, os: Option<HostOs>) -> Program {
 
 #[cfg(test)]
 mod tests {
-    use qishell_hosts::{AuthKind, HostDraft, HostId};
+    use micaterm_hosts::{AuthKind, HostDraft, HostId};
 
     use super::*;
     use crate::backend::HostLogin;
@@ -415,7 +407,7 @@ mod tests {
             "10.0.1.21",
             22,
             "ubuntu",
-            qishell_ssh::LoginMethod::Password,
+            micaterm_ssh::LoginMethod::Password,
         );
         RemoteCard::new(host, RemoteTarget::new(3, login))
     }
@@ -437,7 +429,7 @@ mod tests {
         assert_eq!(os, Some(HostOs::Ubuntu));
         assert_eq!(card.badge().name, "Ubuntu");
         assert_eq!(card.badge().letter, None);
-        assert_eq!(card.os_label().as_ref(), "Ubuntu");
+        assert_eq!(card.os(), Some(HostOs::Ubuntu));
     }
 
     #[test]
@@ -567,7 +559,7 @@ mod tests {
 
     #[test]
     fn the_connecting_line_names_the_jump_hosts_or_the_proxy() {
-        use qishell_ssh::{ProxyKind, ProxyLogin};
+        use micaterm_ssh::{ProxyKind, ProxyLogin};
 
         let mut card = card(None);
         assert_eq!(
@@ -580,7 +572,7 @@ mod tests {
                 "10.0.0.1",
                 22,
                 "root",
-                qishell_ssh::LoginMethod::Agent,
+                micaterm_ssh::LoginMethod::Agent,
             )),
         };
         card.target.login.route = LoginRoute::Jump(vec![

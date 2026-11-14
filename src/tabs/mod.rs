@@ -1,6 +1,7 @@
 //! 标签：标签列表的纯逻辑（`model`）、终端标签（`TerminalTab`）和标签轨道（`tab_rail`）。
 //!
 //! 终端标签里是一棵卡片分屏树（工单 05，树和它的渲染在 `crate::split`）。
+//! 分屏时先在树里放一张占位的新卡片（`CardPicker`，2026-11-14 分屏重做），选好了再换成真卡片。
 //! 工单 04 补全了标签的切换、关闭（`model`）和标签轨道（`TabRail`）。
 
 mod model;
@@ -9,7 +10,7 @@ mod tab_rail;
 
 pub use model::{TabDrop, TabId, TabList};
 pub use tab::Tab;
-pub use tab_rail::{TabRail, TabSnapshot, build_tab_menu};
+pub use tab_rail::{TabLeading, TabRail, TabSnapshot, build_tab_menu};
 
 use std::collections::HashMap;
 
@@ -18,10 +19,9 @@ use gpui_kit::{
     Window, div,
 };
 
-use qishell_terminal::TerminalView;
+use micaterm_terminal::TerminalView;
 
-use crate::card::{CardId, MAX_STACKED_TILES, StatusDot, TerminalCard};
-use crate::programs::Program;
+use crate::card::{CardId, CardPicker, StatusDot, TerminalCard};
 use crate::split::{Axis, Closed, Direction, DividerMirrors, NodeId, SplitTree};
 
 /// 一个终端标签：一棵卡片分屏树。
@@ -32,6 +32,17 @@ pub struct TerminalTab {
     cards: HashMap<CardId, (Entity<TerminalCard>, Vec<Subscription>)>,
     /// 每条分隔线在 gpui 里的镜像（resizable 组件的状态）。
     dividers: DividerMirrors,
+    /// 刚分出来、还在选开什么的新卡片：它在树里占着位置，但不是卡片（不在 `cards` 里）；
+    /// 树的焦点留在分屏的那张卡片上，标签名、终端动作都还跟着它。
+    picker: Option<Box<PickerSlot>>,
+    /// 新卡片选好了、真卡片还没放进来时，它那一格：下一次 `split` 放进这一格（分隔线、比例不动）。
+    reserved: Option<CardId>,
+}
+
+/// 占位的新卡片和窗口壳对它的订阅。
+pub struct PickerSlot {
+    pub view: Entity<CardPicker>,
+    pub _subscription: Subscription,
 }
 
 impl TerminalTab {
@@ -42,6 +53,8 @@ impl TerminalTab {
             tree: SplitTree::new(id),
             cards: HashMap::from([(id, (card, subscriptions))]),
             dividers: DividerMirrors::default(),
+            picker: None,
+            reserved: None,
         }
     }
 
@@ -70,17 +83,6 @@ impl TerminalTab {
         self.cards.contains_key(&card) && self.tree.zoomed().is_none_or(|zoomed| zoomed == card)
     }
 
-    /// 标签上叠放的图块：焦点卡片的在最前面，其余按分屏树的顺序，最多 `MAX_STACKED_TILES` 块。
-    pub fn tiles(&self, cx: &App) -> Vec<Program> {
-        let focused = self.tree.focused();
-        std::iter::once(focused)
-            .chain(self.tree.cards().into_iter().filter(|id| *id != focused))
-            .filter_map(|id| self.card(id))
-            .take(MAX_STACKED_TILES)
-            .map(|card| card.read(cx).tile_program())
-            .collect()
-    }
-
     /// 标签上的状态点：有卡片要注意是橙点，否则有卡片在输出是绿点。
     pub fn dot(&self, cx: &App) -> StatusDot {
         StatusDot::of_tab(self.cards().map(|card| card.read(cx).status_dot(cx)))
@@ -96,20 +98,96 @@ impl TerminalTab {
         &self.tree
     }
 
-    /// 把焦点卡片分成两半，`card` 放在右边或下边，焦点给它。返回新分隔线的 id。
+    /// 在焦点卡片的右边或下边放一张占位的新卡片 `picker`（分屏重做）。已经有一张了先撤掉它。
+    /// 树的焦点留在焦点卡片上；搜索框的焦点由调用方给。
+    pub fn open_picker(
+        &mut self,
+        axis: Axis,
+        picker: Entity<CardPicker>,
+        subscription: Subscription,
+        cx: &mut App,
+    ) {
+        self.dismiss_picker(cx);
+        let source = self.tree.focused();
+        let id = picker.read(cx).id();
+        self.tree.split(axis, id);
+        self.tree.focus(source);
+        self.picker = Some(Box::new(PickerSlot {
+            view: picker,
+            _subscription: subscription,
+        }));
+        self.dividers.sync(&self.tree, cx);
+        self.sync_cards(cx);
+    }
+
+    /// 占位的新卡片（开着时）。
+    pub fn picker(&self) -> Option<&Entity<CardPicker>> {
+        self.picker.as_ref().map(|slot| &slot.view)
+    }
+
+    /// 撤掉占位的新卡片 `id`，交回它（它不是现在这张就是 `None`）。焦点卡片不变。
+    pub fn take_picker(&mut self, id: CardId, cx: &mut App) -> Option<Box<PickerSlot>> {
+        let current = self.picker.as_ref()?.view.read(cx).id();
+        if current != id {
+            return None;
+        }
+        let slot = self.picker.take()?;
+        self.tree.close(id);
+        self.dividers.sync(&self.tree, cx);
+        self.sync_cards(cx);
+        Some(slot)
+    }
+
+    /// 新卡片 `id` 选好了：交回它，它那一格留给接下来 `split` 进来的真卡片。它不是现在这张就是 `None`。
+    pub fn choose_picker(&mut self, id: CardId, cx: &mut App) -> Option<Box<PickerSlot>> {
+        let current = self.picker.as_ref()?.view.read(cx).id();
+        if current != id {
+            return None;
+        }
+        self.reserved = Some(id);
+        self.picker.take()
+    }
+
+    /// 留着的那一格没等到真卡片（主机刚被删了）：收回它，返回 `true`。
+    pub fn release_reserved(&mut self, cx: &mut App) -> bool {
+        let Some(id) = self.reserved.take() else {
+            return false;
+        };
+        self.tree.close(id);
+        self.dividers.sync(&self.tree, cx);
+        self.sync_cards(cx);
+        true
+    }
+
+    /// 改树的结构、动焦点之前先撤掉占位的新卡片：它不是卡片，不能成为焦点卡片。
+    fn dismiss_picker(&mut self, cx: &mut App) {
+        if let Some(id) = self.picker.as_ref().map(|slot| slot.view.read(cx).id()) {
+            self.take_picker(id, cx);
+        }
+    }
+
+    /// 把焦点卡片分成两半，`card` 放在右边或下边，焦点给它。新卡片刚选好时（`choose_picker`），
+    /// 直接放进它留着的那一格，分隔线和比例不动。
     pub fn split(
         &mut self,
         axis: Axis,
         card: Entity<TerminalCard>,
         subscriptions: Vec<Subscription>,
         cx: &mut App,
-    ) -> NodeId {
+    ) {
         let id = card.read(cx).id();
         self.cards.insert(id, (card, subscriptions));
-        let node = self.tree.split(axis, id);
+        match self.reserved.take() {
+            Some(leaf) => {
+                self.tree.replace(leaf, id);
+            }
+            None => {
+                self.dismiss_picker(cx);
+                self.tree.split(axis, id);
+            }
+        }
         self.dividers.sync(&self.tree, cx);
         self.sync_cards(cx);
-        node
     }
 
     /// 从树里摘掉 `card`，交回它的实体（由调用方关掉它的 shell）。
@@ -119,6 +197,7 @@ impl TerminalTab {
         card: CardId,
         cx: &mut App,
     ) -> (Closed, Option<Entity<TerminalCard>>) {
+        self.dismiss_picker(cx);
         let closed = self.tree.close(card);
         if closed != Closed::Merged {
             return (closed, None);
@@ -144,6 +223,7 @@ impl TerminalTab {
     /// 让 `card` 看得见并成为焦点卡片（点了它的通知）：放大的是别的卡片时先还原。
     /// 不在这个标签里返回 `false`。
     pub fn reveal_card(&mut self, card: CardId, cx: &mut App) -> bool {
+        self.dismiss_picker(cx);
         let revealed = self.tree.reveal(card);
         if revealed {
             self.sync_cards(cx);
@@ -157,6 +237,7 @@ impl TerminalTab {
         direction: Direction,
         cx: &mut App,
     ) -> Option<Entity<TerminalCard>> {
+        self.dismiss_picker(cx);
         let card = self.tree.move_focus(direction)?;
         self.sync_cards(cx);
         self.card(card).cloned()
@@ -164,6 +245,7 @@ impl TerminalTab {
 
     /// 放大焦点卡片，或者还原。只有一张卡片时什么都不做，返回 `false`。
     pub fn toggle_zoom(&mut self, cx: &mut App) -> bool {
+        self.dismiss_picker(cx);
         let toggled = self.tree.toggle_zoom();
         if toggled {
             self.sync_cards(cx);
@@ -198,21 +280,27 @@ impl TerminalTab {
         }
     }
 
-    /// 告诉每张卡片它是不是焦点卡片、是不是放大着：描边、按钮、不透明度跟着变。
+    /// 告诉每张卡片它是不是焦点卡片、是不是放大着、是不是标签里唯一的一张：
+    /// 顶行的还原、关闭按钮，右键菜单的「移到新标签」跟着变。
     fn sync_cards(&self, cx: &mut App) {
         let focused = self.tree.focused();
         let zoomed = self.tree.zoomed();
+        let alone = self.cards.len() == 1;
         for (id, (card, _)) in &self.cards {
             let (focused, zoomed) = (*id == focused, zoomed == Some(*id));
-            card.update(cx, |card, cx| card.set_place(focused, zoomed, cx));
+            card.update(cx, |card, cx| card.set_place(focused, zoomed, alone, cx));
         }
     }
 
     /// 标签区里画的内容：照着分屏树嵌套 resizable 组件。
     pub fn content(&self) -> AnyElement {
+        let picker = self.picker.as_ref().map(|slot| &slot.view);
         let card = |id: CardId| match self.card(id) {
             Some(card) => card.clone().into_any_element(),
-            None => div().into_any_element(),
+            None => match picker {
+                Some(picker) => picker.clone().into_any_element(),
+                None => div().into_any_element(),
+            },
         };
         div()
             .flex()

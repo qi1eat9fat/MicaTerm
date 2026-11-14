@@ -9,7 +9,7 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use zeroize::Zeroizing;
 
-use qishell_hosts::SecretRef;
+use micaterm_hosts::SecretRef;
 
 use super::VaultStore;
 use crate::ui::form::typed_secret;

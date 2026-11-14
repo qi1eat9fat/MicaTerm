@@ -1,4 +1,4 @@
-//! 状态点：卡片头部和标签上，名称、目录后面的那个点。
+//! 状态点：标签上名称、目录后面的那个点。
 //!
 //! - 绿点（有光晕，不做动画）：前台是 shell 以外的程序，且 1.5 秒内有输出。在提示符下打字的回显不算：
 //!   那时前台是 shell 自己。
@@ -68,8 +68,8 @@ impl StatusDot {
 pub fn render_status_dot(id: ElementId, dot: StatusDot, tokens: &Tokens) -> Option<AnyElement> {
     let (size, color, label, halo) = match dot {
         StatusDot::None => return None,
-        StatusDot::Busy => (px(6.), tokens.busy, t!("card.dot.busy"), true),
-        StatusDot::Attention => (px(7.), tokens.attention, t!("card.dot.attention"), false),
+        StatusDot::Busy => (px(6.), tokens.ok, t!("card.dot.busy"), true),
+        StatusDot::Attention => (px(7.), tokens.warn, t!("card.dot.attention"), false),
     };
     Some(
         div()

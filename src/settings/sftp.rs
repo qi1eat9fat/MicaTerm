@@ -1,52 +1,36 @@
 // 参考 since2006/shell-rs @ b2a307a: src/settings/settings_panel.rs 的 SFTP 一节
 // 改造：分组照原型「设置 › SFTP」；加「本地默认打开目录」。
-//! 设置 › SFTP（工单 25，原型「设置 › SFTP」）：传输一组（最大同时传输数量），文件列表一组
-//! （本地默认打开目录、图标风格、显示隐藏文件）。
+//! 设置 › SFTP（26 号「设置 › SFTP」）：传输（最大同时传输数量），文件列表（本地默认打开目录、
+//! 显示隐藏文件 本机 / 远程）。没有「图标风格」：文件图标只有单色一种（用户定）。
 //!
 //! 模型在 `model::SftpSettings`，生效在 `apply::apply_sftp`，这里只做界面。
 
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
-    button::Button,
-    input::{Input, InputEvent, InputState},
-};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::*;
 
-use qishell_ssh::sftp::PARALLEL_TRANSFERS_RANGE;
+use micaterm_ssh::sftp::PARALLEL_TRANSFERS_RANGE;
 
-use super::SettingsStore;
-use super::controls::{
-    dropdown, group, row, row_with_note, section_title, segmented, setting_switch,
-};
-use super::dialog::SettingsDialog;
-use super::pages::write;
+use super::controls::{dropdown, field_input, reset_if, row, section, setting_switch};
+use super::pages::{WIDE_WIDTH, write};
+use super::tab::SettingsTab;
+use super::{AppSettings, SettingsStore};
 use crate::i18n::t;
-use crate::sftp_tab::{CardSide, FileIcon, FileIconKind, FileIconStyle};
+use crate::sftp_tab::CardSide;
 use crate::theme::Tokens;
-
-/// 图标风格的两个选项，按分段按钮从左到右。
-const ICON_STYLES: [FileIconStyle; 2] = [FileIconStyle::Color, FileIconStyle::Monochrome];
-
-/// 图标风格一行的示例：文件夹，和几种常见的文件。名字是空的就是普通文件夹的图标。
-const ICON_PREVIEW: [(&str, FileIconKind); 5] = [
-    ("", FileIconKind::Folder),
-    ("nginx.conf", FileIconKind::File),
-    ("compose.yml", FileIconKind::File),
-    ("photo.png", FileIconKind::File),
-    ("backup.tar.gz", FileIconKind::File),
-];
+use crate::ui::modal::{ModalButtonTone, modal_button};
 
 pub(super) fn sftp(
-    dialog: &SettingsDialog,
+    tab: &SettingsTab,
     tokens: &Tokens,
     _: &mut Window,
-    cx: &mut Context<SettingsDialog>,
+    cx: &mut Context<SettingsTab>,
 ) -> Vec<AnyElement> {
-    let store = dialog.store.clone();
+    let store = tab.store.clone();
     let settings = store.read(cx).settings().sftp;
+    let default = AppSettings::default().sftp;
 
     let counts: Vec<usize> = PARALLEL_TRANSFERS_RANGE.collect();
     let parallel = {
@@ -65,128 +49,97 @@ pub(super) fn sftp(
                 let count = counts_for_menu[index];
                 write(&store, cx, |settings| settings.sftp.parallel = count)
             }),
-            px(90.),
-        )
-    };
-
-    let icon_style = {
-        let store = store.clone();
-        segmented(
-            "sftp-icon-style",
-            vec![
-                t!("settings.sftp.icon_color"),
-                t!("settings.sftp.icon_monochrome"),
-            ],
-            ICON_STYLES
-                .iter()
-                .position(|style| *style == settings.file_icon_style)
-                .unwrap_or_default(),
-            Rc::new(move |index, _, cx| {
-                write(&store, cx, |settings| {
-                    settings.sftp.file_icon_style = ICON_STYLES[index]
-                })
-            }),
+            px(96.),
             tokens,
         )
     };
 
     vec![
-        section_title(t!("settings.sftp.transfers"), None, tokens).into_any_element(),
-        group(
-            [row(
-                t!("settings.sftp.parallel"),
-                Some(t!(
-                    "settings.sftp.parallel_description",
-                    min = *PARALLEL_TRANSFERS_RANGE.start(),
-                    max = *PARALLEL_TRANSFERS_RANGE.end()
-                )),
-                parallel,
+        section(t!("settings.sftp.transfers"), None, true, tokens),
+        row(
+            t!("settings.sftp.parallel"),
+            Some(t!(
+                "settings.sftp.parallel_description",
+                min = *PARALLEL_TRANSFERS_RANGE.start(),
+                max = *PARALLEL_TRANSFERS_RANGE.end()
+            )),
+            reset_if(
+                settings.parallel != default.parallel,
+                "sftp-parallel",
+                &store,
+                |settings| settings.sftp.parallel = AppSettings::default().sftp.parallel,
                 tokens,
-            )],
+            ),
+            parallel,
             tokens,
-        )
-        .into_any_element(),
-        section_title(t!("settings.sftp.file_list"), None, tokens).into_any_element(),
-        group(
-            [
-                row(
-                    t!("settings.sftp.local_directory"),
-                    Some(t!("settings.sftp.local_directory_description")),
-                    dialog.local_directory.clone(),
-                    tokens,
-                ),
-                row_with_note(
-                    t!("settings.sftp.icon_style"),
-                    Some(icon_preview().into_any_element()),
-                    icon_style,
-                ),
-                row(
-                    t!("settings.sftp.show_hidden_local"),
-                    Some(t!("settings.sftp.show_hidden_description")),
-                    hidden_switch(
-                        "sftp-show-hidden-local",
-                        t!("settings.sftp.show_hidden_local"),
-                        CardSide::Local,
-                        settings.show_hidden.local,
-                        &store,
-                    ),
-                    tokens,
-                ),
-                row(
-                    t!("settings.sftp.show_hidden_remote"),
-                    None,
-                    hidden_switch(
-                        "sftp-show-hidden-remote",
-                        t!("settings.sftp.show_hidden_remote"),
-                        CardSide::Remote,
-                        settings.show_hidden.remote,
-                        &store,
-                    ),
-                    tokens,
-                ),
-            ],
+        ),
+        section(t!("settings.sftp.file_list"), None, false, tokens),
+        row(
+            t!("settings.sftp.local_directory"),
+            Some(t!("settings.sftp.local_directory_description")),
+            reset_if(
+                settings.local_directory.is_some(),
+                "sftp-local-directory",
+                &store,
+                |settings| settings.sftp.local_directory = None,
+                tokens,
+            ),
+            tab.local_directory.clone(),
             tokens,
-        )
-        .into_any_element(),
+        ),
+        hidden_row(
+            CardSide::Local,
+            settings.show_hidden.local,
+            default.show_hidden.local,
+            &store,
+            tokens,
+        ),
+        hidden_row(
+            CardSide::Remote,
+            settings.show_hidden.remote,
+            default.show_hidden.remote,
+            &store,
+            tokens,
+        ),
     ]
 }
 
-/// 图标风格的示例，和文件列表用同一个图标件，所以跟着风格和深浅色变。
-fn icon_preview() -> impl IntoElement {
-    div()
-        .flex()
-        .gap(px(10.))
-        .mt(px(4.))
-        .children(
-            ICON_PREVIEW
-                .iter()
-                .enumerate()
-                .map(|(index, (name, kind))| {
-                    div()
-                        .id(("sftp-icon-preview", index))
-                        .test_support()
-                        .child(FileIcon::new(*name, *kind))
-                }),
-        )
-}
-
-/// 一侧的「显示隐藏文件」开关。
-fn hidden_switch(
-    id: &'static str,
-    label: SharedString,
+/// 一侧的「显示隐藏文件」一行：开关，和默认不同时有「恢复默认」。
+fn hidden_row(
     side: CardSide,
     checked: bool,
+    default: bool,
     store: &Entity<SettingsStore>,
-) -> impl IntoElement {
-    setting_switch(
-        id,
-        label,
-        checked,
-        store,
-        move |settings, checked| match side {
-            CardSide::Local => settings.sftp.show_hidden.local = checked,
-            CardSide::Remote => settings.sftp.show_hidden.remote = checked,
-        },
+    tokens: &Tokens,
+) -> AnyElement {
+    let (id, title, description) = match side {
+        CardSide::Local => (
+            "sftp-show-hidden-local",
+            t!("settings.sftp.show_hidden_local"),
+            t!("settings.sftp.show_hidden_description"),
+        ),
+        CardSide::Remote => (
+            "sftp-show-hidden-remote",
+            t!("settings.sftp.show_hidden_remote"),
+            t!("settings.sftp.show_hidden_remote_description"),
+        ),
+    };
+    let set = move |settings: &mut AppSettings, checked: bool| match side {
+        CardSide::Local => settings.sftp.show_hidden.local = checked,
+        CardSide::Remote => settings.sftp.show_hidden.remote = checked,
+    };
+    row(
+        title.clone(),
+        Some(description),
+        reset_if(
+            checked != default,
+            id,
+            store,
+            move |settings| set(settings, default),
+            tokens,
+        ),
+        setting_switch(id, title, checked, store, set),
+        tokens,
     )
 }
 
@@ -281,30 +234,34 @@ fn stored_text(store: &Entity<SettingsStore>, cx: &App) -> String {
 }
 
 impl Render for LocalDirectoryEditor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let tokens = Tokens::current(cx);
+        // 26 号 `.stg-ctl`：输入框 240，后面「选择…」描边按钮。
+        let choose = cx.listener(|this, _, _, cx| this.choose(cx));
         div()
             .flex()
             .items_center()
             .gap(px(6.))
-            .w(px(320.))
             .child(
-                div().flex_1().min_w_0().child(
+                div().w(WIDE_WIDTH).child(field_input(
                     Input::new(&self.input)
                         .id("sftp-local-directory")
                         .aria_label(t!(
                             "settings.sftp.local_directory_label",
                             path = self.downloads.as_ref()
-                        ))
-                        .small()
-                        .font_family(cx.theme().mono_font_family.clone()),
-                ),
+                        )),
+                    &tokens,
+                )),
             )
-            .child(
-                Button::new("sftp-local-directory-choose")
-                    .label(t!("settings.sftp.choose"))
-                    .outline()
-                    .small()
-                    .on_click(cx.listener(|this, _, _, cx| this.choose(cx))),
-            )
+            .child(modal_button(
+                "sftp-local-directory-choose",
+                t!("settings.sftp.choose"),
+                None,
+                ModalButtonTone::Line,
+                Some(Box::new(choose)),
+                &tokens,
+                window,
+                cx,
+            ))
     }
 }

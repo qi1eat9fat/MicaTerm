@@ -311,12 +311,12 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-/// 「修改时间」列，本地时间：`2026/4/22 12:44`。
+/// 「修改时间」列，本地时间，补零定宽（26 号）：`2026/04/22 09:05`。
 pub fn format_changed(seconds: i64) -> String {
     chrono::DateTime::from_timestamp(seconds, 0)
         .map(|time| {
             time.with_timezone(&chrono::Local)
-                .format("%Y/%-m/%-d %-H:%M")
+                .format("%Y/%m/%d %H:%M")
                 .to_string()
         })
         .unwrap_or_default()
@@ -380,12 +380,12 @@ mod tests {
     }
 
     #[test]
-    fn changed_uses_an_unpadded_date_without_seconds() {
+    fn changed_uses_a_padded_date_without_seconds() {
         let formatted = format_changed(1_700_000_000);
         let (date, time) = formatted.split_once(' ').unwrap();
         let date: Vec<_> = date.split('/').collect();
         assert_eq!(date[0].len(), 4, "{formatted}");
-        assert!(date[1..].iter().all(|part| !part.starts_with('0')));
+        assert!(date[1..].iter().all(|part| part.len() == 2));
         assert_eq!(date.len(), 3);
         assert_eq!(time.split(':').count(), 2);
     }

@@ -89,30 +89,14 @@ impl Workspace {
             self.activate_tab(tab, window, cx);
             return;
         }
-        let (place, link, owner) = if location.is_remote() {
-            let tab = sftp.read(cx);
-            let login = tab.login();
-            let endpoint = if login.port == 22 {
-                format!("{}@{}", login.user, login.host)
-            } else {
-                format!("{}@{}:{}", login.user, login.host, login.port)
-            };
-            (
-                tab.rail_name(),
-                t!(
-                    "editor.status.remote",
-                    host = tab.rail_name(),
-                    endpoint = endpoint
-                ),
-                Some(sftp.downgrade()),
-            )
+        let (place, owner) = if location.is_remote() {
+            (sftp.read(cx).rail_name(), Some(sftp.downgrade()))
         } else {
-            (t!("sftp_tab.local_name"), t!("editor.status.local"), None)
+            (t!("sftp_tab.local_name"), None)
         };
         let options = EditorOptions {
             location: location.clone(),
             place,
-            link,
             sftp: owner,
             local_files: self.services.local_files.clone(),
             file: (**file).clone(),

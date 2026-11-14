@@ -4,7 +4,7 @@
 //!
 //! 保险库是真的（临时目录 + 进程内钥匙串，`support/vault.rs`），远程终端是假的。
 
-use qishell::app::{ConnectHost, EditHost, NewHost, OpenSettings};
+use micaterm::app::{ConnectHost, EditHost, NewHost, OpenSettings};
 
 use crate::support::*;
 
@@ -100,7 +100,7 @@ fn save_new_host_with_password(cx: &mut TestAppContext, handle: WindowHandle<Roo
     dispatch(cx, handle, NewHost);
     fill(cx, handle, "host-address", "10.0.1.33");
     fill(cx, handle, "host-password", "hunter2");
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
 }
 
 fn vault_status(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> Option<VaultStatus> {
@@ -120,14 +120,11 @@ fn the_first_saved_password_asks_for_a_master_password(cx: &mut TestAppContext) 
     let vault = TestVault::absent();
     let (handle, workspace, _) = open_with_vault(cx, &vault);
     dispatch(cx, handle, NewHost);
-    // 还没建保险库：密码框下提示第一次保存时会问。
-    assert_eq!(
-        label(cx, handle, "host-password-hint").as_deref(),
-        Some("第一次保存秘密时会问你要不要设主密码，可以跳过")
-    );
+    // 26 号表单不放逐字段说明：还没建保险库时密码框下面也没有提示，保存时才问。
+    assert!(!visible(cx, handle, "host-password-hint"));
     fill(cx, handle, "host-address", "10.0.1.33");
     fill(cx, handle, "host-password", "hunter2");
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
 
     assert_eq!(
         label(cx, handle, "vault-password-dialog").as_deref(),
@@ -186,9 +183,9 @@ fn not_setting_a_master_password_still_saves_the_password(cx: &mut TestAppContex
     assert!(!visible(cx, handle, "unlock-vault"));
 
     // 之后再存密码不再问。
-    dispatch(cx, handle, EditHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, EditHost(micaterm_hosts::HostId(1)));
     fill(cx, handle, "host-password", "hunter3");
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
     assert!(!visible(cx, handle, "vault-password-dialog"));
     assert!(!visible(cx, handle, "host-dialog"));
     assert_eq!(vault.read(&web01_password()).as_deref(), Some("hunter3"));
@@ -226,7 +223,7 @@ fn a_saved_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestApp
     // 锁着：主机栏底部是锁着的锁。
     assert!(visible(cx, handle, "unlock-vault"));
 
-    dispatch(cx, handle, EditHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, EditHost(micaterm_hosts::HostId(1)));
     assert_eq!(
         label(cx, handle, "host-password-locked").as_deref(),
         Some("已保存，保险库锁定中 · 解锁后修改")
@@ -256,7 +253,7 @@ fn a_saved_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestApp
     assert!(visible(cx, handle, "host-password"));
     assert!(visible(cx, handle, "lock-vault"));
     fill(cx, handle, "host-password", "hunter3");
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
     assert!(!visible(cx, handle, "host-dialog"));
     assert_eq!(vault.read(&web01_password()).as_deref(), Some("hunter3"));
     assert_eq!(host_names(cx, &workspace).len(), 6);
@@ -266,7 +263,7 @@ fn a_saved_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestApp
 /// （工单 13，M2 code review S4）。
 #[gpui_kit::test]
 fn a_saved_proxy_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestAppContext) {
-    use qishell_hosts::{AuthKind, HostDraft, ProxyKind, ProxySettings, Route};
+    use micaterm_hosts::{AuthKind, HostDraft, ProxyKind, ProxySettings, Route};
     let proxy = SecretRef::proxy("me", "127.0.0.1", 1080);
     let vault = TestVault::unlocked()
         .with_secret(&proxy, "proxy-secret")
@@ -284,7 +281,7 @@ fn a_saved_proxy_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut T
     let (handle, _) = open_workspace_with(cx, settings_store(), services);
     in_frame(cx, handle, |window, _| window.activate_window());
 
-    dispatch(cx, handle, EditHost(qishell_hosts::HostId(7)));
+    dispatch(cx, handle, EditHost(micaterm_hosts::HostId(7)));
     reveal(cx, handle, "host-proxy-password-locked");
     assert_eq!(
         label(cx, handle, "host-proxy-password-locked").as_deref(),
@@ -294,19 +291,19 @@ fn a_saved_proxy_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut T
 
     // 只改名字：锁着的代理密码原样留着。
     fill(cx, handle, "host-name", "mysql-01a");
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
     assert!(!visible(cx, handle, "host-dialog"));
     assert_eq!(vault.status(), VaultStatus::Locked);
 
     // 再编辑，点「解锁…」：解开后换回密码框，填着存的密码。
-    dispatch(cx, handle, EditHost(qishell_hosts::HostId(7)));
+    dispatch(cx, handle, EditHost(micaterm_hosts::HostId(7)));
     click(cx, handle, "host-proxy-password-unlock");
     fill(cx, handle, "vault-unlock-password", MASTER);
     click(cx, handle, "vault-unlock-confirm");
     assert!(!visible(cx, handle, "host-proxy-password-locked"));
     assert!(visible(cx, handle, "host-proxy-password"));
     fill(cx, handle, "host-proxy-password", "proxy-secret-2");
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
     assert!(!visible(cx, handle, "host-dialog"));
     assert_eq!(vault.read(&proxy).as_deref(), Some("proxy-secret-2"));
 }
@@ -318,9 +315,9 @@ fn saving_a_host_while_locked_leaves_its_saved_password_alone(cx: &mut TestAppCo
         .locked();
     let (handle, workspace, _) = open_with_vault(cx, &vault);
 
-    dispatch(cx, handle, EditHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, EditHost(micaterm_hosts::HostId(1)));
     fill(cx, handle, "host-name", "web-01a");
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
 
     // 不用解锁就能存：密码没动。
     assert!(!visible(cx, handle, "vault-unlock"));
@@ -338,12 +335,12 @@ fn connecting_unlocks_only_when_a_saved_secret_is_needed(cx: &mut TestAppContext
     let (handle, _, remote) = open_with_vault(cx, &vault);
 
     // web-02 没存密码：不弹，直接连（现场问密码）。
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(2)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(2)));
     assert!(!visible(cx, handle, "vault-unlock"));
     assert_eq!(connected_hosts(&remote), vec![2]);
 
     // web-01 存了密码：先解锁再连。
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert!(visible(cx, handle, "vault-unlock"));
     assert_eq!(
         label(cx, handle, "vault-unlock-reason").as_deref(),
@@ -357,7 +354,7 @@ fn connecting_unlocks_only_when_a_saved_secret_is_needed(cx: &mut TestAppContext
     assert_eq!(vault.read(&web01_password()).as_deref(), Some("hunter2"));
 
     // 解开了：再连不弹。
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert!(!visible(cx, handle, "vault-unlock"));
     assert_eq!(connected_hosts(&remote), vec![2, 1, 1]);
 }
@@ -371,18 +368,18 @@ fn a_question_asked_while_unlocking_stays_open_and_gets_its_answer(cx: &mut Test
         .locked();
     let (handle, workspace, remote) = open_with_vault(cx, &vault);
     // web-02 没存密码，直接连。
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(2)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(2)));
     let terminal = remote.targets()[0].0.0;
 
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     fill(cx, handle, "vault-unlock-password", MASTER);
     let prompt = std::cell::Cell::new(None);
     in_frame(cx, handle, |window, cx| {
         window.click("vault-unlock-confirm", cx);
         prompt.set(Some(remote.ask(
             terminal,
-            qishell::backend::ConnectionPromptKind::authentication(
-                qishell::backend::AuthenticationRequest::Password {
+            micaterm::backend::ConnectionPromptKind::authentication(
+                micaterm::backend::AuthenticationRequest::Password {
                     saved_rejected: false,
                 },
             ),
@@ -416,16 +413,16 @@ fn a_question_asked_while_unlocking_stays_open_and_gets_its_answer(cx: &mut Test
 fn reusing_a_live_connection_does_not_ask_to_unlock(cx: &mut TestAppContext) {
     let vault = TestVault::unlocked().with_secret(&web01_password(), "hunter2");
     let (handle, _, remote) = open_with_vault(cx, &vault);
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert_eq!(connected_hosts(&remote), vec![1]);
     click(cx, handle, "lock-vault");
     assert_eq!(vault.status(), VaultStatus::Locked);
 
-    dispatch(cx, handle, qishell::app::SplitRight);
+    split_again(cx, handle, micaterm::app::SplitRight);
     assert!(!visible(cx, handle, "vault-unlock"));
     assert_eq!(connected_hosts(&remote), vec![1, 1]);
 
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert!(!visible(cx, handle, "vault-unlock"));
     assert_eq!(connected_hosts(&remote), vec![1, 1, 1]);
     assert_eq!(vault.status(), VaultStatus::Locked);
@@ -440,7 +437,7 @@ fn cancelling_the_unlock_leaves_that_card_unconnected_and_does_not_ask_again(
         .locked();
     let (handle, _, remote) = open_with_vault(cx, &vault);
 
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     click(cx, handle, "vault-unlock-cancel");
     // 取消了这张卡片就不连，显示未连接（工单 33，原地重连再问，见 `vault_waiting`）。
     assert!(!visible(cx, handle, "vault-unlock"));
@@ -448,7 +445,7 @@ fn cancelling_the_unlock_leaves_that_card_unconnected_and_does_not_ask_again(
     assert_eq!(vault.status(), VaultStatus::Locked);
 
     // 新的连接不再自动弹（每次运行最多自动问一次），照样连，密码现场问。
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert!(!visible(cx, handle, "vault-unlock"));
     assert_eq!(connected_hosts(&remote), vec![1]);
 
@@ -468,7 +465,7 @@ fn escape_on_the_unlock_card_is_a_cancel(cx: &mut TestAppContext) {
         .locked();
     let (handle, _, remote) = open_with_vault(cx, &vault);
 
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
     assert!(!visible(cx, handle, "vault-unlock"));
     assert!(connected_hosts(&remote).is_empty());
@@ -491,7 +488,7 @@ fn the_lock_button_locks_and_the_next_use_asks_again(cx: &mut TestAppContext) {
         Some("解锁保险库")
     );
 
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert!(visible(cx, handle, "vault-unlock"));
     assert!(connected_hosts(&remote).is_empty());
 }
@@ -560,7 +557,7 @@ fn settings_change_the_master_password(cx: &mut TestAppContext) {
     fill(cx, handle, "vault-current-password", MASTER);
     click(cx, handle, "vault-password-confirm");
     assert!(!visible(cx, handle, "vault-password-dialog"));
-    // 设置对话框还开着。
+    // 设置标签还开着。
     assert!(visible(cx, handle, "settings"));
 
     // 新的主密码能打开，旧的不行；存的秘密还在。
@@ -568,7 +565,7 @@ fn settings_change_the_master_password(cx: &mut TestAppContext) {
     assert!(reopened.unlock(MASTER, false).is_err());
     reopened.unlock("battery staple", false).unwrap();
     assert_eq!(
-        qishell_hosts::SecretStore::get(&reopened, &web01_password())
+        micaterm_hosts::SecretStore::get(&reopened, &web01_password())
             .unwrap()
             .as_deref()
             .map(String::as_str),
@@ -655,7 +652,7 @@ fn a_vault_from_another_computer_asks_once_and_keeps_the_hosts(cx: &mut TestAppC
     assert_eq!(vault.status(), VaultStatus::KeyLost);
     let (handle, workspace, remote) = open_with_vault(cx, &vault);
 
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert_eq!(
         label(cx, handle, "vault-key-lost-text").as_deref(),
         Some(
@@ -668,7 +665,7 @@ fn a_vault_from_another_computer_asks_once_and_keeps_the_hosts(cx: &mut TestAppC
     assert_eq!(vault.status(), VaultStatus::KeyLost);
 
     // 这次运行不再问。
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert!(!visible(cx, handle, "vault-key-lost"));
     assert_eq!(connected_hosts(&remote), vec![1, 1]);
     assert_eq!(host_names(cx, &workspace).len(), 6);
@@ -681,7 +678,7 @@ fn resetting_a_vault_from_another_computer_lets_passwords_be_saved_again(cx: &mu
         .on_another_computer();
     let (handle, workspace, remote) = open_with_vault(cx, &vault);
 
-    dispatch(cx, handle, ConnectHost(qishell_hosts::HostId(1)));
+    dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     click(cx, handle, "vault-key-lost-confirm");
     assert!(!visible(cx, handle, "vault-key-lost"));
     assert_eq!(connected_hosts(&remote), vec![1]);
@@ -712,7 +709,7 @@ fn a_proxy_password_is_a_first_saved_secret_too(cx: &mut TestAppContext) {
     fill(cx, handle, "host-proxy-port", "8080");
     fill(cx, handle, "host-proxy-user", "me");
     fill(cx, handle, "host-proxy-password", "proxy-secret");
-    click(cx, handle, "host-dialog-save");
+    click_host_save(cx, handle);
 
     // 主机自己没填密码，代理的密码也是秘密：先问要不要设主密码。
     assert!(visible(cx, handle, "vault-password-dialog"));

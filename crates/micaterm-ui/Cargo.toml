@@ -1,0 +1,13 @@
+[package]
+name = "micaterm-ui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "MicaTerm 共用的界面组件：应用和终端 crate 都要用的那几个（右键菜单、查找浮卡）"
+license = "GPL-3.0-only"
+
+[dependencies]
+gpui-kit = { version = "0.6.1" }
+
+[dev-dependencies]
+gpui-kit = { version = "0.6.1", features = ["test-support"] }

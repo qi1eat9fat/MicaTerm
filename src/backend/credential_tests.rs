@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
-use qishell_hosts::secrets::{InMemorySecretStore, SharedSecretStore, StoreSource};
-use qishell_hosts::{
+use micaterm_hosts::secrets::{InMemorySecretStore, SharedSecretStore, StoreSource};
+use micaterm_hosts::{
     AuthKind, CredentialDraft, CredentialKind, GeneratedKey, HostData, HostDraft, HostId,
     KeyAlgorithm, SecretStore as _,
 };
-use qishell_ssh::testing::{TEST_USER, TestServer};
-use qishell_ssh::{AgentLocation, ConnectionPromptKind, SshConnector};
+use micaterm_ssh::testing::{TEST_USER, TestServer};
+use micaterm_ssh::{AgentLocation, ConnectionPromptKind, SshConnector};
 use russh::keys::PublicKey;
 
 use super::tests::{Answerer, Terminal};
@@ -148,7 +148,7 @@ fn a_host_using_a_password_credential_logs_in_with_the_credentials_password() {
     secrets
         .set(
             &saved.password_secret(),
-            qishell_ssh::testing::TEST_PASSWORD,
+            micaterm_ssh::testing::TEST_PASSWORD,
         )
         .unwrap();
     data.insert_unnotified(

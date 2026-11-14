@@ -1,20 +1,24 @@
 // 参考 since2006/shell-rs @ b2a307a: src/explorer/file_dialogs.rs 改写
 // 改造：走 `DialogLayer`；校验错误写在字段下面，不弹通知（spec 第 4 节）；删除的确认框照原型 `.dlg.confirm`；
 // 本地名称在 Windows 上多查一道非法字符。
-//! 删除的确认框，和重命名、新建共用的名称框。
+//! 删除的确认框，和重命名、新建共用的名称框。名称框的样子是共用的 `ui::modal` 弹窗（26 号）：
+//! 头部图标 + 「重命名」「新建文件夹」+ 淡字原名，一栏名称，底部「取消 Esc」「重命名 Enter」。
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 
+use super::operations::OperationSender;
 use super::{CardSide, FileOperation, NewEntryKind, SftpTab};
+use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Confirm, ConfirmLine, open_confirm_dialog};
-use crate::ui::form::{FieldNote, dialog_footer, dialog_title, form_field, text_input};
-
-/// 小对话框的宽（原型 `.dlg.small`）。
-pub(super) const SMALL_DIALOG_WIDTH: Pixels = px(470.);
+use crate::ui::form::{FieldNote, form_field};
+use crate::ui::modal::{
+    ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button, modal_dialog, modal_input,
+    render_modal,
+};
 
 /// 名称框的输入框的元素 id；错误是 `entry-name-error`，确定按钮是 `entry-name-commit`。
 const NAME_FIELD: &str = "entry-name";
@@ -80,7 +84,15 @@ struct NameForm {
     windows_names: bool,
     input: Entity<InputState>,
     label: SharedString,
+    head: ModalHead,
+    commit: SharedString,
     error: Option<SharedString>,
+    send: OperationSender,
+    /// 对话框是哪一层：做了、取消时只关自己。
+    layer: DialogLayer,
+    /// 关了以后焦点回到文件列表。
+    list: FocusHandle,
+    focus_handle: FocusHandle,
     _subscription: Subscription,
 }
 
@@ -106,10 +118,29 @@ impl NameForm {
             NameIntent::New(kind) => FileOperation::Create { kind: *kind, name },
         })
     }
+
+    /// 「重命名」「新建」（回车也是）：过了就关掉对话框、发出操作。
+    fn commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(operation) = self.operation(cx) {
+            self.close(window, cx);
+            self.send.send(operation, window, cx);
+        }
+    }
+
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.layer.close(window, cx);
+        window.focus(&self.list, cx);
+    }
+}
+
+impl Focusable for NameForm {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
 }
 
 impl Render for NameForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let notes = self
             .error
@@ -120,23 +151,51 @@ impl Render for NameForm {
             })
             .into_iter()
             .collect();
-        div()
-            .flex()
-            .flex_col()
-            .text_size(px(12.5))
-            .child(form_field(
-                Some(self.label.clone()),
-                // 和左边 30 高的字段名对齐。
-                div().flex().items_center().min_h(px(30.)).child(text_input(
-                    NAME_FIELD,
-                    self.label.clone(),
-                    &self.input,
-                    self.error.is_some(),
-                    &tokens,
-                )),
-                notes,
+        let body = form_field(
+            Some(self.label.clone()),
+            modal_input(
+                NAME_FIELD,
+                self.label.clone(),
+                &self.input,
+                ModalInputKind::Text,
+                self.error.is_some(),
                 &tokens,
+                window,
+                cx,
+            ),
+            notes,
+            &tokens,
+        );
+        let cancel: OnClick = Box::new(cx.listener(|this, _, window, cx| this.close(window, cx)));
+        let footer = div()
+            .flex()
+            .gap(px(6.))
+            .child(modal_button(
+                "entry-name-cancel",
+                t!("sftp_files.cancel"),
+                Some("Esc"),
+                ModalButtonTone::Plain,
+                Some(cancel),
+                &tokens,
+                window,
+                cx,
             ))
+            .child(modal_button(
+                "entry-name-commit",
+                self.commit.clone(),
+                Some("Enter"),
+                ModalButtonTone::Primary,
+                Some(Box::new(
+                    cx.listener(|this, _, window, cx| this.commit(window, cx)),
+                )),
+                &tokens,
+                window,
+                cx,
+            ));
+        render_modal(Some(self.head.clone()), body, footer, &tokens, window, cx)
+            .id("entry-name-dialog")
+            .test_support()
+            .track_focus(&self.focus_handle)
     }
 }
 
@@ -231,8 +290,9 @@ impl SftpTab {
             .map(|entry| entry.name.to_string())
             .collect();
         let list = card.focus_handle(cx);
-        let (title, subtitle, initial, commit, label) = match &intent {
+        let (icon, title, subtitle, initial, commit, label) = match &intent {
             NameIntent::Rename(name) => (
+                CatalogIcon::Pencil,
                 t!("sftp_files.rename.title"),
                 Some(SharedString::from(name.clone())),
                 SharedString::from(name.clone()),
@@ -240,6 +300,10 @@ impl SftpTab {
                 t!("sftp_files.rename.label"),
             ),
             NameIntent::New(kind) => (
+                match kind {
+                    NewEntryKind::Folder => CatalogIcon::FolderPlus,
+                    NewEntryKind::File => CatalogIcon::FilePlus,
+                },
                 kind.title(),
                 None,
                 kind.default_name(),
@@ -248,52 +312,51 @@ impl SftpTab {
             ),
         };
         let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
+        let layer = DialogLayer::new();
+        let send = self.operation_sender(side);
         let form = cx.new(|cx| {
-            // 改了字，上一次的错误就收起来，提交时再查。
-            let subscription = cx.subscribe(&input, |form: &mut NameForm, _, event, cx| {
-                if matches!(event, InputEvent::Change) && form.error.take().is_some() {
-                    cx.notify();
-                }
-            });
+            // 改了字，上一次的错误就收起来，提交时再查；回车就是「重命名」「新建」。
+            let subscription = cx.subscribe_in(
+                &input,
+                window,
+                |form: &mut NameForm, _, event, window, cx| match event {
+                    InputEvent::Change => {
+                        if form.error.take().is_some() {
+                            cx.notify();
+                        }
+                    }
+                    InputEvent::PressEnter { .. } => form.commit(window, cx),
+                    _ => {}
+                },
+            );
             NameForm {
                 intent,
                 existing,
                 windows_names: !side.is_remote() && cfg!(windows),
                 input: input.clone(),
                 label,
+                head: ModalHead {
+                    icon,
+                    title,
+                    detail: subtitle,
+                },
+                commit,
                 error: None,
+                send,
+                layer: layer.clone(),
+                list: list.clone(),
+                focus_handle: cx.focus_handle(),
                 _subscription: subscription,
             }
         });
-        let tokens = Tokens::current(cx);
-        let send = self.operation_sender(side);
-        let layer = DialogLayer::new();
         layer.open_dismissable(
             move |dialog, _, _| {
-                let (form_ok, send) = (form.clone(), send.clone());
-                dialog
-                    .title(dialog_title(title.clone(), subtitle.clone(), &tokens))
-                    .w(SMALL_DIALOG_WIDTH)
-                    .rounded(px(14.))
-                    // 只由按钮和 Esc 关，点旁边不关。
-                    .overlay_closable(false)
+                modal_dialog(dialog)
+                    // 回车由名称框自己处理（校验过了才关）。
+                    .on_ok(|_, _, _| false)
                     .child(form.clone())
-                    .footer(dialog_footer(
-                        "entry-name-commit",
-                        commit.clone(),
-                        t!("sftp_files.cancel"),
-                    ))
-                    .on_ok(move |_, window, cx| {
-                        let operation = form_ok.update(cx, |form, cx| form.operation(cx));
-                        match operation {
-                            Some(operation) => {
-                                send.send(operation, window, cx);
-                                true
-                            }
-                            None => false,
-                        }
-                    })
             },
+            // Esc 关掉的：焦点回到文件列表。
             move |window, cx| window.focus(&list, cx),
             window,
             cx,

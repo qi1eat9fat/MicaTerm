@@ -3,8 +3,8 @@
 // 参考 since2006/shell-rs @ b2a307a: src/workspace/snippets.rs、src/workspace/tools.rs 的 `on_enter_command`
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::*;
+use micaterm_ui::Menu;
 
 use crate::app::{
     CopySnippet, DeleteSnippet, DismissSnippetNotice, EditSnippet, EnterSnippet, NewSnippet,
@@ -38,6 +38,7 @@ impl Workspace {
     pub(in crate::workspace) fn render_snippet_panel(
         &self,
         tokens: &Tokens,
+        window: &Window,
         cx: &App,
     ) -> AnyElement {
         let props = SnippetPanelProps {
@@ -47,7 +48,7 @@ impl Workspace {
                 .map(|tab| tab.focused_card().read(cx).name()),
         };
         self.snippet_panel
-            .render(props, &self.focus_handle, tokens, cx)
+            .render(props, &self.focus_handle, tokens, window, cx)
             .into_any_element()
     }
 
@@ -169,7 +170,7 @@ impl Workspace {
         let dismiss = cx.subscribe_in(
             &menu,
             window,
-            |this, menu: &Entity<PopupMenu>, _: &DismissEvent, window, cx| {
+            |this, menu: &Entity<Menu>, _: &DismissEvent, window, cx| {
                 this.snippet_panel.close_menu(menu);
                 // 选的是「编辑…」「删除」时对话框已经开了，焦点留在对话框里。
                 if window.has_active_dialog(cx) {
@@ -208,6 +209,6 @@ impl Workspace {
 fn clears_typed_line(card: &TerminalCard) -> bool {
     match card.local_shell() {
         Some(_) => !cfg!(windows),
-        None => card.remote_os() != Some(qishell_hosts::HostOs::Windows),
+        None => card.remote_os() != Some(micaterm_hosts::HostOs::Windows),
     }
 }

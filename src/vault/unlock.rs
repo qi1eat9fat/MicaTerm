@@ -1,11 +1,8 @@
-//! 解锁小卡片（原型「用到秘密时：解锁保险库」）：锁图标、「解锁保险库」、谁要用哪条秘密、
-//! 主密码框、「在本机记住」（默认勾选）、「取消」「解锁」。主密码不对时框描红，下面写原因。
+//! 解锁保险库（26 号「解锁保险库」，共用的 `ui::modal` 弹窗）：锁 +「解锁保险库」、谁要用哪条秘密、
+//! 主密码框、「在本机记住」（默认勾选）、「取消 Esc」「解锁 Enter」。主密码不对时框描红，下面写原因。
 //! Argon2 在后台跑，跑的时候按钮写「解锁中…」，不卡界面。
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::{Disableable as _, Icon, Sizable as _};
 use gpui_kit::*;
 
 use super::reply::{Reply, close_and_reply, open_small_dialog};
@@ -13,11 +10,13 @@ use super::store::{VaultStore, describe};
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, text_input, typed_secret};
+use crate::ui::form::{FieldErrors, typed_secret};
+use crate::ui::modal::{
+    ModalButtonTone, ModalInputKind, OnClick, modal_button, modal_checkbox, modal_input,
+    modal_question, modal_warn, render_modal,
+};
 
 pub const FIELD_UNLOCK: &str = "vault-unlock-password";
-
-const WIDTH: Pixels = px(340.);
 
 pub struct UnlockDialog {
     vault: Entity<VaultStore>,
@@ -111,114 +110,92 @@ impl Focusable for UnlockDialog {
 }
 
 impl Render for UnlockDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let working = self.working.is_some();
         let reply = self.reply.clone();
         let invalid = self.errors.get(FIELD_UNLOCK).is_some();
-        div()
+        // 26 号「解锁保险库」：锁 + 「解锁保险库」、谁要用秘密、主密码框、在本机记住。
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(modal_warn(
+                CatalogIcon::Lock,
+                t!("vault.unlock.title"),
+                false,
+                &tokens,
+            ))
+            .child(
+                modal_question(self.reason.clone(), &tokens)
+                    .id("vault-unlock-reason")
+                    .test_support()
+                    .aria_label(self.reason.clone()),
+            )
+            .child(modal_input(
+                FIELD_UNLOCK,
+                t!("vault.unlock.placeholder"),
+                &self.password,
+                ModalInputKind::Secret,
+                invalid,
+                &tokens,
+                window,
+                cx,
+            ))
+            .children(self.errors.get(FIELD_UNLOCK).map(|message| {
+                div()
+                    .id("vault-unlock-password-error")
+                    .test_support()
+                    .aria_label(message.clone())
+                    .text_color(tokens.err)
+                    .child(message.clone())
+            }))
+            .child(modal_checkbox(
+                "vault-unlock-remember",
+                self.remember,
+                t!("vault.setup.remember"),
+                Some(t!("vault.unlock.remember_note")),
+                Box::new(cx.listener(|this, _, _, cx| {
+                    this.remember = !this.remember;
+                    cx.notify();
+                })),
+                &tokens,
+            ));
+        let footer = div()
+            .flex()
+            .gap(px(6.))
+            .child(modal_button(
+                "vault-unlock-cancel",
+                t!("vault.unlock.cancel"),
+                Some("Esc"),
+                ModalButtonTone::Plain,
+                (!working).then(|| -> OnClick {
+                    Box::new(move |_, window, cx| close_and_reply(&reply, false, window, cx))
+                }),
+                &tokens,
+                window,
+                cx,
+            ))
+            .child(modal_button(
+                "vault-unlock-confirm",
+                if working {
+                    t!("vault.unlock.working")
+                } else {
+                    t!("vault.unlock.confirm")
+                },
+                Some("Enter"),
+                ModalButtonTone::Primary,
+                (!working).then(|| -> OnClick {
+                    Box::new(cx.listener(|this, _, window, cx| this.unlock(window, cx)))
+                }),
+                &tokens,
+                window,
+                cx,
+            ));
+        render_modal(None, body, footer, &tokens, window, cx)
             .id("vault-unlock")
             .test_support()
             .track_focus(&self.focus_handle)
-            .flex()
-            .flex_col()
-            .items_center()
-            .px(px(22.))
-            .pt(px(22.))
-            .pb(px(18.))
-            .text_color(tokens.text)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(44.))
-                    .mb(px(10.))
-                    .rounded(px(13.))
-                    .bg(tokens.attention.opacity(0.18))
-                    .text_color(tokens.attention)
-                    .child(Icon::new(CatalogIcon::Lock).size(px(22.))),
-            )
-            .child(
-                div()
-                    .mb(px(4.))
-                    .text_size(px(15.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(t!("vault.unlock.title")),
-            )
-            .child(
-                div()
-                    .id("vault-unlock-reason")
-                    .test_support()
-                    .aria_label(self.reason.clone())
-                    .mb(px(14.))
-                    .text_size(px(12.))
-                    .text_color(tokens.muted)
-                    .child(self.reason.clone()),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .gap(px(3.))
-                    .child(text_input(
-                        FIELD_UNLOCK,
-                        t!("vault.unlock.placeholder"),
-                        &self.password,
-                        invalid,
-                        &tokens,
-                    ))
-                    .children(self.errors.get(FIELD_UNLOCK).map(|message| {
-                        div()
-                            .id("vault-unlock-password-error")
-                            .test_support()
-                            .aria_label(message.clone())
-                            .text_size(px(11.5))
-                            .text_color(tokens.bad)
-                            .child(message.clone())
-                    })),
-            )
-            .child(
-                div().w_full().mt(px(10.)).mb(px(14.)).child(
-                    Checkbox::new("vault-unlock-remember")
-                        .checked(self.remember)
-                        .label(t!("vault.setup.remember"))
-                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                            this.remember = *checked;
-                            cx.notify();
-                        })),
-                ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .w_full()
-                    .gap(px(8.))
-                    .child(
-                        Button::new("vault-unlock-cancel")
-                            .small()
-                            .flex_1()
-                            .label(t!("vault.unlock.cancel"))
-                            .disabled(working)
-                            .on_click(move |_, window, cx| {
-                                close_and_reply(&reply, false, window, cx)
-                            }),
-                    )
-                    .child(
-                        Button::new("vault-unlock-confirm")
-                            .primary()
-                            .small()
-                            .flex_1()
-                            .label(if working {
-                                t!("vault.unlock.working")
-                            } else {
-                                t!("vault.unlock.confirm")
-                            })
-                            .disabled(working)
-                            .on_click(cx.listener(|this, _, window, cx| this.unlock(window, cx))),
-                    ),
-            )
     }
 }
 
@@ -239,6 +216,6 @@ pub fn open_unlock_dialog(
     let view = cx.new(|cx| UnlockDialog::new(vault, reason, reply.clone(), window, cx));
     let password = view.read(cx).password.clone();
     let focus = view.read(cx).focus_handle.clone();
-    open_small_dialog(view, WIDTH, reply, focus, window, cx);
+    open_small_dialog(view, reply, focus, window, cx);
     password.update(cx, |field, cx| field.focus(window, cx));
 }

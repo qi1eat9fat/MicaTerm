@@ -6,12 +6,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui_kit::{InputEvent as _, point};
-use qishell::app::{OpenHostSftp, SftpAction, SftpTabCommand};
-use qishell::backend::sftp::{
+use micaterm::app::{OpenHostSftp, SftpAction, SftpTabCommand};
+use micaterm::backend::sftp::{
     ConflictFacts, FileFacts, SftpEvent, TransferChoice, TransferDetail, TransferPhase,
     TransferProgress, TransferQuestion, TransferQuestionKind,
 };
-use qishell::sftp_tab::{CardSide, SftpTab};
+use micaterm::sftp_tab::{CardSide, SftpTab};
 
 use crate::support::*;
 
@@ -221,7 +221,7 @@ fn f5_in_the_local_list_confirms_and_uploads_into_the_remote_folder(cx: &mut Tes
     assert_eq!(requests[0].destination().as_str(), "/home/tester");
 }
 
-/// 七列按原型的百分比摆：进度是最后一列，占一行的 15%，不出界。
+/// 七列照 26 号：进度是最后一列，定宽 148，贴着行的右边，不出界。
 #[gpui_kit::test]
 fn the_queue_columns_fit_the_row(cx: &mut TestAppContext) {
     let fixture = open(cx);
@@ -234,8 +234,7 @@ fn the_queue_columns_fit_the_row(cx: &mut TestAppContext) {
         )
     });
     assert!(status.right() <= row.right() + px(1.), "{status:?} {row:?}");
-    let share = status.size.width / row.size.width;
-    assert!((share - 0.15).abs() < 0.01, "{share}");
+    assert_eq!(status.size.width, px(148.));
 }
 
 #[gpui_kit::test]
@@ -508,9 +507,10 @@ fn batches_wait_their_turn_and_the_queue_goes_away_when_cleared(cx: &mut TestApp
         label(cx, &fixture, ("queue-file-status", 2usize)).as_deref(),
         Some("25%")
     );
+    // 「文件大小」一列（原来的「已传输」）写这批一共多大。
     assert_eq!(
-        label(cx, &fixture, ("queue-done", 2usize)).as_deref(),
-        Some("512 B")
+        label(cx, &fixture, ("queue-size", 2usize)).as_deref(),
+        Some("1.0 KB")
     );
 
     // 清除已完成只清结束了的，全清完才收起。
@@ -846,7 +846,7 @@ fn a_transfer_asked_for_while_disconnected_offers_to_reconnect(cx: &mut TestAppC
         cx.update(|cx| tab_of(fixture, cx).read(cx).can_reconnect())
             && cx.update(|cx| {
                 tab_of(fixture, cx).read(cx).connection_state()
-                    == qishell::sftp_tab::ConnectionState::Disconnected
+                    == micaterm::sftp_tab::ConnectionState::Disconnected
             })
     });
     select(cx, &fixture, false, "文件 甲.txt");
@@ -940,7 +940,7 @@ fn quitting_with_a_stopped_batch_asks(cx: &mut TestAppContext) {
     click(cx, &fixture, "cancel-transfer");
     wait_head(cx, &fixture, "已停止");
 
-    assert!(in_frame(cx, fixture.handle, qishell::app::quit_held_back));
+    assert!(in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
     let text = label(cx, &fixture, "quit-confirm-text").unwrap();
     assert!(text.contains("还有 1 批传输没完成"), "{text}");
 }

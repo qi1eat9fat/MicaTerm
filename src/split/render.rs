@@ -7,8 +7,8 @@
 //! - resizable 组件默认的最小尺寸是 100px，和 0.08 的下限对不上：按上一帧量到的容器尺寸
 //!   把两边限制在 0.08–0.92 之间，拖的时候就停在界限上。
 //!
-//! 间隙：两边各留半个 `GAP`，库自己的拖动柄（宽 9）正好压在间隙上；柄里画的是
-//! `("divider", NodeId)`，双击它恢复成一半。
+//! 分隔：窗格之间没有间隙，只有一条 1px 细线（26 号 `.sep-line`）。库自己的拖动柄（宽 9、绝对定位）
+//! 骑在两个窗格的交界上，线画在柄的正中；柄里是 `("divider", NodeId)`，双击它恢复成一半。
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ use gpui_kit::*;
 use super::tree::{Axis, MAX_RATIO, MIN_RATIO, Node, NodeId, SplitTree};
 use crate::app::{ResetDivider, ResizeDivider};
 use crate::card::CardId;
-use crate::theme::GAP;
+use crate::theme::{Tokens, size};
 
 /// 一条分隔线在 gpui 里的镜像：它那个 resizable 组件的状态，和量到的容器长度。
 struct DividerMirror {
@@ -108,7 +108,6 @@ impl DividerMirrors {
         } else {
             px(0.)..Pixels::MAX
         };
-        let half = GAP / 2.;
         let group = match axis {
             Axis::Horizontal => h_resizable(("split", node.0 as usize)),
             Axis::Vertical => v_resizable(("split", node.0 as usize)),
@@ -135,10 +134,6 @@ impl DividerMirrors {
                             .size_full()
                             .min_w_0()
                             .min_h_0()
-                            .map(|side| match axis {
-                                Axis::Horizontal => side.pr(half),
-                                Axis::Vertical => side.pb(half),
-                            })
                             .child(self.render_node(first, card)),
                     ),
             )
@@ -149,10 +144,6 @@ impl DividerMirrors {
                         .size_full()
                         .min_w_0()
                         .min_h_0()
-                        .map(|side| match axis {
-                            Axis::Horizontal => side.pl(half),
-                            Axis::Vertical => side.pt(half),
-                        })
                         .child(self.render_node(second, card)),
                 ),
             );
@@ -194,16 +185,28 @@ fn collect_dividers(node: &Node, nodes: &mut Vec<NodeId>) {
     }
 }
 
-/// 拖动柄里画的东西：盖满整个柄的透明块 `("divider", node)`，双击它恢复成一半。
-/// 拖动本身、光标和命中区都还是库的。
+/// 拖动柄里画的东西：盖满整个柄的透明块 `("divider", node)`，正中一条 1px 的 `--line`；
+/// 双击它恢复成一半。拖动本身、光标和命中区都还是库的。
 fn divider_appearance(node: NodeId) -> ResizeHandleRenderer {
-    Rc::new(move |_: &ResizeHandleContext, _, _| {
+    Rc::new(move |context: &ResizeHandleContext, _, cx| {
+        let line = Tokens::current(cx).line;
+        let horizontal = context.axis() == gpui_kit::Axis::Horizontal;
         Some(
             div()
                 .id(("divider", node.0 as usize))
                 .test_support()
                 .absolute()
                 .inset_0()
+                .flex()
+                .justify_center()
+                .when(!horizontal, |handle| handle.flex_col())
+                .child(div().flex_none().bg(line).map(|rule| {
+                    if horizontal {
+                        rule.w(size::LINE).h_full()
+                    } else {
+                        rule.h(size::LINE).w_full()
+                    }
+                }))
                 .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                     if event.click_count == 2 {
                         window.dispatch_action(Box::new(ResetDivider(node)), cx);

@@ -1,23 +1,16 @@
-//! 表单对话框的通用件，照全部界面原型的样式：分组（`.grp`）、一行字段（`.fr`：左边名称，
-//! 右边控件，出错时下面一行红字写原因）、输入框（`.in`）。主机、凭据、命令片段、保险库的对话框共用
-//! （spec 第 4 节「编辑表单」）。
+//! 表单的通用件（26 号「新建主机」的写法）：一组字段、一栏（字段名在上、控件在下，出错时下面一行红字）、
+//! 并排的两栏、组之间的细线、锁着的秘密那一行。主机表单页和凭据、命令片段、SFTP 的弹窗共用
+//! （spec 第 4 节「编辑表单」）；输入框、按钮这些弹窗里的件在 `ui::modal`。
 
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::Icon;
+use gpui_kit::component::input::InputState;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use zeroize::Zeroizing;
 
-use gpui_kit::component::Icon;
-
 use crate::app::{CatalogIcon, UnlockVault};
 use crate::i18n::t;
-use crate::theme::Tokens;
-
-/// 字段名称那一列的宽度（`.fr` 的 `grid-template-columns: 76px 1fr`）。
-const LABEL_WIDTH: Pixels = px(76.);
+use crate::theme::{Tokens, size};
 
 /// 表单里出错的字段和原因，按字段的元素 id 记。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -50,36 +43,27 @@ impl FieldErrors {
     }
 }
 
-/// 一组字段（原型 `.grp`）：分组底、12 圆角、细描边，左上角是组名（`.gt`）。
-pub fn form_group(
-    title: SharedString,
-    rows: impl IntoIterator<Item = AnyElement>,
-    tokens: &Tokens,
-) -> AnyElement {
+/// 一组字段（26 号「新建主机」）：不再套带标题的框，字段一个接一个往下排、间距 14；
+/// 组和组之间由调用方画一条细线（[`form_divider`]）。
+pub fn form_group(rows: impl IntoIterator<Item = AnyElement>) -> AnyElement {
     div()
         .flex()
         .flex_col()
-        .mb(px(14.))
-        .pt(px(12.))
-        .px(px(12.))
-        .pb(px(2.))
-        .rounded(px(12.))
-        .bg(tokens.group)
-        .border_1()
-        .border_color(tokens.line)
-        .child(
-            div()
-                .mb(px(10.))
-                .text_size(px(12.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(tokens.muted)
-                .child(title),
-        )
+        .gap(px(14.))
         .children(rows)
         .into_any_element()
 }
 
-/// 一行字段（原型 `.fr`）：左边名称（分段按钮那一行没有），右边控件，下面是 `notes`：
+/// 组之间的细线（26 号 `.hp-div`）。
+pub fn form_divider(tokens: &Tokens) -> AnyElement {
+    div()
+        .flex_none()
+        .h(size::LINE)
+        .bg(tokens.line)
+        .into_any_element()
+}
+
+/// 一栏（26 号 `.mf`）：字段名在上（`label` 是 `None` 时没有）、控件在下，再下面是 `notes`：
 /// 出错的原因（红字，id 是 `<field>-error`，原因写在无障碍名称里，测试靠它断言）或提示（灰字）。
 pub fn form_field(
     label: Option<SharedString>,
@@ -89,28 +73,32 @@ pub fn form_field(
 ) -> AnyElement {
     div()
         .flex()
-        .mb(px(10.))
+        .flex_col()
+        .flex_1()
+        .min_w_0()
+        .gap(px(6.))
+        .children(label.map(|label| div().text_color(tokens.text).child(label)))
+        .child(control)
+        .children(notes.into_iter().map(|note| note.render(tokens)))
+        .into_any_element()
+}
+
+/// 并排的两栏（26 号 `.mf-two`）：地址 + 端口、用户名 + 密码。`right_width` 给了就是右边那栏的宽
+/// （端口 96），否则两栏平分。
+pub fn form_pair(left: AnyElement, right: AnyElement, right_width: Option<Pixels>) -> AnyElement {
+    div()
+        .flex()
         .gap(px(10.))
-        .child(
-            div()
-                .flex_none()
-                .w(LABEL_WIDTH)
-                .h(px(30.))
-                .flex()
-                .items_center()
-                .text_size(px(12.5))
-                .text_color(tokens.muted)
-                .children(label),
-        )
+        .child(div().flex().flex_1().min_w_0().child(left))
         .child(
             div()
                 .flex()
-                .flex_col()
-                .flex_1()
                 .min_w_0()
-                .gap(px(3.))
-                .child(control)
-                .children(notes.into_iter().map(|note| note.render(tokens))),
+                .map(|right| match right_width {
+                    Some(width) => right.flex_none().w(width),
+                    None => right.flex_1(),
+                })
+                .child(right),
         )
         .into_any_element()
 }
@@ -139,15 +127,13 @@ impl FieldNote {
                 .id(SharedString::from(format!("{field}-error")))
                 .test_support()
                 .aria_label(message.clone())
-                .text_size(px(11.5))
                 .line_height(relative(1.45))
-                .text_color(tokens.bad)
+                .text_color(tokens.err)
                 .child(message)
                 .into_any_element(),
             FieldNote::Hint(hint) => div()
-                .text_size(px(11.5))
                 .line_height(relative(1.45))
-                .text_color(tokens.faint)
+                .text_color(tokens.st_dim)
                 .child(hint)
                 .into_any_element(),
         }
@@ -159,21 +145,6 @@ pub fn typed_secret(input: &Entity<InputState>, cx: &App) -> Zeroizing<String> {
     Zeroizing::new(input.read(cx).value().to_string())
 }
 
-/// 输入框（原型 `.in`）：元素 id 就是字段名，出错时描红。
-pub fn text_input(
-    field: &'static str,
-    label: SharedString,
-    state: &Entity<InputState>,
-    invalid: bool,
-    tokens: &Tokens,
-) -> Input {
-    Input::new(state)
-        .id(field)
-        .aria_label(label)
-        .small()
-        .when(invalid, |input| input.border_color(tokens.bad))
-}
-
 /// 秘密存过、保险库却锁着时代替输入框的那一行（原型 `.lockedf`）：「已保存，保险库锁定中 · 解锁后修改」，
 /// 右边「解锁…」派发 `UnlockVault`。`row`、`unlock` 是这一行和「解锁…」的元素 id。
 pub fn locked_secret(
@@ -182,7 +153,7 @@ pub fn locked_secret(
     tokens: &Tokens,
 ) -> impl IntoElement + use<> {
     let text = t!("vault.field.locked");
-    let accent = tokens.accent;
+    let accent = tokens.text;
     div()
         .id(row)
         .test_support()
@@ -190,12 +161,13 @@ pub fn locked_secret(
         .flex()
         .items_center()
         .gap(px(8.))
-        .h(px(30.))
-        .px(px(10.))
-        .rounded(px(8.))
-        .bg(tokens.field)
-        .text_color(tokens.faint)
-        .text_size(px(12.))
+        .h(size::INPUT)
+        .px(px(8.))
+        .rounded(size::RADIUS)
+        .bg(tokens.content)
+        .border_1()
+        .border_color(tokens.line)
+        .text_color(tokens.st_dim)
         .child(Icon::new(CatalogIcon::Lock).size(px(13.)))
         .child(div().flex_1().min_w_0().truncate().child(text))
         .child(
@@ -209,45 +181,4 @@ pub fn locked_secret(
                 .on_click(|_, window, cx| window.dispatch_action(Box::new(UnlockVault), cx))
                 .child(t!("vault.field.unlock")),
         )
-}
-
-/// 对话框的标题：粗体，后面可以跟灰字（原型 `.dh .s`）。
-pub fn dialog_title(
-    title: SharedString,
-    subtitle: Option<SharedString>,
-    tokens: &Tokens,
-) -> impl IntoElement + use<> {
-    let faint = tokens.faint;
-    div()
-        .flex()
-        .items_baseline()
-        .gap(px(8.))
-        .min_w_0()
-        .child(div().flex_none().child(title))
-        .children(subtitle.map(|subtitle| {
-            div()
-                .min_w_0()
-                .truncate()
-                .text_size(px(12.))
-                .font_weight(FontWeight::NORMAL)
-                .text_color(faint)
-                .child(subtitle)
-        }))
-}
-
-/// 对话框的按钮：靠右，小号（原型 `.dlg .df`）。库的两个按钮外面都是撑满的盒子，要各包一层才不把宽度分掉。
-pub fn dialog_footer(
-    commit_id: &'static str,
-    commit: SharedString,
-    cancel: SharedString,
-) -> impl IntoElement + use<> {
-    DialogFooter::new()
-        .child(
-            div().flex_none().child(
-                DialogClose::new().trigger(move |button| button.small().label(cancel.clone())),
-            ),
-        )
-        .child(div().flex_none().child(
-            DialogAction::new().child(Button::new(commit_id).primary().small().label(commit)),
-        ))
 }

@@ -1,17 +1,15 @@
 // 参考 since2006/shell-rs @ b2a307a: src/shared/host_mark.rs 重写
 // 裁剪：去掉 Telnet、串口、连接状态变灰和自带的提示框；尺寸按全部界面原型的 `.host .badge`。
 
-//! 主机的系统徽章（原型 `.badge`）：探测出系统时是系统的标志加品牌色底；没探测出时是名称的
-//! 首字，底色按地址从固定调色板取（同一个地址在哪台电脑、哪个版本上都是同一个颜色）。
-//! 主机栏、快速连接、开始卡片共用它，同一台主机到处是同一个样子。
+//! 主机栏里主机的系统徽章（原型 `.badge`）：探测出系统时是系统的标志，用品牌色；没探测出时是名称的
+//! 首字，颜色按地址从固定调色板取（同一个地址在哪台电脑、哪个版本上都是同一个颜色）。
+//! 是淡底：颜色铺薄薄一层做底，标志和首字用颜色本身（用户定，2026-11-14）。
+//! 标签上的图块是 `card::remote::host_badge`，和程序图块（vim、htop）站在一起，还是实色底。
 
 use gpui_kit::component::Icon;
 use gpui_kit::*;
 
-use qishell_hosts::{HostOs, mark_color};
-
-/// 没有品牌色时字和标志用白色（调色板的颜色都够深，白字对比度至少 4.5:1）。
-const MARK_INK: u32 = 0xFF_FFFF;
+use micaterm_hosts::{HostOs, mark_color};
 
 /// 画一个徽章要的东西，从主机上取。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,7 +20,7 @@ pub struct HostMark {
 }
 
 impl HostMark {
-    pub fn of(host: &qishell_hosts::Host) -> Self {
+    pub fn of(host: &micaterm_hosts::Host) -> Self {
         Self {
             name: host.name.clone(),
             address: host.address.clone(),
@@ -52,18 +50,17 @@ impl HostMark {
         }
     }
 
-    /// 直径为 `size` 的圆形徽章。
-    pub fn render(&self, id: ElementId, size: Pixels) -> impl IntoElement + use<> {
-        let own: Hsla = rgb(mark_color(&self.address)).into();
-        let white: Hsla = rgb(MARK_INK).into();
-        let (background, ink) = match self
+    /// 边长为 `size` 的圆角方块徽章，淡底（用户定，2026-11-14）：底是这台主机的颜色铺薄薄一层，
+    /// 标志或首字用这个颜色本身。`dark` 是深色界面：底铺得厚一点，字提亮，免得深色品牌（MySQL 的藏青）
+    /// 在深底上看不见；浅色界面里浅色品牌（Linux 的黄）压暗，免得在浅底上看不见。
+    pub fn render(&self, id: ElementId, size: Pixels, dark: bool) -> impl IntoElement + use<> {
+        // 没有系统，或者是单色的标志（Apple）：用地址的颜色，徽章绝不会是灰的。
+        let color: Hsla = rgb(self
             .os
-            .and_then(|os| os.brand_color().zip(os.brand_foreground()))
-        {
-            Some((background, ink)) => (rgb(background).into(), rgb(ink).into()),
-            // 没有系统，或者是单色的标志（Apple）：用地址的颜色，徽章绝不会是灰的。
-            None => (own, white),
-        };
+            .and_then(|os| os.brand_color())
+            .unwrap_or_else(|| mark_color(&self.address)))
+        .into();
+        let (background, ink) = soft(color, dark);
         let glyph = match self.os {
             Some(os) => Icon::default()
                 .path(os.icon_path())
@@ -71,8 +68,9 @@ impl HostMark {
                 .text_color(ink)
                 .into_any_element(),
             None => div()
-                .text_size(size * 0.5)
-                .font_weight(FontWeight::SEMIBOLD)
+                .text_size(size * 0.64)
+                .line_height(size * 0.64)
+                .font_weight(FontWeight::BOLD)
                 .child(self.glyph().unwrap_or_default())
                 .into_any_element(),
         };
@@ -85,17 +83,39 @@ impl HostMark {
             .items_center()
             .justify_center()
             .size(size)
-            .rounded_full()
+            .rounded(size * (4. / 14.))
             .bg(background)
             .text_color(ink)
             .child(glyph)
     }
 }
 
+/// 淡底徽章的底色和字色：底是 `color` 铺一层（浅色界面 14%，深色 22%），字是 `color` 本身，
+/// 亮度收进看得清的范围（浅色界面不高于 45%，深色不低于 74%）。
+fn soft(color: Hsla, dark: bool) -> (Hsla, Hsla) {
+    if dark {
+        (
+            color.opacity(0.22),
+            Hsla {
+                l: color.l.max(0.74),
+                ..color
+            },
+        )
+    } else {
+        (
+            color.opacity(0.14),
+            Hsla {
+                l: color.l.min(0.45),
+                ..color
+            },
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::HostMark;
-    use qishell_hosts::HostOs;
+    use micaterm_hosts::HostOs;
 
     fn mark(name: &str, os: Option<HostOs>) -> HostMark {
         HostMark {

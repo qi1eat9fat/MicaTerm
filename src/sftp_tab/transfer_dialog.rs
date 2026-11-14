@@ -2,29 +2,31 @@
 // 改造：走 `DialogLayer` 和 `open_choice_dialog`，问题框照全部界面原型 `sftpconf`（要传的 / 已有的两行对比）；
 // 去掉英文和复数写法。
 //! 传输的两种框：上传或下载的确认框（列出项目、来源、目标），和引擎问的问题（冲突、重试、续传）。
+//! 两种都是共用的 `ui::modal` 弹窗（26 号）：确认框头部是上传、下载图标 + 标题，底部「取消 Esc」
+//! 「上传 Enter」；问题框走 `open_choice_dialog`。
 
 use std::path::Path;
 use std::rc::Rc;
 
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::Button;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::{CardSide, FileIcon, FileIconKind, QueueEntry, format_changed, format_size};
+use crate::app::CatalogIcon;
 use crate::backend::sftp::{
     FileFacts, TransferChoice, TransferDirection, TransferQuestion, TransferQuestionKind,
     describe_reason_link,
 };
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, size};
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Choice, ChoiceButton, ChoiceTone, ConfirmLine};
-use crate::ui::form::{FieldNote, dialog_footer, form_field};
-
-/// 确认框的宽（原型 `.dlg.small`）。
-const DIALOG_WIDTH: Pixels = px(480.);
+use crate::ui::form::{FieldNote, form_field};
+use crate::ui::modal::{
+    ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button, modal_dialog, modal_input,
+    render_modal,
+};
 
 /// 确认框里的一项。整条路径换行时一项看着像两项，所以共同的目录写一次，每项一行只写名字。
 struct SourceItem {
@@ -105,7 +107,7 @@ impl TransferSources {
 
     fn render(&self, tokens: &Tokens) -> impl IntoElement + use<> {
         let shared_folder = self.folder.is_some();
-        let (line, faint) = (tokens.line, tokens.faint);
+        let (line, faint) = (tokens.line, tokens.st_dim);
         div()
             .flex()
             .flex_col()
@@ -113,7 +115,6 @@ impl TransferSources {
             .when_some(self.folder.clone(), |this, folder| {
                 this.child(
                     div()
-                        .text_size(px(11.5))
                         .text_color(faint)
                         .child(t!("sftp_transfer.confirm.in_folder", folder = folder)),
                 )
@@ -126,7 +127,7 @@ impl TransferSources {
                     .max_h(px(128.))
                     .overflow_y_scroll()
                     .py(px(4.))
-                    .rounded(px(8.))
+                    .rounded(size::RADIUS)
                     .border_1()
                     .border_color(line)
                     .children(self.items.iter().map(|item| {
@@ -139,14 +140,11 @@ impl TransferSources {
                             .gap(px(7.))
                             .px(px(8.))
                             .py(px(2.))
-                            .child(FileIcon::new(
-                                item.name.clone(),
-                                if item.is_dir {
-                                    FileIconKind::Folder
-                                } else {
-                                    FileIconKind::File
-                                },
-                            ))
+                            .child(FileIcon::new(if item.is_dir {
+                                FileIconKind::Folder
+                            } else {
+                                FileIconKind::File
+                            }))
                             .child(div().min_w_0().child(item.name.clone()))
                             // 来自不同目录的项目各写各的目录。
                             .when(!shared_folder, |this| {
@@ -155,7 +153,6 @@ impl TransferSources {
                                         .flex_1()
                                         .min_w_0()
                                         .truncate()
-                                        .text_size(px(11.5))
                                         .text_color(faint)
                                         .child(item.folder.clone()),
                                 )
@@ -174,6 +171,14 @@ pub(super) struct TransferForm {
     target: Entity<InputState>,
     endpoint: String,
     error: Option<SharedString>,
+    /// 对话框是哪一层：确认、取消时只关自己。
+    layer: DialogLayer,
+    /// 确认了要做的事（`open_form_dialog` 给）。
+    on_confirmed: Option<OnConfirmed>,
+    /// 关了以后焦点回到打开前的地方。
+    restore_focus: Option<FocusHandle>,
+    focus_handle: FocusHandle,
+    _subscription: Subscription,
 }
 
 impl TransferForm {
@@ -186,13 +191,47 @@ impl TransferForm {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let target = cx.new(|cx| InputState::new(window, cx).default_value(target));
+        // 回车就是「上传」「下载」；改了字，上一次的错误先收起来。
+        let subscription =
+            cx.subscribe_in(&target, window, |this, _, event, window, cx| match event {
+                InputEvent::Change => {
+                    if this.error.take().is_some() {
+                        cx.notify();
+                    }
+                }
+                InputEvent::PressEnter { .. } => this.confirm(window, cx),
+                _ => {}
+            });
         Self {
             direction,
             queued,
             sources,
-            target: cx.new(|cx| InputState::new(window, cx).default_value(target)),
+            target,
             endpoint,
             error: None,
+            layer: DialogLayer::new(),
+            on_confirmed: None,
+            restore_focus: None,
+            focus_handle: cx.focus_handle(),
+            _subscription: subscription,
+        }
+    }
+
+    /// 「上传」「下载」（回车也是）：目标过得去就关掉对话框、开始；不然写上原因。
+    fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(target) = self.commit(cx) {
+            self.close(window, cx);
+            if let Some(on_confirmed) = self.on_confirmed.clone() {
+                on_confirmed(target, window, cx);
+            }
+        }
+    }
+
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.layer.close(window, cx);
+        if let Some(focus) = &self.restore_focus {
+            window.focus(focus, cx);
         }
     }
 
@@ -238,13 +277,21 @@ impl TransferForm {
     }
 }
 
+impl Focusable for TransferForm {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
 impl Render for TransferForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let count = self.sources.count();
         let upload = self.direction == TransferDirection::Upload;
-        let (summary, label, field, target) = if upload {
+        let (icon, title, summary, label, field, confirm_id, confirm) = if upload {
             (
+                CatalogIcon::Upload,
+                t!("sftp_transfer.confirm.upload_title"),
                 t!(
                     "sftp_transfer.confirm.upload_summary",
                     items = count,
@@ -252,13 +299,13 @@ impl Render for TransferForm {
                 ),
                 t!("sftp_transfer.confirm.target"),
                 "upload-target",
-                Input::new(&self.target)
-                    .id("upload-target")
-                    .small()
-                    .into_any_element(),
+                "upload-confirm",
+                t!("sftp_transfer.confirm.upload"),
             )
         } else {
             (
+                CatalogIcon::Download,
+                t!("sftp_transfer.confirm.download_title"),
                 t!(
                     "sftp_transfer.confirm.download_summary",
                     items = count,
@@ -266,23 +313,42 @@ impl Render for TransferForm {
                 ),
                 t!("sftp_transfer.confirm.download_to"),
                 "download-target",
-                div()
-                    .flex()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Input::new(&self.target).id("download-target").small()),
-                    )
-                    .child(
-                        Button::new("download-browse")
-                            .small()
-                            .label(t!("sftp_transfer.confirm.browse"))
-                            .on_click(cx.listener(|this, _, window, cx| this.browse(window, cx))),
-                    )
-                    .into_any_element(),
+                "download-confirm",
+                t!("sftp_transfer.confirm.download"),
             )
+        };
+        let input = modal_input(
+            field,
+            label.clone(),
+            &self.target,
+            ModalInputKind::Text,
+            self.error.is_some(),
+            &tokens,
+            window,
+            cx,
+        );
+        // 下载到本机：右边「浏览…」挑目录。
+        let target = if upload {
+            input.into_any_element()
+        } else {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(div().flex_1().min_w_0().child(input))
+                .child(modal_button(
+                    "download-browse",
+                    t!("sftp_transfer.confirm.browse"),
+                    None,
+                    ModalButtonTone::Line,
+                    Some(Box::new(
+                        cx.listener(|this, _, window, cx| this.browse(window, cx)),
+                    )),
+                    &tokens,
+                    window,
+                    cx,
+                ))
+                .into_any_element()
         };
         let notes = self
             .error
@@ -290,16 +356,16 @@ impl Render for TransferForm {
             .map(|message| FieldNote::Error { field, message })
             .into_iter()
             .collect();
-        div()
+        let body = div()
             .flex()
             .flex_col()
             .gap(px(10.))
-            .text_size(px(12.5))
             .child(
                 div()
                     .id("transfer-summary")
                     .test_support()
                     .aria_label(summary.clone())
+                    .text_color(tokens.text2)
                     .child(summary),
             )
             .child(self.sources.render(&tokens))
@@ -308,12 +374,50 @@ impl Render for TransferForm {
                     div()
                         .id("transfer-queued-note")
                         .test_support()
-                        .text_size(px(11.5))
-                        .text_color(tokens.faint)
+                        .text_color(tokens.st_dim)
                         .child(t!("sftp_transfer.confirm.queued_note")),
                 )
             })
-            .child(form_field(Some(label), target, notes, &tokens))
+            .child(
+                div()
+                    .mt(px(4.))
+                    .child(form_field(Some(label), target, notes, &tokens)),
+            );
+        let cancel: OnClick = Box::new(cx.listener(|this, _, window, cx| this.close(window, cx)));
+        let footer = div()
+            .flex()
+            .gap(px(6.))
+            .child(modal_button(
+                "transfer-confirm-cancel",
+                t!("sftp_transfer.confirm.cancel"),
+                Some("Esc"),
+                ModalButtonTone::Plain,
+                Some(cancel),
+                &tokens,
+                window,
+                cx,
+            ))
+            .child(modal_button(
+                confirm_id,
+                confirm,
+                Some("Enter"),
+                ModalButtonTone::Primary,
+                Some(Box::new(
+                    cx.listener(|this, _, window, cx| this.confirm(window, cx)),
+                )),
+                &tokens,
+                window,
+                cx,
+            ));
+        let head = ModalHead {
+            icon,
+            title,
+            detail: None,
+        };
+        render_modal(Some(head), body, footer, &tokens, window, cx)
+            .id("transfer-confirm")
+            .test_support()
+            .track_focus(&self.focus_handle)
     }
 }
 
@@ -328,45 +432,19 @@ pub(super) fn open_form_dialog(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let upload = form.read(cx).direction == TransferDirection::Upload;
-    let (title, confirm_id, confirm) = if upload {
-        (
-            t!("sftp_transfer.confirm.upload_title"),
-            "upload-confirm",
-            t!("sftp_transfer.confirm.upload"),
-        )
-    } else {
-        (
-            t!("sftp_transfer.confirm.download_title"),
-            "download-confirm",
-            t!("sftp_transfer.confirm.download"),
-        )
-    };
     let focus = window.focused(cx);
-    let input = form.read(cx).target.clone();
+    let input = form.update(cx, |form, _| {
+        form.layer = layer.clone();
+        form.on_confirmed = Some(on_confirmed);
+        form.restore_focus = focus.clone();
+        form.target.clone()
+    });
     layer.open_dismissable(
         move |dialog, _, _| {
-            let (commit, on_confirmed) = (form.clone(), on_confirmed.clone());
-            dialog
-                .title(title.clone())
-                .w(DIALOG_WIDTH)
-                .rounded(px(14.))
-                .overlay_closable(false)
+            modal_dialog(dialog)
+                // 回车由目标框自己处理（目标不对时不关）。
+                .on_ok(|_, _, _| false)
                 .child(form.clone())
-                .footer(dialog_footer(
-                    confirm_id,
-                    confirm.clone(),
-                    t!("sftp_transfer.confirm.cancel"),
-                ))
-                .on_ok(
-                    move |_, window, cx| match commit.update(cx, |form, cx| form.commit(cx)) {
-                        Some(target) => {
-                            on_confirmed(target, window, cx);
-                            true
-                        }
-                        None => false,
-                    },
-                )
         },
         move |window, cx| {
             if let Some(focus) = &focus {

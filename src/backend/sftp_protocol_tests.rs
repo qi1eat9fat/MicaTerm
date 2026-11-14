@@ -1,6 +1,6 @@
 // 来自 since2006/shell-rs @ b2a307a: src/sftp/protocol_tests.rs
-// 裁剪：去掉 `SftpRoute`（「文件」开在终端连接上）和 `sftp://` 外部连接的测试，QiShell 的 SFTP 标签总是自己一条连接；
-// 服务器换成 `qishell_ssh::testing::TestServer`，故障注入也放在那里。
+// 裁剪：去掉 `SftpRoute`（「文件」开在终端连接上）和 `sftp://` 外部连接的测试，MicaTerm 的 SFTP 标签总是自己一条连接；
+// 服务器换成 `micaterm_ssh::testing::TestServer`，故障注入也放在那里。
 //! 工作线程走真协议的测试：只连本机，不碰用户的主机、凭据和 shell。
 //! 这台机器上没有 `sftp-server` 时跳过（Windows 上用 Git 带的）。路径当不透明的前缀用。
 
@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer, has_sftp_server};
-use qishell_ssh::{
+use micaterm_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer, has_sftp_server};
+use micaterm_ssh::{
     ConnectionPromptKind, ConnectionPromptReply, ConnectionSecret, HostLogin, Latency, LoginMethod,
     SshConnector,
 };

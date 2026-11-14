@@ -1,7 +1,7 @@
-//! 数据目录：QiShell 存放全部配置的文件夹，拷走它就带走全部配置（ADR 0003）。
+//! 数据目录：MicaTerm 存放全部配置的文件夹，拷走它就带走全部配置（ADR 0003）。
 //!
 //! 默认是可执行文件旁的 `data/`；macOS 上放在 `.app` 包的旁边（写进包内会破坏签名）。
-//! 环境变量 `QISHELL_DATA_DIR` 可以把它改到别处。开发版的数据自然落在 `target/debug/data/`。
+//! 环境变量 `MICATERM_DATA_DIR` 可以把它改到别处。开发版的数据自然落在 `target/debug/data/`。
 // 参考 since2006/shell-rs @ b2a307a: src/app/paths.rs 重写（规则按 ADR 0003）
 
 use std::ffi::OsString;
@@ -9,7 +9,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// 改数据目录的环境变量。
-pub const DATA_DIR_ENV: &str = "QISHELL_DATA_DIR";
+pub const DATA_DIR_ENV: &str = "MICATERM_DATA_DIR";
 
 /// 可执行文件旁的数据目录名。
 pub const DATA_DIR_NAME: &str = "data";
@@ -18,9 +18,10 @@ pub const DATA_DIR_NAME: &str = "data";
 pub const SETTINGS_FILE: &str = "settings.json";
 
 /// 主机、凭据、命令片段的数据库文件名。
-pub const DATABASE_FILE: &str = "qishell.db";
+/// 发布后不能改：改了就找不到已有的主机数据。
+pub const DATABASE_FILE: &str = "micaterm.db";
 
-/// 本次运行的数据目录：`QISHELL_DATA_DIR`，否则是可执行文件旁的 `data/`。
+/// 本次运行的数据目录：`MICATERM_DATA_DIR`，否则是可执行文件旁的 `data/`。
 pub fn data_dir() -> io::Result<PathBuf> {
     let exe = std::env::current_exe()?;
     // 系统怎么拼就怎么用：8.3 短名、符号链接都换成真实路径。
@@ -28,10 +29,10 @@ pub fn data_dir() -> io::Result<PathBuf> {
     Ok(data_dir_of(&exe, std::env::var_os(DATA_DIR_ENV)))
 }
 
-/// 程序在 `exe`、环境变量 `QISHELL_DATA_DIR` 的值是 `env` 时的数据目录。纯函数，便于测试。
+/// 程序在 `exe`、环境变量 `MICATERM_DATA_DIR` 的值是 `env` 时的数据目录。纯函数，便于测试。
 ///
 /// - `env` 非空：就用它；
-/// - macOS 的 `X.app/Contents/MacOS/qishell`：`.app` 旁边的 `data/`；
+/// - macOS 的 `X.app/Contents/MacOS/micaterm`：`.app` 旁边的 `data/`；
 /// - 其他情况：`exe` 所在目录下的 `data/`。
 pub fn data_dir_of(exe: &Path, env: Option<OsString>) -> PathBuf {
     if let Some(dir) = env.filter(|dir| !dir.is_empty()) {
@@ -86,7 +87,7 @@ pub fn vault_path() -> io::Result<PathBuf> {
     Ok(dir.join(VAULT_FILE))
 }
 
-/// QiShell 自己的主机密钥记录文件名（不碰 `~/.ssh/known_hosts`）。
+/// MicaTerm 自己的主机密钥记录文件名（不碰 `~/.ssh/known_hosts`）。
 pub const KNOWN_HOSTS_FILE: &str = "known_hosts";
 
 /// 主机密钥记录 `known_hosts` 的路径（工单 12）。数据目录还不存在时先建好；建不了就返回错误。
@@ -126,12 +127,12 @@ mod tests {
     #[test]
     fn the_data_folder_is_beside_the_program() {
         assert_eq!(
-            data_dir_of(Path::new("D:/Tools/QiShell/qishell.exe"), None),
-            PathBuf::from("D:/Tools/QiShell/data")
+            data_dir_of(Path::new("D:/Tools/MicaTerm/micaterm.exe"), None),
+            PathBuf::from("D:/Tools/MicaTerm/data")
         );
         assert_eq!(
-            data_dir_of(Path::new("/opt/qishell/qishell"), None),
-            PathBuf::from("/opt/qishell/data")
+            data_dir_of(Path::new("/opt/micaterm/micaterm"), None),
+            PathBuf::from("/opt/micaterm/data")
         );
     }
 
@@ -139,14 +140,14 @@ mod tests {
     fn on_macos_the_data_folder_is_beside_the_app_bundle() {
         assert_eq!(
             data_dir_of(
-                Path::new("/Applications/Tools/QiShell.app/Contents/MacOS/qishell"),
+                Path::new("/Applications/Tools/MicaTerm.app/Contents/MacOS/micaterm"),
                 None
             ),
             PathBuf::from("/Applications/Tools/data")
         );
         // 只是名字像的普通目录不算包。
         assert_eq!(
-            data_dir_of(Path::new("/home/me/Contents/MacOS/qishell"), None),
+            data_dir_of(Path::new("/home/me/Contents/MacOS/micaterm"), None),
             PathBuf::from("/home/me/Contents/MacOS/data")
         );
     }
@@ -155,18 +156,18 @@ mod tests {
     fn the_environment_variable_moves_the_data_folder() {
         assert_eq!(
             data_dir_of(
-                Path::new("D:/Tools/QiShell/qishell.exe"),
-                Some(OsString::from("E:/portable/qishell-data"))
+                Path::new("D:/Tools/MicaTerm/micaterm.exe"),
+                Some(OsString::from("E:/portable/micaterm-data"))
             ),
-            PathBuf::from("E:/portable/qishell-data")
+            PathBuf::from("E:/portable/micaterm-data")
         );
         // 设成空字符串等于没设。
         assert_eq!(
             data_dir_of(
-                Path::new("D:/Tools/QiShell/qishell.exe"),
+                Path::new("D:/Tools/MicaTerm/micaterm.exe"),
                 Some(OsString::new())
             ),
-            PathBuf::from("D:/Tools/QiShell/data")
+            PathBuf::from("D:/Tools/MicaTerm/data")
         );
     }
 }

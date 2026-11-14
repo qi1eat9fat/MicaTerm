@@ -27,20 +27,22 @@ use crate::backend::sftp::{
     RemotePath, SftpCommand, SftpEvent, SharedLocalDirectoryProvider, SharedSftpTransportProvider,
     describe_sftp_error,
 };
-use crate::backend::{ConnectionPrompt, ConnectionPromptReply, HostLogin, Latency};
-use crate::card::{StatusDot, host_badge};
+use crate::backend::{ConnectionPrompt, ConnectionPromptReply, HostLogin};
+use crate::card::StatusDot;
 use crate::host::{Host, HostId};
 use crate::i18n::t;
 use crate::programs::Program;
-use crate::theme::GAP;
+use crate::theme::{Tokens, size};
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Choice, ChoiceButton, ChoiceTone, ConfirmLine, open_choice_dialog};
 
 /// 每次连接一个新的代号：对话框比连接活得久时，它发的命令和问题的回答作废。
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
-/// 一张卡片不能比这再窄。
+/// 一栏不能比这再窄。
 const MIN_CARD_WIDTH: Pixels = px(240.);
+/// 传输队列开始时的高（26 号 `.sf-q`），能拖到 96–480。
+const QUEUE_HEIGHT: Pixels = px(212.);
 
 /// 打开一个 SFTP 标签要的东西。
 pub struct SftpTabOptions {
@@ -88,7 +90,6 @@ pub struct SftpTab {
     pub(super) local_files: SharedLocalDirectoryProvider,
     commands: async_channel::Sender<SftpCommand>,
     pub(super) state: ConnectionState,
-    latency: Option<Latency>,
     /// 还没用掉的远程初始目录。
     start_directory: Option<String>,
     /// 归工单 21 的状态（`operations.rs`）。
@@ -132,27 +133,20 @@ impl SftpTab {
                 CardSide::Local,
                 id,
                 t!("sftp_tab.local_name"),
-                crate::programs::local_files_program(),
                 local_home.clone(),
                 dispatch.clone(),
-                window,
                 cx,
             )
         });
-        let endpoint = endpoint_of(&login);
         let remote = cx.new(|cx| {
-            let mut card = FileCard::new(
+            FileCard::new(
                 CardSide::Remote,
                 id,
                 host.name.clone(),
-                host_badge(&host, host.os),
                 String::new(),
                 dispatch.clone(),
-                window,
                 cx,
-            );
-            card.set_link(Some(endpoint), None, cx);
-            card
+            )
         });
         // 本地：设置的目录 → 「下载」 → 主目录，读得出来的第一个。
         let (first, fallback) = start_chain(local_directory, downloads, local_home);
@@ -167,7 +161,7 @@ impl SftpTab {
         let transport = transports.create(&login);
         let failed = sender.clone();
         if let Err(error) = std::thread::Builder::new()
-            .name("qishell-sftp".into())
+            .name("micaterm-sftp".into())
             .spawn(move || {
                 if let Err(error) = transport.run(receiver, sender.clone()) {
                     let _ =
@@ -232,7 +226,6 @@ impl SftpTab {
             local_files,
             commands,
             state: ConnectionState::Connecting,
-            latency: None,
             start_directory,
             operations: OperationState::default(),
             transfers: TransferState::default(),
@@ -373,11 +366,8 @@ impl SftpTab {
         self.local.update(cx, |card, cx| {
             card.set_available(ConnectionState::Connected, transfer, cx)
         });
-        let (endpoint, latency) = (endpoint_of(&self.login), self.latency);
-        self.remote.update(cx, |card, cx| {
-            card.set_available(state, transfer, cx);
-            card.set_link(Some(endpoint), latency, cx);
-        });
+        self.remote
+            .update(cx, |card, cx| card.set_available(state, transfer, cx));
     }
 
     fn on_event(&mut self, event: SftpEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -385,7 +375,6 @@ impl SftpTab {
             SftpEvent::Connecting => {
                 self.generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
                 self.state = ConnectionState::Connecting;
-                self.latency = None;
             }
             SftpEvent::Connected { home } => {
                 self.state = ConnectionState::Connected;
@@ -409,7 +398,6 @@ impl SftpTab {
             }
             SftpEvent::Disconnected(message) => {
                 self.state = ConnectionState::Disconnected;
-                self.latency = None;
                 self.abandon_remote_operations(cx);
                 self.abandon_file_requests();
                 self.remote
@@ -445,7 +433,8 @@ impl SftpTab {
             SftpEvent::Notice(message) => {
                 window.push_notification(Notification::error(message), cx);
             }
-            SftpEvent::Latency(latency) => self.latency = Some(latency),
+            // 状态栏不写延迟（26 号，用户定只留名称和项数）。
+            SftpEvent::Latency(_) => {}
         }
         self.sync_available(cx);
         cx.emit(SftpTabEvent::Changed);
@@ -722,8 +711,8 @@ impl SftpTab {
     }
 
     /// 两张卡片，中间是间隙（可以拖）。两边一开始都从 0 起按 flex 平分，量过以后由 resizable 组件按像素摆。
-    fn render_cards(&self) -> impl IntoElement + use<> {
-        let half = GAP / 2.;
+    /// 本机、远程两栏（26 号 `.sf-cols`）：贴着，中间一条竖线，竖线可以拖。
+    fn render_cards(&self, tokens: &Tokens) -> impl IntoElement + use<> {
         h_resizable(("sftp-cards", self.id.0 as usize))
             .with_state(&self.cards_split)
             .with_handle_appearance(invisible_handle("sftp-cards-gap"))
@@ -737,7 +726,6 @@ impl SftpTab {
                             .size_full()
                             .min_w_0()
                             .min_h_0()
-                            .pr(half)
                             .child(self.local.clone()),
                     ),
             )
@@ -751,7 +739,8 @@ impl SftpTab {
                             .size_full()
                             .min_w_0()
                             .min_h_0()
-                            .pl(half)
+                            .border_l(size::LINE)
+                            .border_color(tokens.line)
                             .child(self.remote.clone()),
                     ),
             )
@@ -766,8 +755,8 @@ impl Drop for SftpTab {
 
 impl Render for SftpTab {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let tokens = Tokens::current(cx);
         let has_queue = !self.transfers.queue.is_empty();
-        let half = GAP / 2.;
         div()
             .id("sftp-tab")
             .test_support()
@@ -777,8 +766,9 @@ impl Render for SftpTab {
             .size_full()
             .min_w_0()
             .min_h_0()
-            .when(!has_queue, |tab| tab.child(self.render_cards()))
-            // 队列卡片有自己的位置：有东西才显示，两张卡片的比例不因为它来去而变。
+            .bg(tokens.content)
+            .when(!has_queue, |tab| tab.child(self.render_cards(&tokens)))
+            // 传输队列（26 号 `.sf-q`）有东西才出现在下面，清除后收起；两栏的比例不因为它来去而变。
             .when(has_queue, |tab| {
                 tab.child(
                     v_resizable(("sftp-queue", self.id.0 as usize))
@@ -790,20 +780,18 @@ impl Render for SftpTab {
                                     .flex()
                                     .size_full()
                                     .min_h_0()
-                                    .pb(half)
-                                    .child(self.render_cards()),
+                                    .child(self.render_cards(&tokens)),
                             ),
                         )
                         .child(
                             resizable_panel()
-                                .size(px(180.))
+                                .size(QUEUE_HEIGHT)
                                 .size_range(px(96.)..px(480.))
                                 .child(
                                     div()
                                         .flex()
                                         .size_full()
                                         .min_h_0()
-                                        .pt(half)
                                         .child(self.render_queue(cx)),
                                 ),
                         ),
@@ -824,11 +812,6 @@ fn invisible_handle(id: &'static str) -> ResizeHandleRenderer {
                 .into_any_element(),
         )
     })
-}
-
-/// 状态栏上的 `user@地址:端口`。
-fn endpoint_of(login: &HostLogin) -> SharedString {
-    format!("{}@{}:{}", login.user, login.host, login.port).into()
 }
 
 /// 本地一侧从哪里开始：设置的目录 → 「下载」 → 主目录，去掉重复的。返回第一个和后面的退路。

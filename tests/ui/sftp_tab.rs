@@ -4,20 +4,20 @@
 
 use std::time::Duration;
 
-use qishell::app::{
+use micaterm::app::{
     CloseFocusedCard, CloseOtherTabs, ConnectHost, NextTab, OpenCardSftp, OpenHostSftp, OpenSftp,
     SftpAction, SftpTabCommand, ShowCredentials, ShowSnippets, ToggleHiddenFiles,
 };
-use qishell::backend::sftp::{FileStamp, RemotePath, SftpEvent, TextFile};
-use qishell::backend::{
+use micaterm::backend::sftp::{FileStamp, RemotePath, SftpEvent, TextFile};
+use micaterm::backend::{
     AuthenticationRequest, ConnectionPrompt, ConnectionPromptKind, ProbedHost, RemoteEvent,
     RemoteTerminalId,
 };
-use qishell::editor::{EditorLocation, EditorOptions, EditorTab};
-use qishell::sftp_tab::{CardSide, SftpTab, TransferJob};
-use qishell::workspace::{FilesButton, RightPanel};
-use qishell_hosts::SecretRef;
-use qishell_terminal::TerminalLifecycle;
+use micaterm::editor::{EditorLocation, EditorOptions, EditorTab};
+use micaterm::sftp_tab::{CardSide, SftpTab, TransferJob};
+use micaterm::workspace::{FilesButton, RightPanel};
+use micaterm_hosts::SecretRef;
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -168,7 +168,6 @@ fn open_editor(
                 EditorOptions {
                     location,
                     place: "web-01".into(),
-                    link: "link".into(),
                     sftp,
                     local_files: Arc::new(local_files),
                     file,
@@ -257,7 +256,7 @@ fn the_terminal_menu_opens_the_host_of_that_card_and_switches_when_open(cx: &mut
 #[gpui_kit::test]
 fn the_host_menu_opens_the_right_clicked_host_from_anywhere(cx: &mut TestAppContext) {
     let fixture = open(cx);
-    // 开始卡片上也行，没有焦点卡片也行。
+    // 新标签页上也行，没有焦点卡片也行。
     dispatch(cx, fixture.handle, OpenHostSftp(HostId(3)));
     let tab = active_sftp(cx, &fixture).expect("the SFTP tab");
     assert_eq!(cx.update(|cx| tab.read(cx).host_id()), HostId(3));
@@ -291,7 +290,7 @@ fn a_local_card_greys_the_files_icon_and_says_why(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_start_card_and_a_local_editor_have_no_remote_files(cx: &mut TestAppContext) {
+fn the_new_tab_page_and_a_local_editor_have_no_remote_files(cx: &mut TestAppContext) {
     let fixture = open(cx);
     let reason = FilesButton::Unavailable("当前标签没有远程文件".into());
     assert_eq!(files_button(cx, &fixture), reason);
@@ -366,13 +365,14 @@ fn an_sftp_tab_cannot_be_split_and_ctrl_shift_w_closes_it(cx: &mut TestAppContex
 fn the_two_cards_show_their_place_and_files(cx: &mut TestAppContext) {
     let fixture = open(cx);
     open_tab(cx, &fixture);
+    // 没有卡片头部了（26 号）：路径栏写着目录，状态栏写着「本机」和主机名。
     assert_eq!(
-        label(cx, fixture.handle, "local-header").as_deref(),
-        Some(format!("本机 {LOCAL_DOWNLOADS}").as_str())
+        shown_path(cx, &fixture, "local-path").as_deref(),
+        Some(LOCAL_DOWNLOADS)
     );
     assert_eq!(
-        label(cx, fixture.handle, "remote-header").as_deref(),
-        Some("web-01 /home/tester")
+        shown_path(cx, &fixture, "remote-path").as_deref(),
+        Some("/home/tester")
     );
     in_frame(cx, fixture.handle, |window, _| {
         assert!(
@@ -454,10 +454,6 @@ fn ctrl_o_turns_the_path_bar_into_an_input_and_enter_goes_there(cx: &mut TestApp
     });
     assert!(done, "没有切过去");
     assert!(!editing_path(cx, &fixture, true));
-    assert_eq!(
-        label(cx, fixture.handle, "remote-header").as_deref(),
-        Some("web-01 /var/log")
-    );
 }
 
 #[gpui_kit::test]
@@ -741,27 +737,21 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
         label(cx, fixture.handle, "local-status").as_deref(),
         Some("4 项 · 已选 0 项")
     );
-    let endpoint = cx.update(|cx| {
-        let tab = fixture.workspace.read(cx).active_sftp_tab().unwrap();
-        let tab = tab.read(cx);
-        let login = tab.login();
-        format!("{}@{}:{}", login.user, login.host, login.port)
-    });
+    // 连着时不写连接状态、地址和延迟（26 号，用户定只留名称和项数）。
     assert_eq!(
-        label(cx, fixture.handle, "remote-status"),
-        Some(format!("已连接 · {endpoint} · 4 项 · 已选 0 项"))
+        label(cx, fixture.handle, "remote-status").as_deref(),
+        Some("4 项 · 已选 0 项")
     );
-
     fixture
         .sftp
-        .emit(SftpEvent::Latency(qishell::backend::Latency::Measured(
+        .emit(SftpEvent::Latency(micaterm::backend::Latency::Measured(
             Duration::from_millis(38),
         )));
-    let measured = wait_until(cx, fixture.handle, |cx| {
-        label(cx, fixture.handle, "remote-status").as_deref()
-            == Some(format!("已连接 · {endpoint} · 38 ms · 4 项 · 已选 0 项").as_str())
-    });
-    assert!(measured, "{:?}", label(cx, fixture.handle, "remote-status"));
+    cx.run_until_parked();
+    assert_eq!(
+        label(cx, fixture.handle, "remote-status").as_deref(),
+        Some("4 项 · 已选 0 项")
+    );
 
     // 选中几项。
     focus_list(cx, &fixture, false);
@@ -771,19 +761,20 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
         Some("4 项 · 已选 4 项")
     );
 
-    // 断开：变红（`problem`）写原因。
+    // 断开：名字后面红字写「已断开」和原因，列表还在。
     fixture.sftp.emit(SftpEvent::Disconnected(
         "连接超时（已自动重连 3 次）".into(),
     ));
     let lost = wait_until(cx, fixture.handle, |cx| {
         label(cx, fixture.handle, "remote-status").as_deref()
-            == Some("已断开 · 连接超时（已自动重连 3 次） · 4 项")
+            == Some("已断开 · 连接超时（已自动重连 3 次） · 4 项 · 已选 0 项")
     });
     assert!(lost, "{:?}", label(cx, fixture.handle, "remote-status"));
 }
 
 #[gpui_kit::test]
-fn the_local_status_bar_counts_hidden_files(cx: &mut TestAppContext) {
+/// 状态栏只数显示出来的项，不写隐藏了几项（26 号）。
+fn the_status_bar_counts_only_the_files_shown(cx: &mut TestAppContext) {
     let fixture = open(cx);
     open_tab(cx, &fixture);
     sftp_action(
@@ -796,7 +787,7 @@ fn the_local_status_bar_counts_hidden_files(cx: &mut TestAppContext) {
     );
     let hidden = wait_until(cx, fixture.handle, |cx| {
         label(cx, fixture.handle, "remote-status")
-            .is_some_and(|status| status.ends_with("1 项 · 已选 0 项 · 隐藏 2 项"))
+            .is_some_and(|status| status == "1 项 · 已选 0 项")
     });
     assert!(hidden, "{:?}", label(cx, fixture.handle, "remote-status"));
 
@@ -818,8 +809,9 @@ fn the_tab_rail_shows_a_folder_tile_the_host_and_the_remote_directory(cx: &mut T
     let tab = cx.update(|cx| fixture.workspace.read(cx).active_tab().unwrap());
 
     assert_eq!(
-        cx.update(|cx| fixture.workspace.read(cx).tab_tiles(tab, cx)),
-        ["SFTP"]
+        cx.update(|cx| fixture.workspace.read(cx).tab_tile(tab, cx))
+            .as_deref(),
+        Some("SFTP")
     );
     let rail = move |cx: &mut TestAppContext, fixture: &Fixture| {
         in_frame(cx, fixture.handle, move |window, _| {
@@ -1032,7 +1024,7 @@ fn closing_an_sftp_tab_closes_its_remote_editors_only(cx: &mut TestAppContext) {
     assert_eq!(tab_count(cx, &fixture), 4);
 
     let tab = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[1]);
-    dispatch(cx, fixture.handle, qishell::app::CloseTab(tab));
+    dispatch(cx, fixture.handle, micaterm::app::CloseTab(tab));
 
     // 卡片那个终端标签和本地文件的编辑器留着。
     assert_eq!(tab_count(cx, &fixture), 2);
@@ -1069,7 +1061,7 @@ fn disconnected_a_remote_command_offers_to_reconnect(cx: &mut TestAppContext) {
     assert!(back, "没有重新连接");
     let connected = wait_until(cx, fixture.handle, |cx| {
         label(cx, fixture.handle, "remote-status")
-            .is_some_and(|status| status.starts_with("已连接"))
+            .is_some_and(|status| !status.starts_with("已断开"))
     });
     assert!(
         connected,

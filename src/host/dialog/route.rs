@@ -23,15 +23,16 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use zeroize::Zeroizing;
 
-use qishell_hosts::{HostDraft, HostId, ProxyKind, ProxySettings, Route, SecretRef};
+use micaterm_hosts::{HostDraft, HostId, ProxyKind, ProxySettings, Route, SecretRef};
 
 use super::HostDialog;
 use super::general::parse_port;
 use crate::host::HostStore;
 use crate::i18n::t;
 use crate::settings::segmented;
-use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, FieldNote, form_field, locked_secret, text_input};
+use crate::theme::{Tokens, ui_text};
+use crate::ui::form::{FieldErrors, FieldNote, form_field, locked_secret};
+use crate::ui::modal::{ModalInputKind, modal_input};
 use crate::vault::{SecretField, VaultStore};
 
 /// 连接方式的分段按钮。
@@ -59,8 +60,6 @@ pub const FIELD_PROXY_PASSWORD: &str = "host-proxy-password";
 pub const PROXY_PASSWORD_LOCKED: &str = "host-proxy-password-locked";
 pub const PROXY_PASSWORD_UNLOCK: &str = "host-proxy-password-unlock";
 
-/// 代理端口输入框的宽度（原型 `.in.narrow`）。
-const PORT_WIDTH: Pixels = px(80.);
 /// 新建代理时端口框里的值（原型）。
 const DEFAULT_PROXY_PORT: u16 = 1080;
 
@@ -109,7 +108,7 @@ pub(super) struct RouteSection {
     /// 可以当跳板的主机：除了编辑的这台以外的全部。
     candidates: Vec<JumpHost>,
     /// 「添加跳板主机」展开着。
-    picking: bool,
+    pub(super) picking: bool,
     proxy_kind: ProxyKind,
     proxy_host: Entity<InputState>,
     proxy_port: Entity<InputState>,
@@ -344,6 +343,7 @@ impl RouteSection {
         errors: &FieldErrors,
         tokens: &Tokens,
         this_host: SharedString,
+        window: &Window,
         cx: &mut Context<HostDialog>,
     ) -> AnyElement {
         let dialog = cx.entity().downgrade();
@@ -360,7 +360,7 @@ impl RouteSection {
                 .ok();
         });
         let mut rows = vec![form_field(
-            None,
+            Some(t!("host.dialog.route")),
             segmented(
                 ROUTE_CHOICE,
                 RouteChoice::ALL
@@ -382,9 +382,9 @@ impl RouteSection {
         match choice {
             RouteChoice::Direct => {}
             RouteChoice::Jump => rows.extend(self.render_jumps(errors, tokens, this_host, cx)),
-            RouteChoice::Proxy => rows.extend(self.render_proxy(errors, tokens, cx)),
+            RouteChoice::Proxy => rows.extend(self.render_proxy(errors, tokens, window, cx)),
         }
-        crate::ui::form::form_group(t!("host.dialog.route"), rows, tokens)
+        crate::ui::form::form_group(rows)
     }
 
     /// 路线和跳板列表两行。
@@ -417,8 +417,8 @@ impl RouteSection {
             .items_center()
             .gap(px(4.))
             .min_h(px(30.))
-            .text_size(px(12.))
-            .text_color(tokens.muted)
+            .text_size(ui_text())
+            .text_color(tokens.text2)
             .children(
                 stops
                     .into_iter()
@@ -429,11 +429,11 @@ impl RouteSection {
                                 .px(px(8.))
                                 .py(px(2.))
                                 .rounded_full()
-                                .bg(tokens.field)
+                                .bg(tokens.input)
                                 .border_1()
-                                .border_color(tokens.field_border)
+                                .border_color(tokens.line_strong)
                                 .font_weight(FontWeight::MEDIUM)
-                                .text_color(if gone { tokens.bad } else { tokens.text })
+                                .text_color(if gone { tokens.err } else { tokens.text })
                                 .child(name)
                         } else {
                             div().child(name)
@@ -466,8 +466,8 @@ impl RouteSection {
                     .pl(px(10.))
                     .pr(px(4.))
                     .rounded(px(8.))
-                    .bg(tokens.field)
-                    .text_size(px(12.5))
+                    .bg(tokens.input)
+                    .text_size(ui_text())
                     .child(
                         div()
                             .flex_none()
@@ -484,7 +484,7 @@ impl RouteSection {
                             .child(
                                 div()
                                     .truncate()
-                                    .when(host.is_none(), |name| name.text_color(tokens.bad))
+                                    .when(host.is_none(), |name| name.text_color(tokens.err))
                                     .child(name),
                             )
                             .children(host.map(|host| {
@@ -586,7 +586,7 @@ impl RouteSection {
                 .aria_label(note.clone())
                 .px(px(10.))
                 .py(px(6.))
-                .text_size(px(12.))
+                .text_size(ui_text())
                 .text_color(tokens.faint)
                 .child(note)
         });
@@ -611,7 +611,7 @@ impl RouteSection {
                     .px(px(8.))
                     .py(px(4.))
                     .rounded(px(6.))
-                    .text_size(px(12.5))
+                    .text_size(ui_text())
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover))
                     .on_click(cx.listener(move |dialog, _, _, cx| {
@@ -635,6 +635,7 @@ impl RouteSection {
         &self,
         errors: &FieldErrors,
         tokens: &Tokens,
+        window: &Window,
         cx: &mut Context<HostDialog>,
     ) -> Vec<AnyElement> {
         let dialog = cx.entity().downgrade();
@@ -676,20 +677,31 @@ impl RouteSection {
                 div()
                     .flex()
                     .gap(px(6.))
-                    .child(div().flex_1().min_w_0().child(text_input(
+                    .child(div().flex_1().min_w_0().child(modal_input(
                         FIELD_PROXY_HOST,
                         t!("host.dialog.proxy_address"),
                         &self.proxy_host,
+                        ModalInputKind::Text,
                         invalid(FIELD_PROXY_HOST),
                         tokens,
+                        window,
+                        cx,
                     )))
-                    .child(div().flex_none().w(PORT_WIDTH).child(text_input(
-                        FIELD_PROXY_PORT,
-                        t!("host.dialog.proxy_port"),
-                        &self.proxy_port,
-                        invalid(FIELD_PROXY_PORT),
-                        tokens,
-                    ))),
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(super::general::PORT_WIDTH)
+                            .child(modal_input(
+                                FIELD_PROXY_PORT,
+                                t!("host.dialog.proxy_port"),
+                                &self.proxy_port,
+                                ModalInputKind::Text,
+                                invalid(FIELD_PROXY_PORT),
+                                tokens,
+                                window,
+                                cx,
+                            )),
+                    ),
                 [
                     FieldNote::error_of(FIELD_PROXY_HOST, errors),
                     FieldNote::error_of(FIELD_PROXY_PORT, errors),
@@ -701,12 +713,15 @@ impl RouteSection {
             ),
             form_field(
                 Some(t!("host.dialog.user")),
-                text_input(
+                modal_input(
                     FIELD_PROXY_USER,
                     t!("host.dialog.proxy_user"),
                     &self.proxy_user,
+                    ModalInputKind::Text,
                     invalid(FIELD_PROXY_USER),
                     tokens,
+                    window,
+                    cx,
                 ),
                 FieldNote::error_of(FIELD_PROXY_USER, errors)
                     .into_iter()
@@ -719,12 +734,15 @@ impl RouteSection {
                     locked_secret(PROXY_PASSWORD_LOCKED, PROXY_PASSWORD_UNLOCK, tokens)
                         .into_any_element()
                 } else {
-                    text_input(
+                    modal_input(
                         FIELD_PROXY_PASSWORD,
                         t!("host.dialog.proxy_password"),
                         self.proxy_password.input(),
+                        ModalInputKind::Secret,
                         false,
                         tokens,
+                        window,
+                        cx,
                     )
                     .into_any_element()
                 },
@@ -768,7 +786,7 @@ fn hop_button(
 #[cfg(test)]
 mod tests {
     use super::RouteChoice;
-    use qishell_hosts::{HostId, ProxyKind, ProxySettings, Route};
+    use micaterm_hosts::{HostId, ProxyKind, ProxySettings, Route};
 
     #[test]
     fn the_choice_follows_the_saved_route() {

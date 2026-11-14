@@ -1,5 +1,5 @@
 // 来自 since2006/shell-rs @ b2a307a: src/explorer/transfer_queue.rs
-// 改造：文案键换成 `sftp_transfer.*`，复数写法换成 `%{count}`（QiShell 只有简体中文）。
+// 改造：文案键换成 `sftp_transfer.*`，复数写法换成 `%{count}`（MicaTerm 只有简体中文）。
 //! The SFTP tab's transfer queue, as WinSCP keeps one: batches waiting
 //! their turn, the one being transferred, and the ones that have ended.
 //! Plain bookkeeping; the panel hands batches to the engine, which runs one

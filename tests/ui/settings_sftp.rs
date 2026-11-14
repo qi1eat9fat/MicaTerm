@@ -1,14 +1,14 @@
-//! 设置 › SFTP（工单 25）：同时传输数量、本地默认打开目录、图标风格、显示隐藏文件，
+//! 设置 › SFTP（工单 25）：同时传输数量、本地默认打开目录、显示隐藏文件，
 //! 改动写进设置存储，并在 SFTP 标签上生效。
 //! 引擎的并发数是进程全局量，并行的测试会互相改它，这里只断言设置值（`settings::apply` 交给引擎）。
 
 use std::path::Path;
 use std::time::Duration;
 
-use qishell::app::{ConnectHost, OpenSettings, OpenSftp, ToggleHiddenFiles};
-use qishell::settings::SftpSettings;
-use qishell::sftp_tab::{CardSide, FileIconStyle, ShowHiddenFiles};
-use qishell_terminal::TerminalLifecycle;
+use micaterm::app::{CloseActiveTab, ConnectHost, OpenSettings, OpenSftp, ToggleHiddenFiles};
+use micaterm::settings::SftpSettings;
+use micaterm::sftp_tab::{CardSide, ShowHiddenFiles};
+use micaterm_terminal::TerminalLifecycle;
 
 use crate::support::*;
 
@@ -46,10 +46,9 @@ fn open_sftp_settings(cx: &mut TestAppContext, fixture: &Fixture) {
     });
 }
 
+/// 关掉设置标签（它在前）。
 fn close_settings(cx: &mut TestAppContext, fixture: &Fixture) {
-    in_frame(cx, fixture.handle, |window, cx| {
-        window.click("settings-close", cx)
-    });
+    dispatch(cx, fixture.handle, CloseActiveTab);
 }
 
 fn sftp_settings(cx: &mut TestAppContext, fixture: &Fixture) -> SftpSettings {
@@ -154,24 +153,14 @@ fn the_sftp_category_sits_between_terminal_and_security_with_its_defaults(cx: &m
             directory.label(),
             Some(format!("本地默认打开目录，默认 {LOCAL_DOWNLOADS}").as_str())
         );
-        // 输入框和「选择…」同一行，都在对话框里。
+        // 输入框和「选择…」同一行，都在设置页里。
         let choose = window.find("sftp-local-directory-choose").bounds();
         let field = directory.bounds();
         assert!(field.size.width > px(150.), "{field:?}");
         assert!(field.right() <= choose.left());
         assert!(choose.right() <= window.find("settings").bounds().right());
-        assert_eq!(
-            window.find(("sftp-icon-style", 0_usize)).label(),
-            Some("彩色")
-        );
-        assert_eq!(
-            window.find(("sftp-icon-style", 0_usize)).selected(),
-            Some(true)
-        );
-        assert_eq!(
-            window.find(("sftp-icon-style", 1_usize)).label(),
-            Some("单色")
-        );
+        // 没有「图标风格」（用户定：文件图标只有单色一种）。
+        assert!(window.try_find(("sftp-icon-style", 0_usize)).is_none());
         assert_eq!(window.find("sftp-show-hidden-local").checked(), Some(false));
         assert_eq!(
             window.find("sftp-show-hidden-remote").checked(),
@@ -306,54 +295,6 @@ fn changing_the_local_directory_leaves_an_open_tab_where_it_is(cx: &mut TestAppC
     );
 }
 
-/// 文件列表里这一行的图标是不是彩色的。
-fn row_is_colored(cx: &mut TestAppContext, fixture: &Fixture, row: &str) -> bool {
-    in_frame(cx, fixture.handle, |window, _| {
-        window
-            .within("remote-card")
-            .within(ElementId::Name(format!("name:{row}").into()))
-            .try_find("color-icon")
-            .is_some()
-    })
-}
-
-#[gpui_kit::test]
-fn the_icon_style_changes_the_preview_and_open_lists_at_once(cx: &mut TestAppContext) {
-    let fixture = open(cx);
-    open_tab(cx, &fixture, 1, 1, LOCAL_DOWNLOADS);
-    assert!(row_is_colored(cx, &fixture, "文件 甲.txt"));
-    open_sftp_settings(cx, &fixture);
-    let preview_colored = |cx: &mut TestAppContext, fixture: &Fixture| {
-        in_frame(cx, fixture.handle, |window, _| {
-            window
-                .within(("sftp-icon-preview", 1_usize))
-                .try_find("color-icon")
-                .is_some()
-        })
-    };
-    assert!(preview_colored(cx, &fixture));
-
-    in_frame(cx, fixture.handle, |window, cx| {
-        window.click(("sftp-icon-style", 1_usize), cx)
-    });
-
-    assert_eq!(
-        sftp_settings(cx, &fixture).file_icon_style,
-        FileIconStyle::Monochrome
-    );
-    cx.update(|cx| assert_eq!(FileIconStyle::current(cx), FileIconStyle::Monochrome));
-    assert!(!preview_colored(cx, &fixture));
-    assert!(!row_is_colored(cx, &fixture, "文件 甲.txt"));
-    in_frame(cx, fixture.handle, |window, cx| {
-        assert_eq!(
-            window.find(("sftp-icon-style", 1_usize)).selected(),
-            Some(true)
-        );
-        window.click(("sftp-icon-style", 0_usize), cx);
-    });
-    assert!(row_is_colored(cx, &fixture, "文件 甲.txt"));
-}
-
 #[gpui_kit::test]
 fn each_side_has_its_own_hidden_files_switch_and_open_lists_follow(cx: &mut TestAppContext) {
     let fixture = open(cx);
@@ -379,6 +320,9 @@ fn each_side_has_its_own_hidden_files_switch_and_open_lists_follow(cx: &mut Test
     in_frame(cx, fixture.handle, |window, cx| {
         assert_eq!(window.find("sftp-show-hidden-remote").checked(), Some(true));
         assert_eq!(window.find("sftp-show-hidden-local").checked(), Some(false));
+        // 远程和默认不同了：标题后面有「恢复默认」（26 号 SFTP 那屏）。
+        assert!(window.find("sftp-show-hidden-remote-reset").visible());
+        assert!(window.try_find("sftp-show-hidden-local-reset").is_none());
         window.click("sftp-show-hidden-local", cx);
     });
     assert_eq!(in_effect(cx), (true, true));
@@ -405,9 +349,10 @@ fn the_hidden_files_switch_changes_the_file_count_of_an_open_list(cx: &mut TestA
         })
     });
     open_tab(cx, &fixture, 1, 1, "/dotfiles");
+    // 状态栏只数显示出来的（26 号不写隐藏了几项）。
     let status = |cx: &mut TestAppContext, fixture: &Fixture| label(cx, fixture, "local-status");
     assert!(
-        status(cx, &fixture).is_some_and(|text| text.ends_with("隐藏 2 项")),
+        status(cx, &fixture).is_some_and(|text| text.starts_with("1 项")),
         "{:?}",
         status(cx, &fixture)
     );

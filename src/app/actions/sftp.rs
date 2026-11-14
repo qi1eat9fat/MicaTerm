@@ -147,7 +147,7 @@ pub enum SftpTabCommand {
 
 /// 发给 `tab` 的命令。
 #[derive(Action, Clone, Debug, PartialEq, Eq)]
-#[action(namespace = qishell, no_json)]
+#[action(namespace = micaterm, no_json)]
 pub struct SftpAction {
     tab: SftpTabId,
     command: SftpTabCommand,
@@ -184,12 +184,12 @@ impl SftpAction {
 
 /// 文件列表的按键：发给在前的 SFTP 标签。
 #[derive(Action, Clone, Debug, PartialEq, Eq)]
-#[action(namespace = qishell, no_json)]
+#[action(namespace = micaterm, no_json)]
 pub struct SftpShortcut(pub SftpTabCommand);
 
 /// 显示隐藏文件：这一侧的开关，写进设置（Ctrl+Alt+H、空白处的右键菜单）。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
-#[action(namespace = qishell, no_json)]
+#[action(namespace = micaterm, no_json)]
 pub struct ToggleHiddenFiles(pub CardSide);
 
 /// 界面实体在自己的 update 结束以后才派发：窗口壳读它们的最新状态时不会重入。

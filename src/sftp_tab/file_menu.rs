@@ -1,10 +1,10 @@
 // 参考 since2006/shell-rs @ b2a307a: src/explorer/pane_menu.rs 改写
 // 裁剪：去掉书签、查找文件、「前往」子菜单和大小格式；空白处的菜单按全部界面原型重排。
-//! 文件卡片的右键菜单（原型「文件右键菜单」「空白处右键菜单」）。
+//! 文件列表的右键菜单（26 号「SFTP 右键」：文件上 / 空白处），用共用的 `micaterm_ui::Menu`。
 
 use gpui_kit::Action;
-use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::prelude::FluentBuilder as _;
+use micaterm_ui::Menu;
 
 use super::{CardSide, NewEntryKind, PreviewKind};
 use crate::app::{SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
@@ -55,7 +55,7 @@ impl CardMenuState {
 }
 
 /// 行上的右键：编辑 / 预览 / 下载…（本地是上传… / 上传文件夹…） / 复制路径 / 删除 / 重命名… / 属性…。
-pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
+pub(super) fn item_menu(menu: Menu, state: &CardMenuState) -> Menu {
     let side = state.side;
     let none = state.targets.is_empty() || !state.can_modify;
     let edit = state.shows_edit();
@@ -95,7 +95,7 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
         state.targets.is_empty(),
     )
     .separator()
-    .menu_with_disabled(
+    .danger(
         t!("sftp_tab.menu.delete"),
         state.action(SftpTabCommand::Delete { side }),
         none,
@@ -115,7 +115,7 @@ pub(super) fn item_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
 }
 
 /// 空白处的右键：新建文件夹… / 新建文件… / 上传… / 上传文件夹… / 刷新 / 上级目录 / 复制路径 / 显示隐藏文件。
-pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
+pub(super) fn directory_menu(menu: Menu, state: &CardMenuState) -> Menu {
     let side = state.side;
     // 远程一侧的「上传…」用原生选择框挑；本地一侧传的是选中的，没选中不能点。
     let (upload, upload_disabled) = if side.is_remote() {
@@ -164,7 +164,7 @@ pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMen
         state.action(SftpTabCommand::CopyPath { side }),
     )
     .separator()
-    .menu_with_check(
+    .check(
         t!("sftp_tab.menu.show_hidden"),
         state.show_hidden,
         Box::new(ToggleHiddenFiles(side)),
@@ -172,7 +172,7 @@ pub(super) fn directory_menu(menu: PopupMenu, state: &CardMenuState) -> PopupMen
 }
 
 /// 「上传文件夹…」：用原生的文件夹选择框挑，传到远程当前目录，不看选中的（工单 35）。
-fn upload_folder_item(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
+fn upload_folder_item(menu: Menu, state: &CardMenuState) -> Menu {
     menu.menu_with_disabled(
         t!("sftp_tab.menu.upload_folder"),
         state.action(SftpTabCommand::ChooseFolder),
@@ -183,20 +183,16 @@ fn upload_folder_item(menu: PopupMenu, state: &CardMenuState) -> PopupMenu {
 #[cfg(test)]
 mod tests {
     use gpui_kit::component::Root;
-    use gpui_kit::component::menu::PopupMenu;
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{AppContext as _, TestAppContext};
+    use micaterm_ui::Menu;
 
     use super::{CardMenuState, CardSide, directory_menu, item_menu};
 
-    /// 菜单里各项的文字，从上到下（分隔线不算）。菜单直接画在一个窗口里读：卡片上真的右键菜单
-    /// （gpui-component 的 `context_menu`）关掉以后还留着菜单的句柄，UI 测试结束时会报泄漏。
-    fn labels(
-        cx: &mut TestAppContext,
-        build: impl Fn(PopupMenu) -> PopupMenu + 'static,
-    ) -> Vec<String> {
+    /// 菜单里各项的文字，从上到下（分隔线不算）。菜单直接画在一个窗口里读。
+    fn labels(cx: &mut TestAppContext, build: impl Fn(Menu) -> Menu + 'static) -> Vec<String> {
         let handle = cx.add_window(|window, cx| {
-            let menu = PopupMenu::build(window, cx, move |menu, _, _| build(menu));
+            let menu = Menu::build(window, cx, move |menu, _, _| build(menu));
             Root::new(menu, window, cx)
         });
         cx.update_window(handle.into(), |_, window, cx| {

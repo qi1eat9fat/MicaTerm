@@ -3,12 +3,12 @@
 // 参考 since2006/shell-rs @ b2a307a: src/workspace/workspace_view.rs（终端处理器、终端字号）
 
 use gpui_kit::*;
-use qishell_terminal::actions::{
+use micaterm_terminal::actions::{
     ClearTerminal, CopyTerminal, DismissTerminalFind, FindInTerminal, FindNextInTerminal,
     FindPreviousInTerminal, PasteTerminal, SelectAllTerminal, ZoomTerminalIn, ZoomTerminalOut,
     ZoomTerminalReset,
 };
-use qishell_terminal::{DEFAULT_FONT_SIZE, SearchDirection, TerminalView};
+use micaterm_terminal::{DEFAULT_FONT_SIZE, SearchDirection, TerminalView};
 
 use crate::workspace::Workspace;
 

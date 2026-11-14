@@ -1,4 +1,6 @@
-//! 窗口按钮：最小化、最大化（或还原）、关闭。
+//! 窗口按钮：最小化、最大化（或还原）、关闭。每个 32 见方（和标签栏同高；26 号是宽 44，
+//! 用户改成和右侧图标栏的内宽一样，× 正好在图标栏那列图标的正上方），
+//! 图标 14，整组左边一条细线；关闭悬停是红底白字。
 //!
 //! - Windows：只标 `window_control_area(Min / Max / Close)`，按下和抬起由平台层在非客户区完成
 //!   （最大化按钮还会弹出贴靠布局）。**不要**挂 `stop_propagation` 或点击处理器，
@@ -12,7 +14,10 @@ use gpui_kit::*;
 
 use crate::app::CatalogIcon;
 use crate::i18n::t;
-use crate::theme::{Tokens, WINDOW_BUTTON, WINDOW_BUTTON_RADIUS};
+use crate::theme::{Tokens, size};
+
+/// 一个窗口按钮的宽度：等于右侧图标栏扣掉左边线的内宽，关闭按钮和图标栏的图标中心在一条竖线上。
+const CAPTION_WIDTH: Pixels = px(32.);
 
 #[derive(Clone, Copy)]
 enum WindowButton {
@@ -69,8 +74,8 @@ impl WindowButton {
             .flex_none()
             .items_center()
             .justify_center()
-            .size(WINDOW_BUTTON)
-            .rounded(WINDOW_BUTTON_RADIUS)
+            .w(CAPTION_WIDTH)
+            .h_full()
             .text_color(tokens.icon)
             .hover(move |style| style.bg(hover_bg).text_color(hover_fg))
             .window_control_area(self.area())
@@ -93,11 +98,11 @@ impl WindowButton {
                         }
                     })
             })
-            .child(Icon::new(self.icon()).size(px(16.)))
+            .child(Icon::new(self.icon()).size(px(14.)))
     }
 }
 
-/// 三个窗口按钮，前面一条分隔竖线。macOS 上什么都不画（用系统的红绿灯）。
+/// 三个窗口按钮，左边一条细线。macOS 上什么都不画（用系统的红绿灯）。
 pub(super) fn render_window_buttons(tokens: &Tokens, window: &Window) -> impl IntoElement {
     let buttons = [
         WindowButton::Minimize,
@@ -109,10 +114,10 @@ pub(super) fn render_window_buttons(tokens: &Tokens, window: &Window) -> impl In
     div()
         .flex()
         .flex_none()
-        .items_center()
-        .gap(px(2.))
+        .h_full()
         .when(!cfg!(target_os = "macos"), |row| {
-            row.child(div().w(px(1.)).h(px(16.)).mx(px(6.)).bg(tokens.separator))
+            row.border_l(size::LINE)
+                .border_color(tokens.line)
                 .children(buttons.map(|button| button.render(tokens)))
         })
 }

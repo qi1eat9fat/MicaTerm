@@ -1,9 +1,9 @@
 //! 标签的处理器：新建（02），切换、三种关闭（04），关闭在前的整个标签（macOS 的 ⇧⌘W），拖动排序（29）。
 
 use gpui_kit::*;
-use qishell_terminal::{LocalLaunch, LocalShell};
+use micaterm_terminal::{LocalLaunch, LocalShell};
 
-use gpui_kit::component::menu::PopupMenu;
+use micaterm_ui::Menu;
 
 use crate::app::{
     ActivateTab, CloseActiveTab, CloseOtherTabs, CloseTab, CloseTabsToRight, MoveTab,
@@ -228,7 +228,7 @@ impl Workspace {
         let dismiss = cx.subscribe_in(
             &menu,
             window,
-            |this, menu: &Entity<PopupMenu>, _: &DismissEvent, window, cx| {
+            |this, menu: &Entity<Menu>, _: &DismissEvent, window, cx| {
                 this.tab_rail.close_menu(menu);
                 this.focus_active_tab(window, cx);
             },
@@ -251,7 +251,7 @@ impl Workspace {
         }
     }
 
-    /// 焦点给在前标签的焦点卡片；没有标签时给开始卡片（快捷键才有焦点路径可走）。
+    /// 焦点给在前标签的焦点卡片；没有标签时给新标签页（快捷键才有焦点路径可走）。
     /// 不动轨道的滚动位置：在前的标签换了，轨道自己会把它滚进视野。
     pub(in crate::workspace) fn focus_active_tab(
         &mut self,
@@ -260,7 +260,7 @@ impl Workspace {
     ) {
         let focus = match self.tabs.active_content() {
             Some(tab) => tab.focus_handle(cx),
-            None => self.start_card_focus.clone(),
+            None => self.new_tab_focus.clone(),
         };
         window.focus(&focus, cx);
         cx.notify();
@@ -604,7 +604,7 @@ impl Workspace {
             .map(|(_, editor)| editor)
     }
 
-    /// 关掉一个标签和它全部卡片的 shell；左边的标签到前面来，没有标签了就回到开始卡片。
+    /// 关掉一个标签和它全部卡片的 shell；左边的标签到前面来，没有标签了就回到新标签页。
     /// SFTP 标签的连接跟着断，它打开的远程编辑器标签一起关（本地文件的不属于它，继续开着）。
     /// 不问：要问的经 `request_close_tabs`。
     pub(in crate::workspace) fn close_tab(
@@ -641,7 +641,9 @@ impl Workspace {
                 }
                 sftp.update(cx, |sftp, cx| sftp.close(window, cx));
             }
-            Tab::Editor(_) => {}
+            Tab::Editor(_) | Tab::Settings(_) => {}
+            // 表单的标签关了（保存、取消、点 ×）：密码框里的明文现在就放掉。
+            Tab::Host(form) => form.update(cx, |form, cx| form.forget_secrets(window, cx)),
         }
         self.focus_active_tab(window, cx);
     }

@@ -7,8 +7,8 @@ use gpui_kit::{
     Bounds, ElementId, InputEvent as _, Modifiers, Pixels, ScrollDelta, ScrollWheelEvent,
     TouchPhase, point,
 };
-use qishell::app::{OpenHostSftp, SftpAction, SftpTabCommand};
-use qishell::sftp_tab::{CardSide, IMAGE_LIMIT, SftpTab};
+use micaterm::app::{OpenHostSftp, SftpAction, SftpTabCommand};
+use micaterm::sftp_tab::{CardSide, IMAGE_LIMIT, SftpTab};
 
 use crate::support::*;
 
@@ -468,7 +468,7 @@ fn markdown_and_svg_are_edited_on_a_double_click(cx: &mut TestAppContext) {
         double_click_row(cx, &fixture, name);
         wait_for_editor(cx, &fixture, name);
         assert!(!visible(cx, &fixture, "preview-dialog"));
-        dispatch(cx, fixture.handle, qishell::app::PreviousTab);
+        dispatch(cx, fixture.handle, micaterm::app::PreviousTab);
     }
 }
 
@@ -505,7 +505,7 @@ fn preview_without_a_path_opens_the_selected_file(cx: &mut TestAppContext) {
     dispatch(
         cx,
         fixture.handle,
-        qishell::app::SftpShortcut(SftpTabCommand::Preview {
+        micaterm::app::SftpShortcut(SftpTabCommand::Preview {
             side: CardSide::Remote,
             path: None,
         }),
@@ -550,7 +550,7 @@ fn closing_the_sftp_tab_closes_its_preview(cx: &mut TestAppContext) {
     double_click_row(cx, &fixture, "图.png");
     wait_visible(cx, &fixture, "preview-dialog");
     let tab = cx.update(|cx| fixture.workspace.read(cx).active_tab().unwrap());
-    dispatch(cx, fixture.handle, qishell::app::CloseTab(tab));
+    dispatch(cx, fixture.handle, micaterm::app::CloseTab(tab));
     assert!(!visible(cx, &fixture, "preview-dialog"));
 }
 
@@ -628,11 +628,11 @@ fn edit_closes_the_preview_and_opens_the_editor(cx: &mut TestAppContext) {
         click(cx, &fixture, "preview-edit");
         assert!(!visible(cx, &fixture, "preview-dialog"), "{name}");
         wait_for_editor(cx, &fixture, name);
-        dispatch(cx, fixture.handle, qishell::app::PreviousTab);
+        dispatch(cx, fixture.handle, micaterm::app::PreviousTab);
     }
     assert_eq!(tab_count(cx, &fixture), 3);
     // SVG 在编辑器里是文本。
-    dispatch(cx, fixture.handle, qishell::app::SwitchToTab(3));
+    dispatch(cx, fixture.handle, micaterm::app::SwitchToTab(3));
     let editor = cx
         .update(|cx| fixture.workspace.read(cx).active_editor_tab())
         .expect("an editor");
@@ -646,7 +646,7 @@ fn edit_switches_to_the_editor_already_open(cx: &mut TestAppContext) {
     double_click_row(cx, &fixture, "README.md");
     wait_for_editor(cx, &fixture, "README.md");
     let opened = cx.update(|cx| fixture.workspace.read(cx).active_tab());
-    dispatch(cx, fixture.handle, qishell::app::PreviousTab);
+    dispatch(cx, fixture.handle, micaterm::app::PreviousTab);
 
     preview_of(cx, &fixture, true, "/pictures/README.md");
     wait_visible(cx, &fixture, "preview-markdown");
@@ -787,7 +787,7 @@ fn an_image_over_the_limit_is_refused_and_offers_the_download(cx: &mut TestAppCo
 
 #[gpui_kit::test]
 fn markdown_over_the_limit_or_not_in_utf8_is_refused(cx: &mut TestAppContext) {
-    let large = vec![b'a'; qishell::backend::sftp::EDIT_LIMIT as usize + 1];
+    let large = vec![b'a'; micaterm::backend::sftp::EDIT_LIMIT as usize + 1];
     let fixture = open_pictures(
         cx,
         &[
@@ -844,13 +844,13 @@ fn previewing_while_disconnected_offers_to_reconnect(cx: &mut TestAppContext) {
     let fixture = open_pictures(cx, &[("/pictures/图.png", PNG)]);
     fixture
         .sftp
-        .emit(qishell::backend::sftp::SftpEvent::Disconnected(
+        .emit(micaterm::backend::sftp::SftpEvent::Disconnected(
             "连接断开了".into(),
         ));
     let tab = sftp_tab(cx, &fixture);
     assert!(
         wait_until(cx, fixture.handle, |cx| cx.update(|cx| {
-            tab.read(cx).connection_state() == qishell::sftp_tab::ConnectionState::Disconnected
+            tab.read(cx).connection_state() == micaterm::sftp_tab::ConnectionState::Disconnected
         })),
         "没有断开"
     );

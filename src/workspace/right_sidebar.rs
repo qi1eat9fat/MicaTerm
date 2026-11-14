@@ -1,15 +1,20 @@
-//! 右侧栏（宽 46）：一列图标，依次是文件、命令片段、凭据。
+//! 右侧图标栏（26 号 `.rail`）：左边一条细线加内宽 32（和窗口按钮同宽，图标对着关闭按钮的 ×）、
+//! 标签栏同色的窄条；一列图标（26 宽、图标 17），
+//! 依次是文件、命令片段、凭据。
 //!
-//! 「文件」打开或切换到 SFTP 标签（工单 20），不展开面板，所以没有按下的样式；在 SFTP 标签里显示成
-//! 当前所在（强调色），没有远程文件可开时变灰，悬停说为什么。
-//! 另外两个点一下在右边展开约 290 宽的面板，再点一下收起，展开时图标显示成按下的样子。
+//! 「文件」打开或切换到 SFTP 标签（工单 20），不展开面板；在 SFTP 标签里显示成按下的样子（当前所在），
+//! 没有远程文件可开时变灰，悬停说为什么。
+//! 另外两个点一下在右边展开宽 280 的面板，再点一下收起，展开时图标显示成按下的样子。
 
 use gpui_kit::*;
 
-use super::icon_button::IconButton;
 use crate::app::{CatalogIcon, OpenSftp, ShowCredentials, ShowSnippets};
 use crate::i18n::t;
-use crate::theme::{ICON_BUTTON_RADIUS, RAIL_BUTTON, RIGHT_SIDEBAR_WIDTH, Tokens};
+use crate::theme::{Tokens, size};
+use crate::ui::icon_button::IconButton;
+
+/// 图标栏里按钮的边长（`.rail .ib`）。
+const RAIL_BUTTON: Pixels = px(26.);
 
 /// 右侧栏展开的面板，同一时间最多一个。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,9 +30,9 @@ pub enum RightPanel {
 pub enum FilesButton {
     /// 点了打开或切到 SFTP 标签。
     Open,
-    /// 在前的就是 SFTP 标签：显示成当前所在（原型 `.rail .ib.cur`）。
+    /// 在前的就是 SFTP 标签：显示成按下的样子（26 号 `.rail .ib.on`）。
     Current,
-    /// 没有远程文件可开：变灰（原型 `.ib.dis`），悬停写原因。
+    /// 没有远程文件可开：变灰，悬停写原因。
     Unavailable(SharedString),
 }
 
@@ -38,7 +43,7 @@ pub(super) fn render_right_sidebar(
     tokens: &Tokens,
 ) -> impl IntoElement {
     let button = |id: &'static str, icon: CatalogIcon, label: SharedString| {
-        IconButton::new(id, icon, label).size(RAIL_BUTTON, ICON_BUTTON_RADIUS)
+        IconButton::new(id, icon, label).size(RAIL_BUTTON, size::RAIL_ICON)
     };
     let files_button = button(
         "right-sidebar-files",
@@ -48,7 +53,7 @@ pub(super) fn render_right_sidebar(
     let files_button = match files {
         FilesButton::Open => files_button.tooltip(t!("sftp_tab.files.open")),
         FilesButton::Current => files_button
-            .current(true)
+            .pressed(true)
             .tooltip(t!("sftp_tab.files.open")),
         FilesButton::Unavailable(reason) => files_button.dimmed(true).tooltip(reason),
     };
@@ -60,8 +65,11 @@ pub(super) fn render_right_sidebar(
         .flex_none()
         .items_center()
         .gap(px(4.))
-        .w(RIGHT_SIDEBAR_WIDTH)
-        .pt(px(2.))
+        .w(size::RAIL_WIDTH)
+        .py(px(6.))
+        .border_l(size::LINE)
+        .border_color(tokens.line)
+        .bg(tokens.tabbar)
         .child(files_button.dispatch(Box::new(OpenSftp), target, tokens))
         .child(
             button(

@@ -4,12 +4,8 @@ host.store.not_saved.host_probe:
   zh-CN: 记录是否探测系统未能保存到本地数据库：%{error}
 host.store.not_saved.host_hostname:
   zh-CN: 记录探测到的主机名未能保存到本地数据库：%{error}
-host.dialog.advanced:
-  zh-CN: 高级
 host.dialog.probe_os:
   zh-CN: 登录后探测系统
-host.dialog.probe_os_hint:
-  zh-CN: 另开一个通道运行 uname 等命令，得到系统徽章。有的堡垒机再开通道就会断开连接，这时关掉它。
 ssh.probe.disabled:
   zh-CN: 已为「%{host}」关闭系统探测：探测时这台主机拒绝了新通道。可在主机设置里重新打开。
 ssh.probe.disabled_reconnecting:

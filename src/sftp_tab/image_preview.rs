@@ -13,7 +13,7 @@ use gpui_kit::*;
 
 use super::preview::PreviewDialog;
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, ui_text};
 
 /// 按钮和按键走的倍数，相对图片自己的大小（100% 时一个像素一个点）。
 const STEPS: [f32; 14] = [
@@ -236,7 +236,7 @@ impl ImageView {
                             })),
                     )
             });
-        let checker = tokens.field;
+        let checker = tokens.input;
         div()
             .id("preview-image")
             .test_support()
@@ -293,8 +293,8 @@ impl ImageView {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .text_size(px(12.5))
-                                .text_color(tokens.muted)
+                                .text_size(ui_text())
+                                .text_color(tokens.text2)
                                 .child(note),
                         )
                     }),

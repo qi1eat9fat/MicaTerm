@@ -16,6 +16,6 @@ const FONTS: [&[u8]; 4] = [
 pub fn register(cx: &mut App) {
     let fonts = FONTS.iter().map(|font| Cow::Borrowed(*font)).collect();
     if let Err(error) = cx.text_system().add_fonts(fonts) {
-        eprintln!("qishell: cannot register the bundled fonts: {error}");
+        eprintln!("micaterm: cannot register the bundled fonts: {error}");
     }
 }

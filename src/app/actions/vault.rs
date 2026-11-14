@@ -2,7 +2,7 @@
 //! 由窗口壳的处理器（`workspace/handlers/vault.rs`）交给 `crate::vault`。
 
 gpui_kit::actions!(
-    qishell,
+    micaterm,
     [
         /// 立即锁定保险库（主机栏底部按钮、设置 › 安全、凭据面板状态条）。没设主密码时什么都不做。
         LockVault,

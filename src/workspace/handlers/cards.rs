@@ -1,15 +1,22 @@
 //! 卡片的处理器（工单 02 建，05 补全分屏、放大、焦点移动、拖动间隙）。
 //!
 //! 分屏树在终端标签里（`TerminalTab`），这里只找到标签、调它的方法，再把焦点交给该聚焦的卡片。
+//! 分屏（2026-11-14 重做）：先在卡片旁边放一张占位的新卡片（`CardPicker`），在里面选开什么——
+//! 再开一个（复制这张卡片）、本地终端、某台主机——选好了撤掉占位，把真卡片分到同一个位置。
 
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
-use qishell_terminal::{LocalLaunch, LocalShell};
+use micaterm_terminal::{LocalLaunch, LocalShell};
 
 use crate::app::{
-    CloseCard, CloseFocusedCard, FocusCard, MoveDivider, ResetDivider, ResizeDivider, SplitCard,
-    SplitDown, SplitRight, ToggleZoomCard, ZoomCard,
+    CloseCard, CloseFocusedCard, FocusCard, MoveCardToNewTab, MoveDivider, ResetDivider,
+    ResizeDivider, SplitCard, SplitDown, SplitRight, ToggleZoomCard, ZoomCard,
 };
-use crate::card::{CardEvent, CardId, TerminalCard};
+use crate::card::{
+    CardEvent, CardId, CardPicker, PickerChoice, PickerEvent, PickerSource, TerminalCard,
+    next_picker_id,
+};
+use crate::host::HostMark;
 use crate::split::{Axis, Closed};
 use crate::tabs::{Tab, TabId, TerminalTab};
 use crate::ui::focus_after_dialogs;
@@ -24,6 +31,7 @@ pub(in crate::workspace) fn bind_cards_actions(
         .on_action(cx.listener(Workspace::on_split_right))
         .on_action(cx.listener(Workspace::on_split_down))
         .on_action(cx.listener(Workspace::on_split_card))
+        .on_action(cx.listener(Workspace::on_move_card_to_new_tab))
         .on_action(cx.listener(Workspace::on_toggle_zoom_card))
         .on_action(cx.listener(Workspace::on_zoom_card))
         .on_action(cx.listener(Workspace::on_focus_card))
@@ -44,8 +52,7 @@ impl Workspace {
         let id = CardId(self.next_card_id);
         self.next_card_id += 1;
         let provider = self.services.local_terminals.clone();
-        let target = self.focus_handle.clone();
-        let card = cx.new(|cx| TerminalCard::local(id, launch, provider, target, window, cx));
+        let card = cx.new(|cx| TerminalCard::local(id, launch, provider, window, cx));
         // 终端的通知和响铃（工单 03）。
         self.watch_notices(&card, window, cx);
         card
@@ -66,7 +73,6 @@ impl Workspace {
             cx.subscribe(card, |this, card, event: &CardEvent, cx| match event {
                 CardEvent::Changed => cx.notify(),
                 CardEvent::WantsAttention => this.on_card_wants_attention(&card, cx),
-                CardEvent::Connected => this.on_remote_card_connected(&card, cx),
             }),
             cx.on_focus_in(&focus, window, move |this, _, cx| {
                 this.on_card_focused(id, cx)
@@ -163,19 +169,148 @@ impl Workspace {
     }
 
     fn on_split_right(&mut self, _: &SplitRight, window: &mut Window, cx: &mut Context<Self>) {
-        self.split_focused_card(Axis::Horizontal, window, cx);
+        self.open_card_picker(Axis::Horizontal, window, cx);
     }
 
     fn on_split_down(&mut self, _: &SplitDown, window: &mut Window, cx: &mut Context<Self>) {
-        self.split_focused_card(Axis::Vertical, window, cx);
+        self.open_card_picker(Axis::Vertical, window, cx);
     }
 
-    /// 卡片头部的分屏按钮：先让按钮所在的卡片成为焦点卡片，再分它。
+    /// 卡片顶行的分屏按钮：分的是那张卡片。
     fn on_split_card(&mut self, action: &SplitCard, window: &mut Window, cx: &mut Context<Self>) {
-        let SplitCard(card, axis) = *action;
+        let SplitCard { card, axis } = *action;
         if self.focus_card_in_its_tab(card, cx) {
-            self.split_focused_card(axis, window, cx);
+            self.open_card_picker(axis, window, cx);
         }
+    }
+
+    /// 在前那个标签的焦点卡片旁边放一张占位的新卡片，焦点给它的搜索框。
+    /// 弹窗（解锁保险库、连接时的问答）开着时不分：新卡片会抢走弹窗的键盘。
+    fn open_card_picker(&mut self, axis: Axis, window: &mut Window, cx: &mut Context<Self>) {
+        if window.has_active_dialog(cx) {
+            return;
+        }
+        let Some(tab) = self.tabs.active() else {
+            return;
+        };
+        let Some(source) = self
+            .tabs
+            .get(tab)
+            .and_then(Tab::as_terminal)
+            .map(|tab| tab.focused_card().clone())
+        else {
+            return;
+        };
+        let source = {
+            let card = source.read(cx);
+            PickerSource {
+                name: card.name(),
+                mark: card.remote_host_snapshot().map(HostMark::of),
+            }
+        };
+        let id = next_picker_id();
+        let hosts = self.hosts.clone();
+        let picker = cx.new(|cx| CardPicker::new(id, axis, source, hosts, window, cx));
+        let subscription = cx.subscribe_in(&picker, window, move |this, _, event, window, cx| {
+            this.on_picker_event(tab, id, *event, window, cx)
+        });
+        if let Some(terminal) = self.terminal_tab_mut(tab) {
+            terminal.open_picker(axis, picker.clone(), subscription, cx);
+        }
+        picker.update(cx, |picker, cx| picker.focus(window, cx));
+        cx.notify();
+    }
+
+    /// 新卡片里选好了或者撤销了：撤掉占位，选好了就把真卡片分到同一个位置。
+    fn on_picker_event(
+        &mut self,
+        tab: TabId,
+        picker: CardId,
+        event: PickerEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(terminal) = self.terminal_tab_mut(tab) else {
+            return;
+        };
+        let choice = match event {
+            PickerEvent::Dismissed { refocus } => {
+                if terminal.take_picker(picker, cx).is_some()
+                    && refocus
+                    && self.tabs.active() == Some(tab)
+                {
+                    self.focus_active_card(window, cx);
+                }
+                cx.notify();
+                return;
+            }
+            PickerEvent::Chosen(choice) => choice,
+        };
+        // 选好了：占位那一格留给真卡片（焦点卡片还是分屏的那张，下面照旧「分」在它旁边，落进这一格）。
+        let Some(slot) = terminal.choose_picker(picker, cx) else {
+            return;
+        };
+        let axis = slot.view.read(cx).axis();
+        match choice {
+            PickerChoice::Duplicate => self.split_focused_card(axis, window, cx),
+            PickerChoice::Local => {
+                let launch = LocalLaunch::new(self.local_shell(cx));
+                let card = self.open_local_card(launch, window, cx);
+                self.place_beside_focused_card(tab, axis, card, window, cx);
+            }
+            PickerChoice::Host(host) => {
+                if let Some(card) = self.open_remote_card(host, window, cx) {
+                    self.place_beside_focused_card(tab, axis, card, window, cx);
+                }
+            }
+        }
+        // 没开出卡片（主机刚被删了）：那一格收回，焦点回到分屏的那张。
+        if self
+            .terminal_tab_mut(tab)
+            .is_some_and(|terminal| terminal.release_reserved(cx))
+        {
+            self.focus_active_card(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// 设置里的 shell（没写就自动检测）。
+    pub(in crate::workspace) fn local_shell(&self, cx: &App) -> LocalShell {
+        LocalShell::new(
+            &self
+                .settings
+                .read(cx)
+                .settings()
+                .local_terminal
+                .shell
+                .unwrap_or_default(),
+        )
+    }
+
+    /// 右键菜单「移到新标签」：把卡片从分屏里拆出去，单独成一个标签（在前）。标签里只有它时什么都不做。
+    fn on_move_card_to_new_tab(
+        &mut self,
+        action: &MoveCardToNewTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let MoveCardToNewTab(card) = *action;
+        let Some(id) = self.tab_of(card, cx) else {
+            return;
+        };
+        let Some(tab) = self.terminal_tab_mut(id) else {
+            return;
+        };
+        let (Closed::Merged, Some(entity)) = tab.close_card(card, cx) else {
+            return;
+        };
+        entity.update(cx, |card, cx| card.set_place(true, false, true, cx));
+        let subscriptions = self.card_subscriptions(&entity, window, cx);
+        self.open_tab(
+            Tab::Terminal(TerminalTab::new(entity, subscriptions, cx)),
+            window,
+            cx,
+        );
     }
 
     /// 让 `card` 成为它所在标签的焦点卡片；只对在前的标签有效。
@@ -202,17 +337,10 @@ impl Workspace {
             return;
         }
         let source = source.read(cx);
-        let shell = source.local_shell().cloned().unwrap_or_else(|| {
-            LocalShell::new(
-                &self
-                    .settings
-                    .read(cx)
-                    .settings()
-                    .local_terminal
-                    .shell
-                    .unwrap_or_default(),
-            )
-        });
+        let shell = source
+            .local_shell()
+            .cloned()
+            .unwrap_or_else(|| self.local_shell(cx));
         let launch = LocalLaunch {
             shell,
             directory: source.directory(),

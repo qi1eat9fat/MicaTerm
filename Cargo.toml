@@ -1,22 +1,22 @@
 [package]
-name = "qishell"
+name = "micaterm"
 version = "0.1.0"
 edition = "2024"
 publish = false
 description = "以 SSH 主机管理为核心的桌面终端，Rex 风格的卡片分屏"
 license = "GPL-3.0-only"
-default-run = "qishell"
+default-run = "micaterm"
 
 # 桌面应用：单一二进制，同时带 lib target，好让 tests/ui/ 驱动生产环境的 Workspace。
 [[bin]]
-name = "qishell"
+name = "micaterm"
 path = "src/main.rs"
 
 [lib]
-name = "qishell"
+name = "micaterm"
 path = "src/lib.rs"
 
-# crates/ 下的每个目录都是 workspace 成员（qishell-terminal、qishell-ssh、qishell-hosts……），
+# crates/ 下的每个目录都是 workspace 成员（micaterm-terminal、micaterm-ssh、micaterm-hosts……），
 # 后续工单新建 crate 时不用改这里。
 [workspace]
 members = ["crates/*"]
@@ -52,15 +52,17 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 从保险库读出来的密码用完清零（工单 11）。
 zeroize = "1"
-# 终端引擎、视图和本地 PTY（拷自 shell-rs，见 crates/qishell-terminal）。
-qishell-terminal = { path = "crates/qishell-terminal" }
-# 主机、凭据、命令片段的模型和写穿的数据库（拷自 shell-rs，见 crates/qishell-hosts）。
-qishell-hosts = { path = "crates/qishell-hosts" }
+# 终端引擎、视图和本地 PTY（拷自 shell-rs，见 crates/micaterm-terminal）。
+micaterm-terminal = { path = "crates/micaterm-terminal" }
+# 应用和终端共用的界面组件（右键菜单）。
+micaterm-ui = { path = "crates/micaterm-ui" }
+# 主机、凭据、命令片段的模型和写穿的数据库（拷自 shell-rs，见 crates/micaterm-hosts）。
+micaterm-hosts = { path = "crates/micaterm-hosts" }
 # 系统钥匙串（Windows 凭据管理器、macOS 钥匙串、Secret Service）：只存保险库的数据密钥。
 keyring = "4"
-# SSH 连接（拷自 shell-rs，见 crates/qishell-ssh）：远程卡片和「测试连接」都经它登录（工单 12）。
-qishell-ssh = { path = "crates/qishell-ssh" }
-# 错误链里 russh 自己的错误（超时、算法谈不拢）要认出来翻成中文；和 qishell-ssh 用同一版。
+# SSH 连接（拷自 shell-rs，见 crates/micaterm-ssh）：远程卡片和「测试连接」都经它登录（工单 12）。
+micaterm-ssh = { path = "crates/micaterm-ssh" }
+# 错误链里 russh 自己的错误（超时、算法谈不拢）要认出来翻成中文；和 micaterm-ssh 用同一版。
 russh = "0.63"
 # 共享连接跑在 backend 自己的多线程运行时上：卡片关了连接不跟着断（工单 12）。
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net"] }
@@ -93,10 +95,10 @@ winresource = "0.1"
 
 [dev-dependencies]
 gpui-kit = { version = "0.6.1", features = ["test-support"] }
-# 进程内的 SSH 测试服务器（`qishell_ssh::testing`），backend 的连接测试用。
-qishell-ssh = { path = "crates/qishell-ssh", features = ["testing"] }
+# 进程内的 SSH 测试服务器（`micaterm_ssh::testing`），backend 的连接测试用。
+micaterm-ssh = { path = "crates/micaterm-ssh", features = ["testing"] }
 # 测试用内存数据库（`HostDatabase::in_memory`）。
-qishell-hosts = { path = "crates/qishell-hosts", features = ["testing"] }
+micaterm-hosts = { path = "crates/micaterm-hosts", features = ["testing"] }
 regex = "1"
 tempfile = "3"
 
@@ -110,7 +112,7 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
-# debug 版也把渲染栈优化起来（照 gpui-kit 的安装指南），否则渲染很卡；qishell 自己保持未优化、可调试。
+# debug 版也把渲染栈优化起来（照 gpui-kit 的安装指南），否则渲染很卡；micaterm 自己保持未优化、可调试。
 [profile.dev.package]
 gpui-pre = { opt-level = 3 }
 gpui-pre-platform = { opt-level = 3 }

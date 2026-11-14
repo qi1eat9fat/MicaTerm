@@ -2,7 +2,7 @@
 //! 和发给 SFTP 标签的命令。命令本身在 `SftpTab::execute`，这里只找到标签转过去。
 //!
 //! 规则（spec 第 6 节）：焦点卡片是远程卡片时，打开它所在主机的 SFTP 标签，已有就切过去；是本地卡片时
-//! 「文件」变灰。没有焦点卡片时：SFTP 标签不动；远程编辑器切到它的 SFTP 标签；本地编辑器和开始卡片变灰。
+//! 「文件」变灰。没有焦点卡片时：SFTP 标签不动；远程编辑器切到它的 SFTP 标签；本地编辑器和新标签页变灰。
 //! 主机右键开被右键的主机，初始目录在焦点卡片正好是这台主机时用它的目录，否则用主目录。
 // 参考 since2006/shell-rs @ b2a307a: src/workspace/workspace_view.rs 的 `open_explorer`、`new_explorer_panel`
 
@@ -36,7 +36,9 @@ impl Workspace {
     /// 右侧栏「文件」现在是什么样：`OpenSftp` 按同一个规则做事。
     pub fn files_button(&self, cx: &App) -> FilesButton {
         match self.tabs.active_content() {
-            None => FilesButton::Unavailable(t!("sftp_tab.files.no_remote_files")),
+            None | Some(Tab::Host(_)) | Some(Tab::Settings(_)) => {
+                FilesButton::Unavailable(t!("sftp_tab.files.no_remote_files"))
+            }
             Some(Tab::Terminal(tab)) => {
                 if tab.focused_card().read(cx).remote_host().is_some() {
                     FilesButton::Open
@@ -77,7 +79,7 @@ impl Workspace {
                     return;
                 }
             }
-            None => {}
+            None | Some(Tab::Host(_)) | Some(Tab::Settings(_)) => {}
         }
         // 按键也要有个交代：图标是灰的，悬停才看得到为什么。
         if let FilesButton::Unavailable(reason) = self.files_button(cx) {

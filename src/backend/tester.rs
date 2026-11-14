@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use qishell_ssh::{
+use micaterm_ssh::{
     ConnectionPrompt, ConnectionPromptKind, ConnectionPromptReply, HostLogin, JumpLogin,
     LoginMethod, LoginRoute, MissingCredential, PasswordWanted, RouteFailure, SecretRef,
     SecretSource, SharedSecretSource, SshConnectionConfig, SshConnector, SshPrompts,

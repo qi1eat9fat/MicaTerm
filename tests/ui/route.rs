@@ -1,10 +1,9 @@
 //! 跳板与代理（工单 15）的 UI 测试：主机对话框「连接方式」的跳板和代理表单、
 //! 删除被当作跳板的主机后路线里留下「已删除的主机」、连接时把这条断了的路线交给连接器。
 
-use gpui_kit::{ScrollDelta, point};
-use qishell::app::{ConnectHost, DeleteHost, EditHost, NewHost};
-use qishell_hosts::{ProxyKind, ProxySettings, Route, SecretRef};
-use qishell_ssh::{JumpLogin, LoginRoute};
+use micaterm::app::{ConnectHost, DeleteHost, EditHost, NewHost};
+use micaterm_hosts::{ProxyKind, ProxySettings, Route, SecretRef};
+use micaterm_ssh::{JumpLogin, LoginRoute};
 
 use crate::support::*;
 
@@ -12,37 +11,6 @@ fn dialog_open(cx: &mut TestAppContext, handle: WindowHandle<Root>) -> bool {
     in_frame(cx, handle, |window, _| {
         window.try_find("host-dialog").is_some()
     })
-}
-
-/// 对话框里放不下全部字段，要滚动：把 `id` 滚进看得见的地方。
-fn reveal(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &ElementId) {
-    for _ in 0..40 {
-        let place = in_frame(cx, handle, |window, _| {
-            let target = window.find(id.clone());
-            let Some(dialog) = window.try_find("host-dialog").map(|dialog| dialog.bounds()) else {
-                return (true, false);
-            };
-            // 整个落在标题栏和底部按钮之间才算看得见（只露一半时点中间会点到别处）。
-            let bounds = target.bounds();
-            let shown = target.visible()
-                && bounds.top() >= dialog.top() + px(46.)
-                && bounds.bottom() <= dialog.bottom() - px(60.);
-            (shown, bounds.top() < dialog.center().y)
-        });
-        match place {
-            (true, _) => return,
-            // 在上面就往上滚，在下面就往下滚。
-            (false, above) => in_frame(cx, handle, |window, cx| {
-                let step = if above { 80. } else { -80. };
-                window.scroll(
-                    "host-dialog",
-                    ScrollDelta::Pixels(point(px(0.), px(step))),
-                    cx,
-                )
-            }),
-        }
-    }
-    panic!("{id:?} 滚不进视野");
 }
 
 /// 把字段 `field` 的内容换成 `text`。
@@ -67,9 +35,7 @@ fn click(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: impl Into<Elem
 
 /// 「保存」在底部，不随内容滚动。
 fn save(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
-    in_frame(cx, handle, |window, cx| {
-        window.click("host-dialog-save", cx)
-    });
+    click_host_save(cx, handle);
 }
 
 fn label(

@@ -6,12 +6,12 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use futures::FutureExt as _;
-use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer, closed_port};
-use qishell_ssh::{
+use micaterm_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer, closed_port};
+use micaterm_ssh::{
     AgentLocation, AuthenticationRequest, ConnectionPromptKind, ConnectionPromptReply,
     ConnectionSecret, HostLogin, LoginMethod, PROBE_COMMAND, SecretRef, SecretSource, SshConnector,
 };
-use qishell_terminal::{TerminalSize, TerminalTransportCommand, TerminalTransportEvent};
+use micaterm_terminal::{TerminalSize, TerminalTransportCommand, TerminalTransportEvent};
 use zeroize::Zeroizing;
 
 use super::{

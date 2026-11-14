@@ -17,7 +17,6 @@
 //! - `host_dialog`：主机对话框（11）
 //! - `snippets`：命令片段（19）
 //! - `remote_card`：密码登录远程卡片（12）
-//! - `quick_connect`：快速连接与最近连接（18）
 //! - `split_remote`：分屏复用连接（16）
 //! - `route`：跳板与代理（15）
 //! - `vault`：保险库界面（13）
@@ -43,7 +42,6 @@ mod hosts;
 mod preview;
 mod probe;
 mod programs;
-mod quick_connect;
 mod remote_activity;
 mod remote_card;
 mod route;

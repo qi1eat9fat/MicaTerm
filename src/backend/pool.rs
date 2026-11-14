@@ -14,8 +14,8 @@
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
-use qishell_hosts::HostId;
-use qishell_ssh::{
+use micaterm_hosts::HostId;
+use micaterm_ssh::{
     ConnectionPrompt, ConnectionPromptReply, HostOsProbe, LATENCY_INTERVAL, Latency, ProbeOutcome,
     ProbedHost, SshConnectionConfig, SshConnector, SshHandle, SshPrompts, open_probe, round_trip,
 };
@@ -486,7 +486,7 @@ async fn hang_up(handle: &SshHandle) {
         DISCONNECT_TIMEOUT,
         handle.disconnect(
             russh::Disconnect::ByApplication,
-            "QiShell closed the connection",
+            "MicaTerm closed the connection",
             "zh-CN",
         ),
     )

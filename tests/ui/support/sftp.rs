@@ -1,13 +1,13 @@
 //! SFTP 标签的夹具：假的 SFTP 传输、假的本地目录，和打开在它们上面的窗口壳。
 // 来自 since2006/shell-rs @ b2a307a: tests/ui/support/sftp.rs
-// 裁剪：去掉 `SftpRoute`、`on_terminal`、`places`；改成 QiShell 的夹具（`..fake_services()`）。
+// 裁剪：去掉 `SftpRoute`、`on_terminal`、`places`；改成 MicaTerm 的夹具（`..fake_services()`）。
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use qishell::backend::HostLogin;
-use qishell::backend::sftp::{
+use micaterm::backend::HostLogin;
+use micaterm::backend::sftp::{
     DirectoryEntry, DirectoryListing, DownloadRequest, EDIT_LIMIT, EntryKind, FileBytes,
     FileMetadata, FileStamp, LocalDirectoryProvider, PermissionEdit, ReadFailure, RemoteOperation,
     RemotePath, SaveFailure, SftpCommand, SftpEvent, SftpTransport, SftpTransportProvider,

@@ -1,4 +1,4 @@
-//! 本地终端卡片（工单 02）：从开始卡片、「+」和 Ctrl+Shift+T 新开终端标签，卡片的头部、
+//! 本地终端卡片（工单 02）：从新标签页、「+」和 Ctrl+Shift+T 新开终端标签，卡片的头部、
 //! 状态栏，关卡片关 shell。本地终端一律用假传输，不起真的 shell。
 
 use crate::support::*;
@@ -26,10 +26,10 @@ fn open_with_fake_terminals(
     (handle, workspace, factory, provider)
 }
 
-/// 新开的终端标签里是一张本地卡片：标签、卡片、卡片里的终端都在，开始卡片不见了。
+/// 新开的终端标签里是一张本地卡片：标签、卡片、卡片里的终端都在，新标签页不见了。
 fn assert_one_local_card(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     in_frame(cx, handle, |window, _| {
-        assert!(window.try_find("start-card").is_none());
+        assert!(window.try_find("new-tab-page").is_none());
         let tab = window.find(TAB);
         assert!(tab.visible());
         assert!(
@@ -45,12 +45,12 @@ fn assert_one_local_card(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
 }
 
 #[gpui_kit::test]
-fn the_start_card_opens_a_local_terminal_tab(cx: &mut TestAppContext) {
+fn the_new_tab_page_opens_a_local_terminal_tab(cx: &mut TestAppContext) {
     let (handle, workspace, factory, provider) =
         open_with_fake_terminals(cx, FakeTerminalFactory::default());
 
     in_frame(cx, handle, |window, cx| {
-        window.click("start-new-local-terminal", cx)
+        window.click("new-tab-local-terminal", cx)
     });
 
     assert_one_local_card(cx, handle);
@@ -118,9 +118,10 @@ fn the_shell_from_the_settings_is_started(cx: &mut TestAppContext) {
     assert_eq!(provider.shells(), [LocalShell::new("cmd.exe /k")]);
 }
 
-/// 头部高 33：程序图标、shell 名、目录；右边是分屏、放大、关闭按钮。
+/// 卡片顶行（26 号，2026-11-14）：高 28，写 shell 名；终端在它下面 8、离左边 20。
+/// 卡片和标签的无障碍名称是 shell 名和目录。
 #[gpui_kit::test]
-fn the_card_header_shows_the_shell_and_its_folder(cx: &mut TestAppContext) {
+fn the_card_has_a_title_row_and_names_the_shell_and_its_folder(cx: &mut TestAppContext) {
     let factory = Arc::new(FakeTerminalFactory::default());
     let provider = Arc::new(
         FixedLocalTerminalTransportProvider::new(factory)
@@ -131,47 +132,30 @@ fn the_card_header_shows_the_shell_and_its_folder(cx: &mut TestAppContext) {
     dispatch(cx, handle, NewLocalTerminalTab);
 
     in_frame(cx, handle, |window, _| {
-        let card = window.find(CARD).bounds();
-        let header = window.find(("card-header", 1usize));
-        assert_eq!(header.bounds().size.height, px(33.));
-        // 紧贴卡片顶边（中间只有 1px 描边）。
-        assert!(header.bounds().top() - card.top() <= px(1.));
+        let card = window.find(CARD);
+        let terminal = window.find(("terminal", 1usize)).bounds();
+        let title = window.find(("card-title", 1usize));
+        assert_eq!(title.bounds().top(), card.bounds().top());
+        assert_eq!(title.bounds().size.height, px(28.));
+        assert_eq!(title.label(), Some("pwsh"));
+        // 终端在顶行下面 8（终端自己四周留 0.5 rem）、离左边 20。
+        assert_eq!(terminal.top() - card.bounds().top(), px(36.));
+        assert_eq!(terminal.left() - card.bounds().left(), px(20.));
         // 没有报告目录时是主目录。
-        assert_eq!(header.label(), Some("pwsh ~"));
-        let tile = window.find(("card-tile", 1usize));
-        assert!(header.bounds().contains(&tile.bounds().center()));
-        let close = window.find(("card-close", 1usize));
-        assert_eq!(close.label(), Some("关闭卡片"));
-        assert!(header.bounds().contains(&close.bounds().center()));
-        // 关闭在最右边，图标在最左边。
-        assert!(tile.bounds().right() < close.bounds().left());
-        // 关闭前面依次是向右分屏、向下分屏、放大（工单 05）。
-        let mut left = tile.bounds().right();
-        for (button, label) in [
-            ("card-split-right", "向右分屏"),
-            ("card-split-down", "向下分屏"),
-            ("card-zoom", "放大卡片"),
-            ("card-close", "关闭卡片"),
-        ] {
-            let button = window.find((button, 1usize));
-            assert_eq!(button.label(), Some(label));
-            assert!(header.bounds().contains(&button.bounds().center()));
-            assert!(left < button.bounds().left(), "{label}");
-            left = button.bounds().left();
-        }
-        // 标签也写 shell 名和目录。
+        assert_eq!(card.label(), Some("pwsh ~"));
+        // 标签也是。
         assert_eq!(window.find(TAB).label(), Some("pwsh ~"));
     });
 }
 
-/// 本机说 shell 换了目录，头部跟着变。
+/// 本机说 shell 换了目录，卡片的名称跟着变。
 #[gpui_kit::test]
 fn the_header_follows_the_folder_of_the_shell(cx: &mut TestAppContext) {
     let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
     let folder: &'static str = Box::leak(
         std::path::Path::new(&home)
             .join("vibe")
-            .join("QiShell")
+            .join("MicaTerm")
             .display()
             .to_string()
             .into_boxed_str(),
@@ -181,17 +165,17 @@ fn the_header_follows_the_folder_of_the_shell(cx: &mut TestAppContext) {
     dispatch(cx, handle, NewLocalTerminalTab);
 
     let expected = if cfg!(windows) {
-        r"pwsh ~\vibe\QiShell"
+        r"pwsh ~\vibe\MicaTerm"
     } else {
-        "pwsh ~/vibe/QiShell"
+        "pwsh ~/vibe/MicaTerm"
     };
-    let label = wait_for_label(cx, handle, ("card-header", 1usize), expected);
+    let label = wait_for_label(cx, handle, CARD, expected);
     assert_eq!(label.as_deref(), Some(expected));
 }
 
-/// 底部状态栏：「本地终端」、shell 版本；右边是编码、终端类型、尺寸。
+/// 底部状态栏（高 28）：正中是路径，右边是尺寸（本地卡片没有连接状态和系统，编码不写）。
 #[gpui_kit::test]
-fn the_status_bar_says_local_terminal_and_the_shell_version(cx: &mut TestAppContext) {
+fn the_status_bar_shows_the_folder_and_the_size(cx: &mut TestAppContext) {
     let (handle, workspace, _, _) = open_with_fake_terminals(cx, FakeTerminalFactory::default());
 
     dispatch(cx, handle, NewLocalTerminalTab);
@@ -199,14 +183,16 @@ fn the_status_bar_says_local_terminal_and_the_shell_version(cx: &mut TestAppCont
     in_frame(cx, handle, |window, _| {
         let card = window.find(CARD).bounds();
         let status = window.find(("card-status", 1usize));
-        assert_eq!(status.bounds().size.height, px(24.));
-        // 紧贴卡片底边（中间只有 1px 描边）。
-        assert!(card.bottom() - status.bounds().bottom() <= px(1.));
+        assert_eq!(status.bounds().size.height, px(28.));
+        // 贴着卡片底边。
+        assert_eq!(card.bottom(), status.bounds().bottom());
         let label = status.label().expect("the status bar says what it shows");
-        assert!(
-            label.starts_with("本地终端 · PowerShell 7.5.2 · UTF-8 · xterm-256color · "),
-            "{label}"
-        );
+        assert!(label.starts_with("~ · "), "{label}");
+        assert!(!label.contains("UTF-8"), "{label}");
+        let path = window.find(("card-status-path", 1usize)).bounds();
+        let middle = (path.left() + path.right()) / 2.;
+        let center = (card.left() + card.right()) / 2.;
+        assert!((middle - center).abs() < px(1.), "{path:?} {card:?}");
         // 尺寸是终端现在的列数 × 行数。
         let size = label.rsplit(" · ").next().unwrap();
         let (columns, rows) = size.split_once('×').expect("columns × rows");
@@ -232,7 +218,7 @@ fn the_card_runs_the_shell(cx: &mut TestAppContext) {
     assert!(wait_until(|| factory.written_text().contains("ls\r")));
 }
 
-/// 卡片上的 × 关闭这张卡片和它的 shell；关掉最后一张，回到开始卡片。
+/// 终端右键菜单的「关闭卡片」关闭这张卡片和它的 shell；关掉最后一张，回到新标签页。
 #[gpui_kit::test]
 fn closing_the_card_closes_its_shell(cx: &mut TestAppContext) {
     let (handle, workspace, factory, _) =
@@ -240,16 +226,14 @@ fn closing_the_card_closes_its_shell(cx: &mut TestAppContext) {
     dispatch(cx, handle, NewLocalTerminalTab);
     assert_eq!(factory.shutdowns(), 0);
 
-    in_frame(cx, handle, |window, cx| {
-        window.click(("card-close", 1usize), cx)
-    });
+    click_terminal_menu(cx, handle, 1, "关闭卡片");
 
     assert_eq!(factory.wait_for_shutdowns(1), 1);
     in_frame(cx, handle, |window, _| {
         assert!(window.try_find(CARD).is_none());
         assert!(window.try_find(TAB).is_none());
-        assert!(window.find("start-card").visible());
-        assert_eq!(window.find("start-card").focused(), Some(true));
+        assert!(window.find("new-tab-page").visible());
+        assert_eq!(window.find("new-tab-page").focused(), Some(true));
     });
     cx.update(|cx| assert!(workspace.read(cx).tab_ids().is_empty()));
 }

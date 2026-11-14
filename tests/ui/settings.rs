@@ -1,8 +1,11 @@
-//! 设置对话框（工单 07）的 UI 测试：外观与终端两类，改动立即生效并写进注入的设置存储。
+//! 设置标签（UI 重做工单 12）的 UI 测试：外观与终端两类，改动立即生效并写进注入的设置存储。
+
+use micaterm::app::CloseActiveTab;
+use micaterm::theme::INTERFACE_FONT_SIZE;
 
 use crate::support::*;
 
-/// 按 Ctrl+,（macOS 上 ⌘,）打开设置对话框。
+/// 按 Ctrl+,（macOS 上 ⌘,）打开设置标签。
 fn open_settings(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     in_frame(cx, handle, |window, cx| {
         #[cfg(target_os = "macos")]
@@ -12,13 +15,19 @@ fn open_settings(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     });
 }
 
+/// 设置是一个标签（26 号）：Ctrl+, 打开；再按一次切回同一个，不开第二个；关掉就没了。
 #[gpui_kit::test]
-fn ctrl_comma_opens_the_settings_dialog_on_appearance(cx: &mut TestAppContext) {
-    let (handle, _) = open_workspace(cx);
+fn ctrl_comma_opens_the_settings_tab_on_appearance(cx: &mut TestAppContext) {
+    let (handle, workspace) = open_workspace(cx);
     open_settings(cx, handle);
+    let tabs = |cx: &mut TestAppContext| cx.update(|cx| workspace.read(cx).tab_ids().len());
+    assert_eq!(tabs(cx), 1);
+    assert!(cx.update(|cx| workspace.read(cx).settings_tab().is_some()));
 
     in_frame(cx, handle, |window, _| {
         assert!(window.find("settings").visible());
+        assert_eq!(window.find("settings-title").label(), Some("外观"));
+        assert!(window.find("settings-applies-at-once").visible());
         let appearance = window.find(("settings-category", 0_usize));
         let terminal = window.find(("settings-category", 1_usize));
         assert_eq!(appearance.label(), Some("外观"));
@@ -28,6 +37,42 @@ fn ctrl_comma_opens_the_settings_dialog_on_appearance(cx: &mut TestAppContext) {
         // 外观在前：能看到应用外观，看不到终端字体。
         assert!(window.find(("appearance", 0_usize)).visible());
         assert!(window.try_find("terminal-font-family").is_none());
+        // 都是默认值：没有「恢复默认」。
+        assert!(window.try_find("appearance-reset").is_none());
+        assert!(window.try_find("mica-reset").is_none());
+    });
+
+    dispatch(cx, handle, NewLocalTerminalTab);
+    assert_eq!(tabs(cx), 2);
+    open_settings(cx, handle);
+    assert_eq!(tabs(cx), 2);
+    in_frame(cx, handle, |window, _| {
+        assert!(window.find("settings").visible())
+    });
+
+    dispatch(cx, handle, CloseActiveTab);
+    assert_eq!(tabs(cx), 1);
+    assert!(cx.update(|cx| workspace.read(cx).settings_tab().is_none()));
+}
+
+/// 改过的设置在标题后面有「恢复默认」，点了改回默认、它也就没了（26 号 `.stg-row .rs`）。
+#[gpui_kit::test]
+fn a_changed_setting_can_be_reset_to_its_default(cx: &mut TestAppContext) {
+    let (handle, workspace) = open_workspace(cx);
+    open_settings(cx, handle);
+
+    in_frame(cx, handle, |window, cx| window.click("mica", cx));
+    assert!(stored(cx, &workspace).interface.mica);
+    in_frame(cx, handle, |window, cx| {
+        assert_eq!(window.find("mica-reset").label(), Some("恢复默认"));
+        // 别的没改过的还是没有。
+        assert!(window.try_find("appearance-reset").is_none());
+        window.click("mica-reset", cx);
+    });
+    assert!(!stored(cx, &workspace).interface.mica);
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("mica-reset").is_none());
+        assert_eq!(window.find("mica").checked(), Some(false));
     });
 }
 
@@ -54,10 +99,10 @@ fn the_app_appearance_changes_at_once_and_is_stored(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let theme = cx.theme();
         assert!(theme.is_dark());
-        // 对话框、菜单这些用原型 `.win.dark` 的颜色。
-        assert_eq!(theme.theme_name().as_ref(), "QiShell Dark");
-        assert_eq!(theme.primary, Tokens::dark().accent);
-        assert_eq!(theme.popover, Tokens::dark().panel);
+        // 弹窗、菜单这些用原型 `.win.dark` 的颜色。
+        assert_eq!(theme.theme_name().as_ref(), "MicaTerm Dark");
+        assert_eq!(theme.primary, Tokens::dark().text);
+        assert_eq!(theme.popover, Tokens::dark().popup);
     });
     in_frame(cx, handle, |window, cx| {
         assert_eq!(window.find(("appearance", 2_usize)).selected(), Some(true));
@@ -67,27 +112,21 @@ fn the_app_appearance_changes_at_once_and_is_stored(cx: &mut TestAppContext) {
     assert_eq!(stored(cx, &workspace).appearance, Appearance::Light);
     cx.update(|cx| {
         assert!(!cx.theme().is_dark());
-        assert_eq!(cx.theme().theme_name().as_ref(), "QiShell Light");
-        assert_eq!(cx.theme().primary, Tokens::light().accent);
+        assert_eq!(cx.theme().theme_name().as_ref(), "MicaTerm Light");
+        assert_eq!(cx.theme().primary, Tokens::light().text);
     });
 }
 
+/// 界面字号不是设置（用户定）：外观页没有这一项，主题字号就是固定的那个。
 #[gpui_kit::test]
-fn the_interface_font_size_changes_at_once_and_is_stored(cx: &mut TestAppContext) {
-    let (handle, workspace) = open_workspace(cx);
+fn the_interface_font_size_is_fixed(cx: &mut TestAppContext) {
+    let (handle, _workspace) = open_workspace(cx);
     open_settings(cx, handle);
 
-    in_frame(cx, handle, |window, cx| {
-        window.click("interface-font-size", cx)
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("interface-font-size").is_none());
     });
-    in_frame(cx, handle, |window, cx| {
-        // 12 到 20，第 5 项是 16。
-        let mut menu = window.within("popup-menu");
-        assert_eq!(menu.find(4_usize).label(), Some("16"));
-        menu.click(4_usize, cx);
-    });
-    assert_eq!(stored(cx, &workspace).interface.font_size, 16.);
-    cx.update(|cx| assert_eq!(cx.theme().font_size, px(16.)));
+    cx.update(|cx| assert_eq!(cx.theme().font_size, px(INTERFACE_FONT_SIZE)));
 }
 
 #[gpui_kit::test]
@@ -95,13 +134,13 @@ fn each_appearance_has_its_own_terminal_theme(cx: &mut TestAppContext) {
     let (handle, workspace) = open_workspace(cx);
     let in_effect = |cx: &mut TestAppContext| cx.update(|cx| TerminalColors::current(cx).name());
     open_settings(cx, handle);
-    assert_eq!(in_effect(cx), "QiShell Light");
+    assert_eq!(in_effect(cx), "MicaTerm Light");
 
     in_frame(cx, handle, |window, cx| {
-        let qishell = window.find("terminal-theme-qishell-light");
-        assert_eq!(qishell.selected(), Some(true));
+        let default_light = window.find("terminal-theme-micaterm-light");
+        assert_eq!(default_light.selected(), Some(true));
         assert_eq!(
-            window.find("terminal-theme-qishell-dark").selected(),
+            window.find("terminal-theme-micaterm-dark").selected(),
             Some(true)
         );
         assert_eq!(
@@ -110,7 +149,7 @@ fn each_appearance_has_its_own_terminal_theme(cx: &mut TestAppContext) {
         );
         // 四对：浅色栏在左、深色栏在右，同一行是一对。
         for (light, dark) in [
-            ("qishell-light", "qishell-dark"),
+            ("micaterm-light", "micaterm-dark"),
             ("tokyo-day", "tokyo-night"),
             ("catppuccin-latte", "catppuccin-mocha"),
             ("rose-pine-dawn", "rose-pine"),
@@ -136,7 +175,7 @@ fn each_appearance_has_its_own_terminal_theme(cx: &mut TestAppContext) {
             Some(true)
         );
         assert_eq!(
-            window.find("terminal-theme-qishell-light").selected(),
+            window.find("terminal-theme-micaterm-light").selected(),
             Some(false)
         );
         // 选深色栏的不影响浅色外观下的终端。
@@ -189,7 +228,8 @@ fn the_terminal_category_shows_the_font_interaction_and_local_shell(cx: &mut Tes
         }
         assert_eq!(
             window.find("terminal-font-preview").label(),
-            Some("JetBrains Mono 11.6 px，行高 1.45")
+            // 测试环境没装 Maple Mono，退回随包的 JetBrains Mono。
+            Some("JetBrains Mono 13 px，行高 1.6")
         );
         // 默认：右键显示菜单，选中即复制关着。
         assert_eq!(window.find("right-click").label(), Some("显示菜单"));
@@ -197,32 +237,58 @@ fn the_terminal_category_shows_the_font_interaction_and_local_shell(cx: &mut Tes
     });
 }
 
+/// 字号、行高是下拉框（26 号 `.stg-dd`）：字号 10–28 每个整数，行高 1.0–2.0 每档 0.1。
 #[gpui_kit::test]
 fn the_terminal_font_size_and_line_height_change_at_once_and_are_stored(cx: &mut TestAppContext) {
     let (handle, workspace) = open_workspace(cx);
     open_terminal_settings(cx, handle);
 
     in_frame(cx, handle, |window, cx| {
+        assert_eq!(window.find("terminal-font-size").label(), Some("13"));
+        assert_eq!(window.find("terminal-line-height").label(), Some("1.6"));
         window.click("terminal-font-size", cx)
     });
     in_frame(cx, handle, |window, cx| {
-        window.press("ctrl-a", cx);
-        window.input("14", cx);
+        let mut menu = window.within("popup-menu");
+        assert_eq!(menu.find(0_usize).label(), Some("10"));
+        assert_eq!(menu.find(18_usize).label(), Some("28"));
+        menu.click(4_usize, cx);
     });
     assert_eq!(stored(cx, &workspace).terminal_font.size, 14.);
     cx.update(|cx| assert_eq!(cx.global::<TerminalFont>().size, px(14.)));
 
-    // 行高点「+」加一档（0.05）。
     in_frame(cx, handle, |window, cx| {
-        window.within("terminal-line-height").click("increment", cx)
+        window.click("terminal-line-height", cx)
     });
-    assert_eq!(stored(cx, &workspace).terminal_font.line_height, 1.5);
-    cx.update(|cx| assert_eq!(cx.global::<TerminalFont>().line_height, 1.5));
+    in_frame(cx, handle, |window, cx| {
+        let mut menu = window.within("popup-menu");
+        assert_eq!(menu.find(0_usize).label(), Some("1.0"));
+        assert_eq!(menu.find(10_usize).label(), Some("2.0"));
+        menu.click(2_usize, cx);
+    });
+    assert_eq!(stored(cx, &workspace).terminal_font.line_height, 1.2);
+    cx.update(|cx| assert_eq!(cx.global::<TerminalFont>().line_height, 1.2));
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find("terminal-font-preview").label(),
-            Some("JetBrains Mono 14 px，行高 1.5")
+            Some("JetBrains Mono 14 px，行高 1.2")
         );
+        assert_eq!(window.find("terminal-font-size").label(), Some("14"));
+        assert!(window.find("terminal-font-size-reset").visible());
+    });
+
+    // 在终端里按 Ctrl+= 调出来的数不在菜单里，框上照样显示。
+    cx.update(|cx| {
+        workspace
+            .read(cx)
+            .settings()
+            .clone()
+            .update(cx, |store, cx| {
+                store.update(|settings| settings.terminal_font.size = 14.5, cx)
+            })
+    });
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find("terminal-font-size").label(), Some("14.5"));
     });
 }
 
@@ -287,8 +353,8 @@ fn the_local_shell_typed_in_is_stored_and_new_local_terminals_run_it(cx: &mut Te
         Some("cmd.exe /k")
     );
 
-    // 关掉对话框，新开一个本地终端：用的是刚填的 shell。
-    in_frame(cx, handle, |window, cx| window.click("settings-close", cx));
+    // 关掉设置标签，新开一个本地终端：用的是刚填的 shell。
+    dispatch(cx, handle, CloseActiveTab);
     in_frame(cx, handle, |window, _| {
         assert!(window.try_find("settings").is_none())
     });

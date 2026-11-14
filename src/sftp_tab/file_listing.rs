@@ -1,44 +1,33 @@
 // 来自 since2006/shell-rs @ b2a307a: src/explorer/file_listing.rs
-// 裁剪：去掉单栏「文件」的窄列表、切换语言和 `FileSizeFormat`（大小固定简短格式）；
-// 颜色取原型的 token：选中是 `--sel-solid`，悬停只在名称格上，行本身透明（表格的颜色见 `theme::component`）。
-//! 一张文件卡片的行和列，交给 `DataTable`。选择归卡片（按名字记），表格自己的选行关着。
+// 裁剪：去掉单栏「文件」的窄列表、切换语言和 `FileSizeFormat`（大小固定简短格式）、拖列宽。
+// 改造：外观照 26 号「SFTP」（`ui::table`，Zed data_table）：整行是一个项目，悬停、选中都是整行。
+//! 一侧文件列表的行和列：显示哪些行、怎么排、每一行怎么画。选择归卡片（按名字记）。
+//!
+//! 点一行任何地方都选中它（Ctrl 加减、Shift 扩展），双击打开，右键先选中再开菜单；
+//! 从图标和名字上拖是把文件拖到另一侧，从行的别处或空白处拖是框选（同资源管理器的详细信息视图）。
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::cmp::Ordering;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use gpui_kit::component::h_flex;
-use gpui_kit::component::table::{Column, ColumnSort, TableDelegate, TableState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::marquee::{ListGeometry, Pressed, ends_a_drag};
+use super::marquee::{Pressed, ends_a_drag};
 use super::{
-    CardSide, ClickMode, FileCard, FileEntry, FileIcon, Selection, SftpTabId, child_path,
-    format_changed, format_rights, format_size,
+    CardSide, ClickMode, FileCard, FileEntry, FileIcon, SftpTabId, format_changed, format_rights,
+    format_size,
 };
 use crate::app::{SftpAction, SftpDispatch as _, SftpTabCommand};
 use crate::backend::sftp::TransferDirection;
 use crate::i18n::t;
-use crate::theme::Tokens;
-
-/// 行的回调要从卡片知道的东西，由 `FileCard` 推进来：渲染时不读别的实体。
-#[derive(Clone, Default)]
-pub(super) struct ListingContext {
-    pub tab: SftpTabId,
-    pub path: String,
-    pub selection: Rc<Selection>,
-    pub transfer_enabled: bool,
-    pub dispatch: Option<FocusHandle>,
-    pub card: Option<WeakEntity<FileCard>>,
-    /// 上一次右键点到了什么，列表的右键菜单读它。
-    pub menu_hit: Rc<RefCell<Option<MenuHit>>>,
-    /// 行在哪里，给框选用。
-    pub geometry: Rc<ListGeometry>,
-    /// 没有行时列表写什么。
-    pub placeholder: ListPlaceholder,
-}
+use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY, baseline_shift, ui_text};
+use crate::ui::table::{
+    self, ColumnWidth, RowState, SortDirection, TableColumn, cell, header_cell, header_row,
+    text_cell,
+};
 
 /// 没有行时列表写什么，画的时候再翻成文字。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -65,61 +54,32 @@ impl ListPlaceholder {
     }
 }
 
-/// 列表里的右键点到了什么；空白处是 `None`。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum MenuHit {
-    /// 文件或文件夹，按名字。
-    Item(String),
-    /// 列标题，按列的键。
-    Column(SharedString),
-}
+/// 名称格里图标的边长、图标和名字之间（`.sf-r .nm`：图标在 12，名字在 34）。
+const ICON_SIZE: Pixels = px(14.);
+const ICON_GAP: Pixels = px(8.);
+/// 图标往下挪多少才和名字的字面居中（真程序 150% 实测，ui-lessons 第二节）。
+const ICON_NUDGE: Pixels = px(0.5);
 
-/// 一张文件卡片的行和列。
-pub struct FileListing {
-    columns: Vec<Column>,
-    /// 目录里的全部，读到的样子。
-    listed: Vec<FileEntry>,
-    /// 显示的行，排好序：`listed` 去掉不显示的隐藏文件。
-    rows: Vec<FileEntry>,
-    show_hidden: bool,
-    sort: Option<(usize, ColumnSort)>,
-    side: CardSide,
-    /// 用户拖过列宽：之后不再按百分比摆。
-    dragged: bool,
-    context: ListingContext,
-}
-
-/// 列表放不下时的最窄的列。
-const MIN_COLUMN_WIDTH: Pixels = px(48.);
-/// 列表右边留给竖滚动条的地方。
-const SCROLLBAR_ROOM: Pixels = px(10.);
-
-/// 两侧每列占列表宽度的百分比（原型 `fcard` 的 `colgroup`）。
-fn column_shares(side: CardSide) -> &'static [f32] {
-    match side {
-        CardSide::Local => &[44., 13., 19., 24.],
-        CardSide::Remote => &[34., 13., 22., 16., 15.],
-    }
-}
-
-/// 两侧的列（原型）。量到列表的宽度之前先用这些宽度。箭头是 `render_th` 自己画的：
-/// 原型只在排序的那一列上有箭头，不用表格那种每列都有的。
-fn columns(side: CardSide) -> Vec<Column> {
-    let column =
-        |key: &'static str, width: f32| Column::new(key, column_title(key)).width(px(width));
+/// 两侧的列（26 号 `grid-template-columns`）：本地 名称 / 大小 76 / 类型 96 / 修改时间 124，
+/// 远程 名称 / 大小 64 / 修改时间 124 / 权限 84 / 所有者 84。
+fn columns(side: CardSide) -> Vec<TableColumn> {
+    let fixed = |key: &'static str, width: f32| {
+        TableColumn::new(key, column_title(key), ColumnWidth::Fixed(px(width)))
+    };
+    let name = TableColumn::new("name", column_title("name"), ColumnWidth::Fill);
     match side {
         CardSide::Local => vec![
-            name_column(px(240.)),
-            column("size", 80.),
-            column("type", 100.),
-            column("modified", 130.),
+            name,
+            fixed("size", 76.).right(),
+            fixed("type", 96.),
+            fixed("modified", 124.),
         ],
         CardSide::Remote => vec![
-            name_column(px(200.)),
-            column("size", 80.),
-            column("modified", 130.),
-            column("rights", 90.),
-            column("owner", 80.),
+            name,
+            fixed("size", 64.).right(),
+            fixed("modified", 124.),
+            fixed("rights", 84.),
+            fixed("owner", 84.),
         ],
     }
 }
@@ -137,6 +97,18 @@ fn column_title(key: &str) -> SharedString {
     }
 }
 
+/// 一侧文件列表的行和列。
+pub struct FileListing {
+    columns: Vec<TableColumn>,
+    /// 目录里的全部，读到的样子。
+    listed: Vec<FileEntry>,
+    /// 显示的行，排好序：`listed` 去掉不显示的隐藏文件。
+    rows: Vec<FileEntry>,
+    show_hidden: bool,
+    /// 按哪一列、哪个方向排；`None` 是按名称升序。
+    sort: Option<(usize, SortDirection)>,
+}
+
 impl FileListing {
     pub fn new(side: CardSide) -> Self {
         Self {
@@ -145,68 +117,30 @@ impl FileListing {
             rows: Vec::new(),
             show_hidden: false,
             sort: None,
-            side,
-            dragged: false,
-            context: ListingContext::default(),
         }
     }
 
-    pub(super) fn configure(&mut self, context: ListingContext) {
-        self.context = context;
+    pub(super) fn columns(&self) -> &[TableColumn] {
+        &self.columns
     }
 
-    /// 记住拖到的列宽：每次 `refresh`（每次列目录都有）表格都重新取一遍列。
-    pub(super) fn set_widths(&mut self, widths: &[Pixels]) {
-        for (column, width) in self.columns.iter_mut().zip(widths) {
-            if column.width != *width {
-                self.dragged = true;
-                column.width = *width;
+    /// 点列标题排序：降序、升序、回到按名称。
+    pub(super) fn cycle_sort(&mut self, col_ix: usize) {
+        self.sort = match self.sort {
+            Some((ix, SortDirection::Descending)) if ix == col_ix => {
+                Some((col_ix, SortDirection::Ascending))
             }
-        }
-    }
-
-    /// 按原型的百分比摆列，列表宽 `width`。用户拖过就不动了。返回变了没有。
-    pub(super) fn fit_columns(&mut self, width: Pixels) -> bool {
-        if self.dragged {
-            return false;
-        }
-        let room = f32::from((width - SCROLLBAR_ROOM).max(px(0.)));
-        let mut changed = false;
-        for (column, share) in self.columns.iter_mut().zip(column_shares(self.side)) {
-            let fitted = px((room * share / 100.).floor()).max(MIN_COLUMN_WIDTH);
-            if column.width != fitted {
-                column.width = fitted;
-                changed = true;
-            }
-        }
-        changed
-    }
-
-    /// 点列标题排序，和点箭头一样：降序、升序、回到按名称。
-    fn cycle_sort(&mut self, col_ix: usize) {
-        let sort = match self.sort {
-            Some((ix, ColumnSort::Descending)) if ix == col_ix => ColumnSort::Ascending,
-            Some((ix, ColumnSort::Ascending)) if ix == col_ix => ColumnSort::Default,
-            _ => ColumnSort::Descending,
-        };
-        self.set_sort(col_ix, sort);
-    }
-
-    /// 按某一列排序。
-    fn set_sort(&mut self, col_ix: usize, sort: ColumnSort) {
-        self.sort = match sort {
-            ColumnSort::Default => None,
-            sort => Some((col_ix, sort)),
+            Some((ix, SortDirection::Ascending)) if ix == col_ix => None,
+            _ => Some((col_ix, SortDirection::Descending)),
         };
         self.apply_sort();
     }
 
-    /// 这一列标题后面的箭头：排序的那一列才有，没选时是按名称升序（原型 `th.srt`）。
-    fn sort_arrow(&self, col_ix: usize) -> Option<&'static str> {
+    /// 这一列标题后面的箭头：排序的那一列才有，没选时是按名称升序（26 号 `.sf-hd .so`）。
+    pub(super) fn sort_arrow(&self, col_ix: usize) -> Option<SortDirection> {
         match self.sort {
-            Some((ix, ColumnSort::Descending)) if ix == col_ix => Some("\u{2193}"),
-            Some((ix, _)) if ix == col_ix => Some("\u{2191}"),
-            None if self.columns[col_ix].key.as_ref() == "name" => Some("\u{2191}"),
+            Some((ix, direction)) if ix == col_ix => Some(direction),
+            None if self.columns[col_ix].key == "name" => Some(SortDirection::Ascending),
             _ => None,
         }
     }
@@ -237,97 +171,6 @@ impl FileListing {
 
     pub fn position(&self, name: &str) -> Option<usize> {
         self.rows.iter().position(|row| row.name.as_ref() == name)
-    }
-
-    /// 一行的项目在它那一侧的路径。
-    fn child_path(&self, name: &str) -> String {
-        child_path(&self.context.path, name, self.side)
-    }
-
-    /// 让 `cell` 能把这一行拖到另一侧；这一行在选中项里时连选中的一起拖。
-    /// 按下没选中的项目就只选它，这样高亮的就是要拖的。
-    fn drag_from(&self, cell: Stateful<Div>, name: &str) -> Stateful<Div> {
-        let names = if self.context.selection.contains(name) {
-            self.context.selection.targets(&self.order())
-        } else {
-            vec![name.to_string()]
-        };
-        // 按着 Ctrl、Shift 的留给名称格的点击。
-        let cell = match self.context.card.clone() {
-            Some(card) => cell.on_mouse_down(MouseButton::Left, {
-                let name = name.to_string();
-                move |event, _, cx| {
-                    if !event.modifiers.secondary() && !event.modifiers.shift {
-                        let _ = card.update(cx, |card, cx| {
-                            card.clear_menu_row(cx);
-                            card.select_pressed(&name, cx);
-                        });
-                    }
-                }
-            }),
-            None => cell,
-        };
-        let paths = names.iter().map(|name| self.child_path(name));
-        match self.side {
-            CardSide::Local => drag_files(
-                cell,
-                paths.map(PathBuf::from).collect(),
-                TransferDirection::Upload,
-            ),
-            CardSide::Remote => drag_files(
-                cell,
-                paths.collect::<Vec<String>>(),
-                TransferDirection::Download,
-            ),
-        }
-    }
-
-    /// 名称格的点击：选中（Ctrl 加减，Shift 扩展），双击打开，右键先选中，菜单才对着高亮的项目。
-    fn name_events(&self, cell: Stateful<Div>, name: &str) -> Stateful<Div> {
-        let geometry = self.context.geometry.clone();
-        let cell = cell.on_any_mouse_down(move |_, _, _| geometry.pressed.set(Pressed::Name));
-        let (Some(dispatch), Some(card)) =
-            (self.context.dispatch.clone(), self.context.card.clone())
-        else {
-            return cell;
-        };
-        let tab = self.context.tab;
-        let side = self.side;
-        cell.on_click({
-            let name = name.to_string();
-            let card = card.clone();
-            move |event, window, cx| {
-                if ends_a_drag(event) {
-                    return;
-                }
-                let modifiers = event.modifiers();
-                let mode = if modifiers.shift {
-                    ClickMode::Extend
-                } else if modifiers.secondary() {
-                    ClickMode::Toggle
-                } else {
-                    ClickMode::Replace
-                };
-                let _ = card.update(cx, |card, cx| card.click_row(&name, mode, cx));
-                if mode == ClickMode::Replace && event.click_count() == 2 {
-                    dispatch.dispatch_sftp_action(
-                        &SftpAction::new(tab, SftpTabCommand::DoubleClick { side }),
-                        window,
-                        cx,
-                    );
-                }
-            }
-        })
-        .on_mouse_down(MouseButton::Right, {
-            let hit = (name != "..").then(|| name.to_string());
-            let menu_hit = self.context.menu_hit.clone();
-            move |_, _, cx| {
-                if let Some(hit) = &hit {
-                    let _ = card.update(cx, |card, cx| card.select_pressed(hit, cx));
-                }
-                *menu_hit.borrow_mut() = hit.clone().map(MenuHit::Item);
-            }
-        })
     }
 
     pub fn set_rows(&mut self, rows: Vec<FileEntry>) {
@@ -362,16 +205,16 @@ impl FileListing {
     fn apply_sort(&mut self) {
         let (key, descending) = self
             .sort
-            .and_then(|(col_ix, sort)| {
+            .and_then(|(col_ix, direction)| {
                 self.columns
                     .get(col_ix)
-                    .map(|column| (column.key.clone(), sort == ColumnSort::Descending))
+                    .map(|column| (column.key, direction == SortDirection::Descending))
             })
-            .unwrap_or_else(|| ("name".into(), false));
+            .unwrap_or(("name", false));
         let start = usize::from(self.rows.first().is_some_and(FileEntry::is_parent));
         self.rows[start..].sort_by(|a, b| {
             let by_name = || a.name.to_lowercase().cmp(&b.name.to_lowercase());
-            let by_key = match key.as_ref() {
+            let by_key = match key {
                 "size" => a.size.cmp(&b.size),
                 "modified" => a.modified.cmp(&b.modified),
                 "type" => a.type_label().cmp(&b.type_label()),
@@ -389,238 +232,304 @@ impl FileListing {
     }
 }
 
-impl TableDelegate for FileListing {
-    fn columns_count(&self, _: &App) -> usize {
-        self.columns.len()
+impl FileCard {
+    /// 表头：点标题排序（降序、升序、回到按名称）。
+    pub(super) fn render_header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> Div {
+        let geometry = self.marquee.geometry.clone();
+        let columns = self.listing.columns();
+        header_row(tokens).children((0..columns.len()).map(|col_ix| {
+            let geometry = geometry.clone();
+            header_cell(columns, col_ix, self.listing.sort_arrow(col_ix), tokens)
+                .on_any_mouse_down(move |_, _, _| geometry.pressed.set(Pressed::Title))
+                .on_click(cx.listener(move |card, _, _, cx| {
+                    cx.stop_propagation();
+                    card.listing.cycle_sort(col_ix);
+                    cx.notify();
+                }))
+                .test_support()
+        }))
     }
 
-    fn rows_count(&self, _: &App) -> usize {
-        self.rows.len()
-    }
-
-    fn column(&self, col_ix: usize, _: &App) -> Column {
-        self.columns[col_ix].clone()
-    }
-
-    /// `Column::text_right` 在 `DataTable` 里不生效，大小列自己靠右。点标题排序，不只是点箭头。
-    /// 右键记下来给列表的菜单。
-    fn render_th(
+    /// 列表里 `range` 那几行（`uniform_list` 只要看得见的）。
+    pub(super) fn render_rows(
         &mut self,
-        col_ix: usize,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) -> impl IntoElement {
-        let column = &self.columns[col_ix];
-        let key = column.key.clone();
-        let arrow = self.sort_arrow(col_ix);
-        let accent = Tokens::current(cx).accent;
-        let menu_hit = self.context.menu_hit.clone();
-        let geometry = self.context.geometry.clone();
-        h_flex()
-            .id(ElementId::Name(format!("column:{key}").into()))
-            .test_support()
-            .size_full()
-            .text_size(px(11.5))
-            .font_weight(FontWeight::MEDIUM)
-            .when(key.as_ref() == "size", |this| this.justify_end())
-            .when(key.as_ref() == "name", |this| this.px_1p5())
-            .on_mouse_down(MouseButton::Right, move |_, _, _| {
-                *menu_hit.borrow_mut() = Some(MenuHit::Column(key.clone()));
+        range: Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let tokens = Tokens::current(cx);
+        let scale = TypeScale::current(cx);
+        // 权限是等宽小字（`.sf-r .pm`，界面 12 时 11.5），和界面字放在同一条基线上（26 号整行按基线对齐）。
+        let rights_size = scale.mono_small;
+        let rights_shift = baseline_shift(
+            window,
+            (UI_FONT_FAMILY, scale.ui),
+            (MONO_FONT_FAMILY, scale.mono_small),
+            table::ROW_HEIGHT,
+        );
+        range
+            .filter_map(|ix| {
+                let entry = self.listing.entry(ix)?.clone();
+                Some(self.render_row(ix, &entry, (rights_shift, rights_size), &tokens, cx))
             })
-            .on_any_mouse_down(move |_, _, _| geometry.pressed.set(Pressed::Title))
-            // 箭头记在表格的列上，只有 `refresh` 才重新取。
-            .on_click(cx.listener(move |table, _, _, cx| {
-                cx.stop_propagation();
-                table.delegate_mut().cycle_sort(col_ix);
-                table.refresh(cx);
-                cx.notify();
-            }))
-            .gap(px(3.))
-            .child(column.name.clone())
-            .children(arrow.map(|arrow| div().text_color(accent).child(arrow)))
+            .collect()
     }
 
-    fn render_td(
-        &mut self,
+    fn render_row(
+        &self,
         row_ix: usize,
-        col_ix: usize,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) -> impl IntoElement {
-        let Some(entry) = self.rows.get(row_ix) else {
-            return div().into_any_element();
-        };
-        let tokens = Tokens::current(cx);
-        let parent = entry.is_parent();
-        let faint = |cell: Div| cell.text_size(px(11.5)).text_color(tokens.faint);
-        match self.columns[col_ix].key.as_ref() {
-            // 名称格就是项目：它显示悬停、选中和光标，收点击；行的其余地方算空白。
-            // 只有图标和文字能拖文件，从格子的其余地方拖是框选。
-            "name" => {
-                let selection = &self.context.selection;
-                let selected = selection.contains(&entry.name);
-                // 选中的名字不管光标在不在都显示选中；边框只用来在没选中的名字上找到光标：
-                // `..`，或者刚用 Ctrl 取消的。
-                let cursor = !selected && selection.cursor() == Some(entry.name.as_ref());
-                let label = h_flex()
-                    .id(ElementId::Name(format!("name:{}", entry.name).into()))
-                    .h_full()
-                    .min_w_0()
-                    .gap(px(7.))
-                    .child(FileIcon::entry(entry).dimmed(entry.is_hidden()))
-                    .child(div().min_w_0().truncate().child(entry.name.clone()));
-                let label = if parent {
-                    label
-                } else {
-                    self.drag_from(label, &entry.name)
-                };
-                let cell = h_flex()
-                    .id(ElementId::Name(format!("name-cell:{}", entry.name).into()))
-                    .size_full()
-                    .px_1p5()
-                    .border_1()
-                    .rounded(px(6.))
-                    .border_color(if cursor {
-                        tokens.accent
-                    } else {
-                        gpui_kit::transparent_black()
-                    })
-                    .map(|this| {
-                        if selected {
-                            this.bg(tokens.selection_solid)
-                        } else {
-                            this.hover(|this| this.bg(tokens.hover))
-                        }
-                    })
-                    .child(label.test_support().aria_selected(selected));
-                self.name_events(cell, &entry.name)
-                    .test_support()
-                    .into_any_element()
-            }
-            "size" => {
-                let size = (!entry.is_dir()).then(|| format_size(entry.size));
-                h_flex()
-                    .id(ElementId::Name(format!("size:{}", entry.name).into()))
-                    .test_support()
-                    .aria_label(size.clone().unwrap_or_default())
-                    .w_full()
-                    .justify_end()
-                    .text_size(px(11.5))
-                    .text_color(tokens.faint)
-                    .children(size)
-                    .into_any_element()
-            }
-            "type" => faint(div())
-                .child(if parent {
-                    String::new()
-                } else {
-                    entry.type_label()
-                })
-                .into_any_element(),
-            "modified" => faint(div())
-                .child(if parent {
-                    String::new()
-                } else {
-                    entry.modified.map(format_changed).unwrap_or_default()
-                })
-                .into_any_element(),
-            "rights" => faint(div())
-                .when(!parent, |this| {
-                    this.children(entry.permissions.map(format_rights))
-                })
-                .into_any_element(),
-            "owner" => faint(div())
-                .when(!parent, |this| this.children(entry.owner.clone()))
-                .into_any_element(),
-            _ => div().into_any_element(),
-        }
-    }
-
-    fn render_tr(
-        &mut self,
-        row_ix: usize,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) -> Stateful<Div> {
-        let Some(entry) = self.rows.get(row_ix) else {
-            return div().id(("empty-file-row", row_ix));
-        };
+        entry: &FileEntry,
+        (rights_shift, rights_size): (Pixels, Pixels),
+        tokens: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let columns = self.listing.columns();
         let name = entry.name.to_string();
-        let context = &self.context;
-        let tokens = Tokens::current(cx);
-        // 悬停、选中和光标显示在名称格上，见 `render_td`。隐藏文件显示出来时比别的淡，整行都是。
-        let row = div()
-            .id(ElementId::Name(format!("file:{name}").into()))
-            .when(entry.is_hidden(), |row| row.text_color(tokens.faint))
-            // 这一行画在哪，就知道每一行在哪。要写明偏移：不写的绝对定位子元素会落到格子下面。
-            .child({
-                let geometry = context.geometry.clone();
-                canvas(
-                    move |bounds, _, _| {
-                        let first = bounds.origin.y - bounds.size.height * row_ix as f32;
-                        geometry.rows.set(Some((first, bounds.size.height)));
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-            });
-        let Some(dispatch) = context.dispatch.clone() else {
-            return row;
+        let parent = entry.is_parent();
+        let selected = self.selection.contains(&name);
+        // 键盘光标落在没选中的行上（`..`，或者刚用 Ctrl 取消的）时描一圈细边，好找到它。
+        let cursor = !selected && self.selection.cursor() == Some(name.as_str());
+        let geometry = self.marquee.geometry.clone();
+        let card = cx.entity().downgrade();
+        let state = RowState {
+            selected,
+            focused: self.current,
         };
-        if entry.is_parent() || !entry.is_dir() {
-            return row;
+        let dim = |cell: Div| cell.text_color(tokens.text2);
+        let cells = columns.iter().enumerate().map(|(col_ix, column)| {
+            let blank = parent && column.key != "name";
+            match column.key {
+                "name" => self.render_name(entry, selected, card.clone(), tokens),
+                _ if blank => cell(columns, col_ix).into_any_element(),
+                "size" => {
+                    let size = (!entry.is_dir()).then(|| format_size(entry.size));
+                    dim(cell(columns, col_ix))
+                        .id(ElementId::Name(format!("size:{name}").into()))
+                        .test_support()
+                        .aria_label(size.clone().unwrap_or_default())
+                        .children(size)
+                        .into_any_element()
+                }
+                "type" => dim(text_cell(columns, col_ix, entry.type_label())).into_any_element(),
+                "modified" => dim(text_cell(
+                    columns,
+                    col_ix,
+                    entry.modified.map(format_changed).unwrap_or_default(),
+                ))
+                .into_any_element(),
+                "rights" => dim(cell(columns, col_ix))
+                    .child(
+                        div()
+                            .relative()
+                            .top(rights_shift)
+                            .font_family(MONO_FONT_FAMILY)
+                            .text_size(rights_size)
+                            .children(entry.permissions.map(format_rights)),
+                    )
+                    .into_any_element(),
+                "owner" => dim(text_cell(
+                    columns,
+                    col_ix,
+                    entry.owner.clone().unwrap_or_default(),
+                ))
+                .into_any_element(),
+                _ => cell(columns, col_ix).into_any_element(),
+            }
+        });
+        let row = table::row(
+            ElementId::Name(format!("file:{name}").into()),
+            state,
+            tokens,
+        )
+        .relative()
+        // 隐藏文件显示出来时整行更淡（`.sf-r.hid`）。
+        .when(entry.is_hidden(), |row| row.text_color(tokens.st_dim))
+        .children(cells)
+        .when(cursor, |row| {
+            row.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .border_1()
+                    .border_color(tokens.line_strong),
+            )
+        })
+        // 这一行画在哪，就知道每一行在哪（框选用）。要写明偏移：不写的绝对定位子元素会落到格子下面。
+        .child({
+            let geometry = geometry.clone();
+            canvas(
+                move |bounds, _, _| {
+                    let first = bounds.origin.y - bounds.size.height * row_ix as f32;
+                    geometry.rows.set(Some((first, bounds.size.height)));
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        })
+        // 按在行上（名字以外）：点一下选中它，拖是框选。名字自己先说了就不改。
+        .on_any_mouse_down({
+            let geometry = geometry.clone();
+            move |_, _, _| {
+                if geometry.pressed.get() == Pressed::Empty {
+                    geometry.pressed.set(Pressed::Row);
+                }
+            }
+        })
+        .on_click({
+            let (name, card) = (name.clone(), card.clone());
+            let (dispatch, tab, side) = (self.dispatch.clone(), self.tab, self.side);
+            move |event, window, cx| {
+                if ends_a_drag(event) {
+                    return;
+                }
+                cx.stop_propagation();
+                let modifiers = event.modifiers();
+                let mode = if modifiers.shift {
+                    ClickMode::Extend
+                } else if modifiers.secondary() {
+                    ClickMode::Toggle
+                } else {
+                    ClickMode::Replace
+                };
+                let _ = card.update(cx, |card, cx| card.click_row(&name, mode, cx));
+                if mode == ClickMode::Replace && event.click_count() == 2 {
+                    dispatch.dispatch_sftp_action(
+                        &SftpAction::new(tab, SftpTabCommand::DoubleClick { side }),
+                        window,
+                        cx,
+                    );
+                }
+            }
+        })
+        // 右键先选中这一行（没选中时只选它），菜单才对着高亮的项目；`..` 当空白处。
+        .on_mouse_down(MouseButton::Right, {
+            let hit = (!parent).then(|| name.clone());
+            let (menu_hit, card) = (self.menu_hit.clone(), card.clone());
+            move |_, _, cx| {
+                if let Some(hit) = &hit {
+                    let _ = card.update(cx, |card, cx| card.select_pressed(hit, cx));
+                }
+                menu_hit.set(hit.is_some());
+            }
+        });
+        if parent || !entry.is_dir() {
+            return row.test_support().into_any_element();
         }
         // 放到目录这一行上，就是放进这个目录。
         accept_drops(
             row,
             self.side,
-            context.transfer_enabled,
-            dispatch,
-            context.tab,
-            self.child_path(&name),
+            self.transfer_enabled,
+            self.dispatch.clone(),
+            self.tab,
+            self.child_path_of(&name),
         )
+        .test_support()
+        .into_any_element()
     }
 
-    fn perform_sort(
-        &mut self,
-        col_ix: usize,
-        sort: ColumnSort,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) {
-        self.set_sort(col_ix, sort);
-        cx.notify();
+    /// 名称格：图标（14，单色）和名字。图标和名字能拖到另一侧，`..` 不能。
+    fn render_name(
+        &self,
+        entry: &FileEntry,
+        selected: bool,
+        card: WeakEntity<FileCard>,
+        tokens: &Tokens,
+    ) -> AnyElement {
+        let columns = self.listing.columns();
+        let name = entry.name.to_string();
+        let geometry = self.marquee.geometry.clone();
+        let label = div()
+            .id(ElementId::Name(format!("name:{name}").into()))
+            .flex()
+            .h_full()
+            .min_w_0()
+            .items_center()
+            .gap(ICON_GAP)
+            .on_any_mouse_down(move |_, _, _| geometry.pressed.set(Pressed::Name))
+            // 图标在 GPUI 里比几何居中高（150% 实测比字面中心高 1 个设备像素），往下挪半个像素。
+            .child(div().flex_none().relative().top(ICON_NUDGE).child(
+                FileIcon::entry(entry).sized(
+                    ICON_SIZE,
+                    if entry.is_hidden() {
+                        tokens.st_dim
+                    } else {
+                        tokens.icon
+                    },
+                ),
+            ))
+            .child(div().min_w_0().truncate().child(entry.name.clone()));
+        let label = if entry.is_parent() {
+            label
+        } else {
+            self.drag_from(label, &name, card)
+        };
+        cell(columns, 0)
+            .id(ElementId::Name(format!("name-cell:{name}").into()))
+            .child(label.aria_selected(selected).test_support())
+            .test_support()
+            .into_any_element()
     }
 
-    fn render_empty(
-        &mut self,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) -> impl IntoElement {
-        let text = self.context.placeholder.text();
-        let tokens = Tokens::current(cx);
+    /// 让 `label` 能把这一行拖到另一侧；这一行在选中项里时连选中的一起拖。
+    /// 按下没选中的项目就只选它，这样高亮的就是要拖的（按着 Ctrl、Shift 的留给行的点击）。
+    fn drag_from(
+        &self,
+        label: Stateful<Div>,
+        name: &str,
+        card: WeakEntity<FileCard>,
+    ) -> Stateful<Div> {
+        let order = self.listing.order();
+        let names = if self.selection.contains(name) {
+            self.selection.targets(&order)
+        } else {
+            vec![name.to_string()]
+        };
+        let label = label.on_mouse_down(MouseButton::Left, {
+            let name = name.to_string();
+            move |event, _, cx| {
+                if !event.modifiers.secondary() && !event.modifiers.shift {
+                    let _ = card.update(cx, |card, cx| card.select_pressed(&name, cx));
+                }
+            }
+        });
+        let paths = names.iter().map(|name| self.child_path_of(name));
+        match self.side {
+            CardSide::Local => drag_files(
+                label,
+                paths.map(PathBuf::from).collect(),
+                TransferDirection::Upload,
+            ),
+            CardSide::Remote => drag_files(
+                label,
+                paths.collect::<Vec<String>>(),
+                TransferDirection::Download,
+            ),
+        }
+    }
+
+    /// 没有行时列表写的字，在表头下面居中。
+    pub(super) fn render_placeholder(
+        &self,
+        placeholder: ListPlaceholder,
+        tokens: &Tokens,
+    ) -> AnyElement {
+        let text = placeholder.text();
         div()
             .id("list-placeholder")
-            .size_full()
             .flex()
+            .flex_1()
             .items_center()
             .justify_center()
-            .text_size(px(12.5))
             .text_color(tokens.faint)
             .child(text.clone())
-            .test_support()
             .aria_label(text)
+            .test_support()
+            .into_any_element()
     }
-}
-
-/// 名称列自己画满整格的选中，所以没有表格的内边距：格子和标题自己留（`px_1p5`）。
-fn name_column(width: Pixels) -> Column {
-    Column::new("name", column_title("name"))
-        .width(width)
-        .paddings(Edges::all(px(0.)))
 }
 
 /// 往另一侧拖的行，路径是它自己那一侧的。
@@ -653,7 +562,7 @@ fn drag_files<P: 'static>(
 
 /// 显示另一侧的行能放到 `element` 上，指针在它上面时告诉那次拖动。
 pub(super) fn offer_drop<P: 'static>(element: Stateful<Div>, tokens: &Tokens) -> Stateful<Div> {
-    let highlight = tokens.selection_solid;
+    let highlight = tokens.sel;
     element
         .drag_over::<FilesDrag<P>>(move |style, _, _, _| style.bg(highlight))
         .on_drag_move(|event: &DragMoveEvent<FilesDrag<P>>, _, cx| {
@@ -756,74 +665,11 @@ impl Render for FileDragPreview {
             .rounded(px(7.))
             .bg(tokens.tooltip)
             .text_color(tokens.tooltip_text)
-            .text_size(px(11.5))
+            .text_size(ui_text())
             .child(pointer)
             .child(text.clone())
             .test_support()
             .aria_label(text)
             .into_any_element()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use gpui_kit::{Pixels, px};
-
-    use super::{CardSide, FileListing};
-    use crate::sftp_tab::FileEntry;
-
-    fn widths(listing: &FileListing) -> Vec<Pixels> {
-        listing.columns.iter().map(|column| column.width).collect()
-    }
-
-    #[test]
-    fn the_columns_share_the_list_as_the_prototype_does() {
-        let mut local = FileListing::new(CardSide::Local);
-        assert!(local.fit_columns(px(1010.)));
-        assert_eq!(widths(&local), [px(440.), px(130.), px(190.), px(240.)]);
-        // 同样的宽度：什么都没变，不用刷新表格。
-        assert!(!local.fit_columns(px(1010.)));
-
-        let mut remote = FileListing::new(CardSide::Remote);
-        remote.fit_columns(px(1010.));
-        assert_eq!(
-            widths(&remote),
-            [px(340.), px(130.), px(220.), px(160.), px(150.)]
-        );
-    }
-
-    #[test]
-    fn a_narrow_list_keeps_a_minimum_and_dragged_columns_stay() {
-        let mut listing = FileListing::new(CardSide::Remote);
-        listing.fit_columns(px(100.));
-        assert!(widths(&listing).iter().all(|width| *width == px(48.)));
-
-        let dragged = [px(300.), px(60.), px(60.), px(60.), px(60.)];
-        listing.set_widths(&dragged);
-        assert!(!listing.fit_columns(px(1010.)));
-        assert_eq!(widths(&listing), dragged);
-    }
-
-    #[test]
-    fn folders_stay_first_and_the_parent_on_top_whatever_the_sort() {
-        let mut listing = FileListing::new(CardSide::Local);
-        listing.set_rows(vec![
-            FileEntry::parent(),
-            FileEntry::file("b.txt", 1),
-            FileEntry::file("a.txt", 9),
-            FileEntry::dir("目录"),
-        ]);
-        assert_eq!(listing.order(), ["..", "目录", "a.txt", "b.txt"]);
-        // 第 1 列是大小：第一次点降序，按字节数。
-        listing.cycle_sort(1);
-        assert_eq!(listing.order(), ["..", "目录", "a.txt", "b.txt"]);
-        assert_eq!(listing.sort_arrow(1), Some("\u{2193}"));
-        assert_eq!(listing.sort_arrow(0), None);
-        listing.cycle_sort(1);
-        assert_eq!(listing.order(), ["..", "目录", "b.txt", "a.txt"]);
-        // 第三次回到按名称。
-        listing.cycle_sort(1);
-        assert_eq!(listing.order(), ["..", "目录", "a.txt", "b.txt"]);
-        assert_eq!(listing.sort_arrow(0), Some("\u{2191}"));
     }
 }

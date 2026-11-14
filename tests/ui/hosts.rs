@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use gpui_kit::point;
-use qishell::app::{CopyHostAddress, DeleteHost, DuplicateHost};
+use micaterm::app::{CopyHostAddress, DeleteHost, DuplicateHost};
 
 use crate::support::*;
 
@@ -23,25 +23,30 @@ fn selected(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> Option<u6
 }
 
 #[gpui_kit::test]
-fn the_host_sidebar_lists_every_saved_host_with_its_badge_and_login(cx: &mut TestAppContext) {
+fn the_host_sidebar_lists_every_saved_host_with_its_badge(cx: &mut TestAppContext) {
     let (handle, _, _) = open_with_seed(cx);
 
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("host-count").label(), Some("6"));
-        // 从上到下，按保存的顺序。
+        // 从上到下，按保存的顺序；一台两行：名称，下面是地址。用户名和端口只在悬停提示里。
         let tops: Vec<_> = (1..=6)
             .map(|id| window.find(host_row(id)).bounds().top())
             .collect();
         assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
         assert_eq!(window.find(host_row(1)).label(), Some("web-01"));
-        // 端口是 22 时不写，别的端口写上。
         assert_eq!(
             window.find(("host-address", 1usize)).label(),
-            Some("root@10.0.1.12")
+            Some("10.0.1.12")
         );
-        assert_eq!(
-            window.find(("host-address", 4usize)).label(),
-            Some("deploy@10.0.9.20:2222")
+        let (name, address) = (
+            window.find(host_row(1)).bounds(),
+            window.find(("host-address", 1usize)).bounds(),
+        );
+        assert!(name.contains(&address.center()), "{name:?} {address:?}");
+        // 徽章占两行：和整行一样居中，比地址那一行高。
+        let badge = window.find(("host-badge", 1usize)).bounds();
+        assert!(
+            badge.size.height > address.size.height,
+            "{badge:?} {address:?}"
         );
         // 没探测出系统：名称首字。
         assert_eq!(window.find(("host-badge", 1usize)).label(), Some("W"));
@@ -67,7 +72,6 @@ fn without_hosts_the_sidebar_says_how_to_make_one(cx: &mut TestAppContext) {
     let (handle, _) = open_workspace(cx);
 
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("host-count").label(), Some("0"));
         assert_eq!(window.find("host-list-empty").label(), Some("还没有主机"));
     });
 }
@@ -151,6 +155,26 @@ fn the_first_match_is_highlighted_and_arrows_move_it(cx: &mut TestAppContext) {
     assert_eq!(highlighted(cx, &workspace), None);
     in_frame(cx, handle, |window, _| {
         assert_eq!(window.find("host-search").focused(), Some(true));
+    });
+}
+
+/// 搜索框常驻：顶栏没有搜索按钮；点进去能打字，空着按 Esc 焦点回到列表，搜索框还在。
+#[gpui_kit::test]
+fn the_search_box_is_always_there_and_escape_leaves_it(cx: &mut TestAppContext) {
+    let (handle, _, _) = open_with_seed(cx);
+    in_frame(cx, handle, |window, _| {
+        assert!(window.find("host-search").visible());
+        assert!(window.try_find("host-sidebar-search").is_none());
+    });
+    in_frame(cx, handle, |window, cx| window.click("host-search", cx));
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find("host-search").focused(), Some(true));
+    });
+    in_frame(cx, handle, |window, cx| window.press("escape", cx));
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find("host-search").focused(), Some(false));
+        assert!(window.find("host-search").visible());
+        assert!(window.find(host_row(1)).visible());
     });
 }
 
@@ -289,26 +313,15 @@ fn the_host_menu_edits_copies_and_deletes(cx: &mut TestAppContext) {
 
     assert_eq!(
         menu_labels(cx, handle, 1),
-        [
-            "连接",
-            "在右侧分屏打开",
-            "在下方分屏打开",
-            "打开 SFTP",
-            "编辑…",
-            "创建副本",
-            "复制 IP",
-            "删除"
-        ]
+        ["连接", "打开 SFTP", "编辑…", "创建副本", "复制 IP", "删除"]
     );
-    // 右键也选中那一台。
-    assert_eq!(selected(cx, &workspace), Some(1));
+    // 右键不改选中（被右键的那一行只描细边，26 号「主机右键」）。
+    assert_eq!(selected(cx, &workspace), None);
     // 地址是域名时叫「复制主机名」。
     assert_eq!(
         menu_labels(cx, handle, 7),
         [
             "连接",
-            "在右侧分屏打开",
-            "在下方分屏打开",
             "打开 SFTP",
             "编辑…",
             "创建副本",
@@ -378,7 +391,7 @@ fn deleting_a_host_asks_first(cx: &mut TestAppContext) {
     );
     in_frame(cx, handle, |window, _| {
         assert!(window.try_find(host_row(1)).is_none());
-        assert_eq!(window.find("host-count").label(), Some("5"));
+        assert!(window.find(host_row(2)).visible());
     });
     // 主机自己的密码跟着主机走。
     assert!(secrets.get(&web01.password_secret()).unwrap().is_none());
@@ -389,7 +402,7 @@ fn deleting_a_jump_host_names_the_hosts_that_go_through_it(cx: &mut TestAppConte
     let mut data = HostData::seed();
     data.insert_unnotified(
         HostDraft::new("db-master", "10.0.2.8", 22, "root", AuthKind::Password)
-            .with_route(qishell_hosts::Route::Jump(vec![Some(HostId(1))])),
+            .with_route(micaterm_hosts::Route::Jump(vec![Some(HostId(1))])),
     );
     let (handle, _, _) = open_with_hosts(cx, data);
 
@@ -411,9 +424,9 @@ fn deleting_a_jump_host_names_the_hosts_that_go_through_it(cx: &mut TestAppConte
 fn a_change_the_database_refuses_still_shows_and_is_reported(cx: &mut TestAppContext) {
     // 一台用着数据库不认识的凭据的主机：复制它写不进数据库。
     let mut data = HostData::load(HostDatabase::in_memory().unwrap()).unwrap();
-    let credential = data.insert_credential_unnotified(qishell_hosts::CredentialDraft::new(
+    let credential = data.insert_credential_unnotified(micaterm_hosts::CredentialDraft::new(
         "部署",
-        qishell_hosts::CredentialKind::Password,
+        micaterm_hosts::CredentialKind::Password,
         "deploy",
     ));
     data.insert_unnotified(
@@ -443,6 +456,6 @@ fn a_database_that_cannot_be_opened_is_reported_once_the_window_is_up(cx: &mut T
     let shown = in_frame(cx, handle, |window, cx| window.notifications(cx).len());
     assert_eq!(shown, 1);
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("host-count").label(), Some("0"));
+        assert_eq!(window.find("host-list-empty").label(), Some("还没有主机"));
     });
 }

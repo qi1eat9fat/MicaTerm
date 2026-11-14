@@ -11,7 +11,7 @@ use std::ops::{Deref, DerefMut};
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, SharedString, Task};
 use zeroize::Zeroizing;
 
-use qishell_hosts::{
+use micaterm_hosts::{
     CredentialDraft, CredentialId, HostData, HostDraft, HostEvent, HostId, HostOs, SecretJob,
     SecretRef, SnippetDraft, SnippetId,
 };
@@ -93,11 +93,10 @@ impl HostStore {
         fn insert(draft: HostDraft) -> HostId;
         fn update(id: HostId, draft: HostDraft) -> bool;
         fn remove(id: HostId) -> bool;
-        fn move_host(id: HostId, drop: qishell_hosts::HostDrop) -> bool;
+        fn move_host(id: HostId, drop: micaterm_hosts::HostDrop) -> bool;
         fn insert_credential(draft: CredentialDraft) -> CredentialId;
         fn update_credential(id: CredentialId, draft: CredentialDraft) -> bool;
         fn remove_credential(id: CredentialId) -> Vec<HostId>;
-        fn record_connection(id: HostId);
         fn set_host_os(id: HostId, os: Option<HostOs>);
         fn save_secret(secret: SecretRef, value: Option<Zeroizing<String>>);
         fn insert_snippet(draft: SnippetDraft) -> SnippetId;
@@ -176,8 +175,8 @@ mod tests {
     use std::sync::Arc;
 
     use gpui_kit::TestAppContext;
-    use qishell_hosts::secrets::InMemorySecretStore;
-    use qishell_hosts::{AuthKind, CredentialKind, HostDatabase, SecretStore as _};
+    use micaterm_hosts::secrets::InMemorySecretStore;
+    use micaterm_hosts::{AuthKind, CredentialKind, HostDatabase, SecretStore as _};
 
     use super::*;
 

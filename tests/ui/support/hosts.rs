@@ -3,16 +3,17 @@
 use std::sync::Arc;
 
 use gpui_kit::component::Root;
-use gpui_kit::{Entity, TestAppContext, WindowHandle};
-use qishell::workspace::{Workspace, WorkspaceServices};
-pub use qishell_hosts::secrets::InMemorySecretStore;
-pub use qishell_hosts::{
+use gpui_kit::test::TestWindowExt as _;
+use gpui_kit::{ElementId, Entity, ScrollDelta, TestAppContext, WindowHandle, point, px};
+use micaterm::workspace::{Workspace, WorkspaceServices};
+pub use micaterm_hosts::secrets::InMemorySecretStore;
+pub use micaterm_hosts::{
     AuthKind, Host, HostDatabase, HostDraft, HostId, HostOs, SecretStore as _,
 };
 
-use qishell_hosts::HostData;
+use micaterm_hosts::HostData;
 
-use super::{fake_services, open_workspace_with, settings_store};
+use super::{fake_services, in_frame, open_workspace_with, settings_store};
 
 /// 用 `data` 和一个内存版秘密存储打开窗口壳；返回秘密存储，测试拿它看存了哪些密码。
 pub fn open_with_hosts(
@@ -92,9 +93,53 @@ pub fn saved_host(cx: &mut TestAppContext, workspace: &Entity<Workspace>, id: u6
 pub fn edit_hosts(
     cx: &mut TestAppContext,
     workspace: &Entity<Workspace>,
-    change: impl FnOnce(&mut qishell::host::HostStore, &mut gpui_kit::Context<qishell::host::HostStore>),
+    change: impl FnOnce(&mut micaterm::host::HostStore, &mut gpui_kit::Context<micaterm::host::HostStore>),
 ) {
     let store = cx.update(|cx| workspace.read(cx).hosts().clone());
     store.update(cx, change);
     cx.run_until_parked();
+}
+
+/// 主机表单页（标签里的，UI 重做工单 07）放不下全部字段时要滚动：把 `id` 滚进看得见的地方。
+pub fn reveal(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &ElementId) {
+    reveal_in(cx, handle, "host-dialog", id);
+}
+
+/// 把 `id` 在能滚动的 `scroller` 里滚进看得见的地方（主机表单页、凭据对话框的正文）。
+pub fn reveal_in(
+    cx: &mut TestAppContext,
+    handle: WindowHandle<Root>,
+    scroller: &'static str,
+    id: &ElementId,
+) {
+    for _ in 0..40 {
+        let place = in_frame(cx, handle, |window, _| {
+            let target = window.find(id.clone());
+            let Some(page) = window.try_find(scroller).map(|page| page.bounds()) else {
+                return (true, false);
+            };
+            // 整个落在页面里才算看得见（只露一半时点中间会点到别处）。
+            let bounds = target.bounds();
+            let shown =
+                target.visible() && bounds.top() >= page.top() && bounds.bottom() <= page.bottom();
+            (shown, bounds.top() < page.center().y)
+        });
+        match place {
+            (true, _) => return,
+            // 在上面就往上滚，在下面就往下滚。
+            (false, above) => in_frame(cx, handle, |window, cx| {
+                let step = if above { 80. } else { -80. };
+                window.scroll(scroller, ScrollDelta::Pixels(point(px(0.), px(step))), cx)
+            }),
+        }
+    }
+    panic!("{id:?} 滚不进看得见的地方");
+}
+
+/// 点主机表单的「保存」：按钮跟在表单后面，字段多（代理、跳板）时先滚过去。
+pub fn click_host_save(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
+    reveal(cx, handle, &"host-dialog-save".into());
+    in_frame(cx, handle, |window, cx| {
+        window.click("host-dialog-save", cx)
+    });
 }

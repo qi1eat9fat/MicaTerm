@@ -1,44 +1,43 @@
-//! Rex 风格的视觉常量：颜色 token（`tokens`）和尺寸。
+//! 视觉常量：颜色 token（`tokens`）、尺寸（`size`）、字号（`TypeScale`）和字体。
 //!
-//! 尺寸取 gorex 的数值（spec 第 3 节「视觉」、Rex 视觉拆解），颜色取全部界面原型。
+//! 全部取自 26 号逐屏原型（`.scratch/qishell-design/prototypes/26-screens.prototype.html`），
+//! 规则见 `.scratch/qishell-design/ui-lessons.md` 第四节：业务代码里不写颜色、尺寸和字号数字，都从这里取。
 
+pub mod code_colors;
 mod component;
+pub mod size;
 mod tokens;
+mod type_scale;
 
 pub use component::{DARK_THEME_NAME, LIGHT_THEME_NAME, component_theme, component_theme_name};
 pub use tokens::Tokens;
+pub use type_scale::{INTERFACE_FONT_SIZE, TypeScale, ui_text};
 
-use gpui_kit::{Pixels, px};
+use gpui_kit::{FontWeight, Pixels};
 
-/// 卡片之间、卡片和窗口边之间的间隙。
-pub const GAP: Pixels = px(8.);
-/// 标题栏（主区域顶部的标签轨道那一行、主机栏顶部那一行）的高度。
-pub const TITLE_BAR_HEIGHT: Pixels = px(44.);
-/// 卡片圆角。
-pub const CARD_RADIUS: Pixels = px(12.);
-/// 卡片头部高度。
-pub const CARD_HEADER_HEIGHT: Pixels = px(33.);
-/// 卡片底部状态栏高度。
-pub const STATUS_BAR_HEIGHT: Pixels = px(24.);
-/// 标签高度；外面的轨道高 32。
-pub const TAB_HEIGHT: Pixels = px(28.);
-pub const TAB_TRACK_HEIGHT: Pixels = px(32.);
-/// 标签宽度，固定。
-pub const TAB_WIDTH: Pixels = px(180.);
-/// 程序图块的宽和高。
-pub const TILE_WIDTH: Pixels = px(21.);
-pub const TILE_HEIGHT: Pixels = px(16.);
-/// 主机栏宽度。
-pub const HOST_SIDEBAR_WIDTH: Pixels = px(236.);
-/// 右侧栏（图标列）宽度。
-pub const RIGHT_SIDEBAR_WIDTH: Pixels = px(46.);
-/// 右侧栏展开的面板宽度。
-pub const RIGHT_PANEL_WIDTH: Pixels = px(290.);
-/// 普通图标按钮的边长（`.ib`）和圆角。
-pub const ICON_BUTTON: Pixels = px(26.);
-pub const ICON_BUTTON_RADIUS: Pixels = px(10.);
-/// 窗口按钮（`.ib.lg`）的边长和圆角。
-pub const WINDOW_BUTTON: Pixels = px(30.);
-pub const WINDOW_BUTTON_RADIUS: Pixels = px(11.);
-/// 右侧栏图标按钮的边长。
-pub const RAIL_BUTTON: Pixels = px(34.);
+/// 界面字体：中英文都用 HarmonyOS Sans SC（用户定）。本机有 300 / 400 / 500 / 700，没有 600。
+pub const UI_FONT_FAMILY: &str = "HarmonyOS Sans SC";
+/// 等宽字体：终端、编辑器、快捷键、等宽小字，Maple Mono 的 CN 版自带中文（用户定）。
+pub const MONO_FONT_FAMILY: &str = micaterm_terminal::DEFAULT_FONT_FAMILY;
+
+/// 字重只用两种：正文 400，标题和强调 500。主机栏一律 400。
+/// HarmonyOS Sans SC 没有 600，写 600 会落到 Bold。
+pub const WEIGHT_NORMAL: FontWeight = FontWeight::NORMAL;
+pub const WEIGHT_MEDIUM: FontWeight = FontWeight::MEDIUM;
+
+/// 同一行里两段不同字体、字号的文字（如 12 的界面字 + 11.5 的 Maple Mono 快捷键）都设成行高
+/// `line_height`、盒子居中时，要把 `to` 那段往下挪多少，两者的基线才对齐（ui-lessons 第四节第 3 条：
+/// 按字形度量算，不写死像素）。GPUI 把字形盒在行高里上下居中，基线在 `(行高 − 上伸 − 下伸) / 2 + 上伸`。
+pub fn baseline_shift(
+    window: &gpui_kit::Window,
+    from: (&'static str, Pixels),
+    to: (&'static str, Pixels),
+    line_height: Pixels,
+) -> Pixels {
+    let text = window.text_system();
+    let baseline = |(family, size): (&'static str, Pixels)| {
+        let id = text.resolve_font(&gpui_kit::font(family));
+        text.baseline_offset(id, size, line_height)
+    };
+    baseline(from) - baseline(to)
+}

@@ -14,7 +14,7 @@ pub(super) fn shared() -> Handle {
         .get_or_init(|| {
             Builder::new_multi_thread()
                 .worker_threads(2)
-                .thread_name("qishell-ssh")
+                .thread_name("micaterm-ssh")
                 .enable_all()
                 .build()
                 .expect("the SSH runtime starts")

@@ -1,5 +1,5 @@
 //! `settings.json` 的读写。
-// 来自 since2006/shell-rs @ b2a307a: src/settings/store.rs（测试按 QiShell 的字段改写）
+// 来自 since2006/shell-rs @ b2a307a: src/settings/store.rs（测试按 MicaTerm 的字段改写）
 
 use std::{
     fs, io,

@@ -1,6 +1,6 @@
-//! 命令片段面板（原型 `.panel` + `snipPanel`）：标题后面写「→ 焦点卡片名」，顶部按名称或命令搜索，
-//! 列表按名称排序、不能拖动，每行名称、下一行等宽字体的命令；悬停时右边出现 ⚡（点击就执行）或
-//! ▶（点击只输入），点它总是直接执行。右键菜单四项。
+//! 命令片段面板（26 号「片段」，停靠面板 `ui::dock`）：标题后面写「→ 焦点卡片名」，顶部按名称或命令
+//! 搜索，列表按名称排序、不能拖动，没有分组；每条两行：名称，下一行淡色等宽的命令；悬停时右边出现
+//! ⚡（点击就执行）或 ▶（点击只输入），点它总是直接执行。右键菜单四项。
 //!
 //! 和标签轨道一样，面板是窗口壳持有的普通结构：渲染不读实体，只拿窗口壳给的片段和焦点卡片名；
 //! 点击、菜单都经窗口壳的焦点派发 action，由窗口壳把命令发给焦点卡片。
@@ -8,11 +8,11 @@
 // 右键菜单不用 gpui-component 的 `context_menu`，照 `TabRail` 自己持有菜单实体）。
 
 use gpui_kit::base::POPUP_PRIORITY;
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
+use gpui_kit::component::Icon;
+use gpui_kit::component::input::InputState;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use micaterm_ui::Menu;
 
 use crate::app::{
     CatalogIcon, CopySnippet, DeleteSnippet, DismissSnippetNotice, EditSnippet, EnterSnippet,
@@ -20,14 +20,12 @@ use crate::app::{
 };
 use crate::host::{Snippet, SnippetId};
 use crate::i18n::t;
-use crate::theme::{CARD_RADIUS, GAP, RIGHT_PANEL_WIDTH, Tokens};
+use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, size};
+use crate::ui::dock::{DockNew, DockTarget, dock_empty, dock_header, dock_panel, dock_search};
+use crate::ui::icon_button::TextTooltip;
 
-/// 面板标题栏的高（`.panel .ph`）。
-const HEADER_HEIGHT: Pixels = px(38.);
-/// 标题栏「+」的边长（`.ib.sm`）。
-const SMALL_BUTTON: Pixels = px(22.);
-/// 行右边 ⚡ / ▶ 的边长（`.it .run`）。
-const RUN_BUTTON: Pixels = px(24.);
+/// 行右边 ⚡ / ▶ 的边长（`.sni .ib`）。
+const RUN_BUTTON: Pixels = px(22.);
 
 /// 面板跨帧要记住的东西：搜索框和搜的词、开着的右键菜单、底部「没有发出去」的提示。
 pub struct SnippetPanel {
@@ -42,7 +40,7 @@ pub struct SnippetPanel {
 struct OpenMenu {
     snippet: SnippetId,
     position: Point<Pixels>,
-    view: Entity<PopupMenu>,
+    view: Entity<Menu>,
     _dismiss: Subscription,
 }
 
@@ -84,7 +82,7 @@ impl SnippetPanel {
         &mut self,
         snippet: SnippetId,
         position: Point<Pixels>,
-        view: Entity<PopupMenu>,
+        view: Entity<Menu>,
         dismiss: Subscription,
     ) {
         self.menu = Some(OpenMenu {
@@ -96,7 +94,7 @@ impl SnippetPanel {
     }
 
     /// 关掉右键菜单，只在开着的正是 `view` 时（右键另一行时，旧菜单的关闭事件晚到）。
-    pub fn close_menu(&mut self, view: &Entity<PopupMenu>) {
+    pub fn close_menu(&mut self, view: &Entity<Menu>) {
         if self.menu.as_ref().is_some_and(|menu| &menu.view == view) {
             self.menu = None;
         }
@@ -116,41 +114,44 @@ impl SnippetPanel {
         self.notice.as_ref()
     }
 
-    /// 面板（宽约 290，卡片样式）。`dispatch` 是窗口壳的焦点：点击和菜单都经它派发。
+    /// 面板（停靠面板 `ui::dock`，宽 280）。`dispatch` 是窗口壳的焦点：点击和菜单都经它派发。
     pub fn render(
         &self,
         props: SnippetPanelProps,
         dispatch: &FocusHandle,
         tokens: &Tokens,
+        window: &Window,
         cx: &App,
     ) -> impl IntoElement + use<> {
         let SnippetPanelProps { snippets, target } = props;
         let body = match &target {
-            None => render_no_terminal(tokens).into_any_element(),
-            Some(_) => self.render_list(&snippets, dispatch, tokens, cx),
+            None => dock_empty(
+                "snippets-no-terminal",
+                t!("snippets.panel.no_terminal"),
+                Some(t!("snippets.panel.no_terminal_hint")),
+                tokens,
+                cx,
+            ),
+            Some(_) => self.render_list(&snippets, dispatch, tokens, window, cx),
         };
-        div()
-            .id("snippets")
-            .test_support()
-            .relative()
-            .flex()
-            .flex_col()
-            .flex_none()
-            .w(RIGHT_PANEL_WIDTH)
-            .ml(GAP)
-            .rounded(CARD_RADIUS)
-            .overflow_hidden()
-            .bg(tokens.card_focused)
-            .border_1()
-            .border_color(tokens.card_border)
-            .shadow(vec![BoxShadow {
-                color: tokens.shadow_focused,
-                offset: point(px(0.), px(6.)),
-                blur_radius: px(22.),
-                spread_radius: px(-2.),
-                inset: false,
-            }])
-            .child(render_header(target, dispatch, tokens))
+        let to = target.map(|name| DockTarget {
+            id: "snippets-target",
+            label: t!("snippets.panel.target", card = name.clone()),
+            name,
+        });
+        dock_panel("snippets", tokens)
+            .child(dock_header(
+                t!("snippets.panel.title"),
+                to,
+                DockNew {
+                    id: "snippets-new",
+                    label: t!("snippets.panel.new"),
+                    action: Box::new(NewSnippet),
+                },
+                dispatch,
+                tokens,
+                cx,
+            ))
             .child(body)
             .children(
                 self.notice
@@ -166,6 +167,7 @@ impl SnippetPanel {
                 )
                 .with_priority(POPUP_PRIORITY)
             }))
+            .test_support()
     }
 
     /// 搜索框和片段列表；一个片段都没有、搜不到时写一句话。
@@ -174,9 +176,9 @@ impl SnippetPanel {
         snippets: &[&Snippet],
         dispatch: &FocusHandle,
         tokens: &Tokens,
+        window: &Window,
         cx: &App,
     ) -> AnyElement {
-        let mono = cx.theme().mono_font_family.clone();
         let menu_snippet = self.menu_snippet();
         let rows: Vec<AnyElement> = snippets
             .iter()
@@ -185,26 +187,28 @@ impl SnippetPanel {
                 render_row(
                     snippet,
                     menu_snippet == Some(snippet.id),
-                    mono.clone(),
                     dispatch,
                     tokens,
+                    cx,
                 )
                 .into_any_element()
             })
             .collect();
         let empty = if snippets.is_empty() {
-            Some(render_empty(
+            Some(dock_empty(
                 "snippets-empty",
                 t!("snippets.panel.empty"),
                 Some(t!("snippets.panel.empty_hint")),
                 tokens,
+                cx,
             ))
         } else if rows.is_empty() {
-            Some(render_empty(
+            Some(dock_empty(
                 "snippets-no-match",
                 t!("snippets.panel.no_match"),
                 None,
                 tokens,
+                cx,
             ))
         } else {
             None
@@ -214,16 +218,14 @@ impl SnippetPanel {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .p(px(6.))
-            .child(
-                div().mx(px(2.)).mt(px(2.)).mb(px(6.)).child(
-                    Input::new(&self.search)
-                        .id("snippets-search")
-                        .aria_label(t!("snippets.panel.search"))
-                        .small()
-                        .prefix(Icon::new(IconName::Search).small()),
-                ),
-            )
+            .child(dock_search(
+                "snippets-search",
+                t!("snippets.panel.search"),
+                &self.search,
+                tokens,
+                window,
+                cx,
+            ))
             .child(
                 div()
                     .id("snippets-list")
@@ -232,6 +234,7 @@ impl SnippetPanel {
                     .flex_col()
                     .flex_1()
                     .min_h_0()
+                    .pb(px(8.))
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .children(rows)
@@ -241,83 +244,29 @@ impl SnippetPanel {
     }
 }
 
-/// 标题栏：图标、「命令片段」、「→ 焦点卡片名」（当前标签没有终端时不写），右边「+」新建。
-fn render_header(
-    target: Option<SharedString>,
-    dispatch: &FocusHandle,
-    tokens: &Tokens,
-) -> impl IntoElement {
-    let new_snippet = dispatch.clone();
-    let hover = tokens.hover;
-    let text = tokens.text;
-    div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(8.))
-        .h(HEADER_HEIGHT)
-        .pl(px(12.))
-        .pr(px(6.))
-        .border_b_1()
-        .border_color(tokens.line)
-        .child(
-            Icon::new(CatalogIcon::CodeXml)
-                .size(px(16.))
-                .text_color(tokens.icon),
-        )
-        .child(
-            div()
-                .flex_none()
-                .text_size(px(13.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(t!("snippets.panel.title")),
-        )
-        .children(target.map(|name| {
-            let label = t!("snippets.panel.target", card = name);
-            div()
-                .id("snippets-target")
-                .test_support()
-                .aria_label(label.clone())
-                .min_w_0()
-                .truncate()
-                .text_size(px(12.))
-                .text_color(tokens.faint)
-                .child(label)
-        }))
-        .child(
-            div()
-                .id("snippets-new")
-                .test_support()
-                .aria_label(t!("snippets.panel.new"))
-                .ml_auto()
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .size(SMALL_BUTTON)
-                .rounded(px(7.))
-                .text_color(tokens.icon)
-                .cursor_pointer()
-                .hover(move |style| style.bg(hover).text_color(text))
-                .on_click(move |_, window, cx| new_snippet.dispatch_action(&NewSnippet, window, cx))
-                .child(Icon::new(IconName::Plus).size(px(14.))),
-        )
-}
-
-/// 一个片段（`.it`）：名称，下一行等宽字体的命令；悬停时右边出现 ⚡ 或 ▶。
-/// `pressed`：它的右键菜单开着。
+/// 一个片段（26 号 `.sni`）：名称一行（13，界面字），下面淡色等宽的命令一行（11.5），放不下就省略，
+/// 悬停看全文；悬停时右边出现 ⚡（点一下这一行会执行）或 ▶（点一下只输入），点它总是直接执行。
+/// `pressed`：它的右键菜单开着（描一圈细边）。
 fn render_row(
     snippet: &Snippet,
     pressed: bool,
-    mono: SharedString,
     dispatch: &FocusHandle,
     tokens: &Tokens,
-) -> impl IntoElement {
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let scale = TypeScale::current(cx);
     let id = snippet.id;
     let line = one_line(&snippet.command);
     let runs = snippet.run_on_click;
     let group = SharedString::from(format!("snippet-row-{}", id.0));
     let hover = tokens.hover;
+    let text = tokens.text;
+    let command = SharedString::from(snippet.command.clone());
+    let run_hint = if runs {
+        t!("snippets.panel.runs_on_click")
+    } else {
+        t!("snippets.panel.types_on_click")
+    };
     let (click, menu, run) = (dispatch.clone(), dispatch.clone(), dispatch.clone());
     div()
         .id(("snippet", id.0))
@@ -328,12 +277,22 @@ fn render_row(
         .flex_none()
         .items_center()
         .gap(px(8.))
-        .px(px(8.))
-        .py(px(6.))
-        .rounded(px(8.))
+        .pl(px(8.))
+        .pr(px(4.))
+        .py(px(5.))
+        .rounded(size::RADIUS_LG)
+        .text_size(scale.side)
+        .text_color(tokens.label)
+        .whitespace_nowrap()
         .cursor_pointer()
-        .when(pressed, |row| row.bg(hover))
-        .hover(move |style| style.bg(hover))
+        .hover(move |style| style.bg(hover).text_color(text))
+        // 被右键的那一行描一圈细边（26 号 `.sni.ctx`）。
+        .when(pressed, |row| {
+            row.border_1().border_color(tokens.line_strong)
+        })
+        .when(!pressed, |row| {
+            row.tooltip(move |_, cx| TextTooltip::view(command.clone(), cx))
+        })
         // 单击按片段自己的「点击时自动执行」：执行，或者只输入。
         .on_click(move |_, window, cx| {
             click.dispatch_action(
@@ -365,16 +324,17 @@ fn render_row(
                 .min_w_0()
                 .child(
                     div()
+                        .line_height(px(20.))
                         .truncate()
-                        .text_size(px(12.5))
                         .child(snippet.name.clone()),
                 )
                 .child(
                     div()
+                        .line_height(px(18.))
                         .truncate()
-                        .font_family(mono)
-                        .text_size(px(11.5))
-                        .text_color(tokens.faint)
+                        .font_family(MONO_FONT_FAMILY)
+                        .text_size(scale.mono_small)
+                        .text_color(tokens.st_dim)
                         .child(line),
                 ),
         )
@@ -383,22 +343,19 @@ fn render_row(
             div()
                 .id(("snippet-run", id.0))
                 .test_support()
-                .aria_label(if runs {
-                    t!("snippets.panel.runs_on_click")
-                } else {
-                    t!("snippets.panel.types_on_click")
-                })
+                .aria_label(run_hint.clone())
                 .flex()
                 .flex_none()
                 .items_center()
                 .justify_center()
                 .size(RUN_BUTTON)
-                .rounded(px(7.))
+                .rounded(size::RADIUS)
                 .invisible()
                 .group_hover(group, |style| style.visible())
                 .when(pressed, |button| button.visible())
-                .text_color(if runs { tokens.attention } else { tokens.icon })
-                .hover(|style| style.bg(hover))
+                .text_color(tokens.icon)
+                .hover(move |style| style.bg(hover).text_color(text))
+                .tooltip(move |_, cx| TextTooltip::view(run_hint.clone(), cx))
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
                     run.dispatch_action(
@@ -416,51 +373,12 @@ fn render_row(
                     } else {
                         CatalogIcon::Play
                     })
-                    .size(px(14.)),
+                    .size(px(13.)),
                 ),
         )
 }
 
-/// 列表里的一句话（`.empty`）：还没有片段、搜不到。
-fn render_empty(
-    id: &'static str,
-    text: SharedString,
-    hint: Option<SharedString>,
-    tokens: &Tokens,
-) -> AnyElement {
-    div()
-        .id(id)
-        .test_support()
-        .aria_label(text.clone())
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap(px(4.))
-        .px(px(16.))
-        .py(px(30.))
-        .text_size(px(12.5))
-        .text_color(tokens.faint)
-        .child(text)
-        .children(hint.map(|hint| div().text_size(px(11.5)).child(hint)))
-        .into_any_element()
-}
-
-/// 当前标签没有终端（没有标签，或者是 SFTP、编辑器标签）：不列片段，说清楚为什么。
-fn render_no_terminal(tokens: &Tokens) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .flex_1()
-        .p(px(6.))
-        .child(render_empty(
-            "snippets-no-terminal",
-            t!("snippets.panel.no_terminal"),
-            Some(t!("snippets.panel.no_terminal_hint")),
-            tokens,
-        ))
-}
-
-/// 面板底部的提示条（`.warnbar`）：片段为什么没有发出去。点一下收起。
+/// 面板底部的提示条：片段为什么没有发出去。点一下收起。
 fn render_notice(
     notice: SharedString,
     dispatch: &FocusHandle,
@@ -477,12 +395,12 @@ fn render_notice(
         .bottom(px(8.))
         .px(px(10.))
         .py(px(8.))
-        .rounded(px(10.))
-        .text_size(px(12.))
-        // 浮在列表上面，要不透明：面板底色上叠 16% 的橙色。
-        .bg(tokens.card_focused.blend(tokens.attention.opacity(0.16)))
+        .rounded(size::RADIUS_LG)
+        // 浮在列表上面，要不透明：内容底上叠 14% 的警示黄。
+        .bg(tokens.content.blend(tokens.warn.opacity(0.14)))
         .border_1()
-        .border_color(tokens.attention.opacity(0.4))
+        .border_color(tokens.warn.opacity(0.45))
+        .text_color(tokens.text)
         .cursor_pointer()
         .on_click(move |_, window, cx| dismiss.dispatch_action(&DismissSnippetNotice, window, cx))
         .child(notice)
@@ -505,9 +423,9 @@ pub fn build_snippet_menu(
     target: &FocusHandle,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<PopupMenu> {
+) -> Entity<Menu> {
     let target = target.clone();
-    PopupMenu::build(window, cx, move |menu, _, _| {
+    Menu::build(window, cx, move |menu, _, _| {
         menu.action_context(target)
             .menu(
                 t!("snippets.menu.enter"),
@@ -519,7 +437,11 @@ pub fn build_snippet_menu(
             .menu(t!("snippets.menu.copy"), Box::new(CopySnippet(snippet)))
             .separator()
             .menu(t!("snippets.menu.edit"), Box::new(EditSnippet(snippet)))
-            .menu(t!("snippets.menu.delete"), Box::new(DeleteSnippet(snippet)))
+            .danger(
+                t!("snippets.menu.delete"),
+                Box::new(DeleteSnippet(snippet)),
+                false,
+            )
     })
 }
 

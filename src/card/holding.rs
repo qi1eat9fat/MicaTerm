@@ -5,7 +5,7 @@ use std::sync::{Arc, mpsc};
 
 use anyhow::Result;
 use async_channel::Sender;
-use qishell_terminal::{
+use micaterm_terminal::{
     SharedTerminalTransportFactory, TerminalSize, TerminalTransport, TerminalTransportCommand,
     TerminalTransportEvent, TerminalTransportFactory,
 };

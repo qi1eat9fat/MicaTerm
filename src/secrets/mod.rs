@@ -1,4 +1,4 @@
-//! 秘密：数据目录里的保险库（核心在 `qishell_hosts::vault`）和应用自己的系统钥匙串实现。
+//! 秘密：数据目录里的保险库（核心在 `micaterm_hosts::vault`）和应用自己的系统钥匙串实现。
 //! 钥匙串里只放保险库的数据密钥，密码、口令、私钥都在 `vault.json` 里（ADR 0003）。
 
 mod keychain;
@@ -6,7 +6,7 @@ mod keychain;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use qishell_hosts::{KdfParams, Vault};
+use micaterm_hosts::{KdfParams, Vault};
 
 pub use keychain::{KeychainDataKeyStore, SERVICE, account};
 

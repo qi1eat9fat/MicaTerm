@@ -1,0 +1,399 @@
+// 来自 since2006/shell-rs @ b2a307a: crates/shellrs-hosts/src/private_key.rs
+// 裁剪：去掉把私钥写进数据目录 `keys/` 的部分（`write_key_file`、`is_kept_in`、`moved_key`）：
+// 私钥正文直接存进保险库，没有 `keys/` 目录。生成、解析和读公钥原样保留。
+
+//! Private keys MicaTerm is given or makes itself: a key pasted into the
+//! credential form, a freshly generated one, a key file of this machine read
+//! once, and the public half people put on their servers.
+//!
+//! 不论私钥从哪来（本机文件、粘贴、生成），它的正文都存进保险库，凭据只记一个
+//! `secret_id`。登录时从保险库读出正文，不再按文件路径读。
+
+use std::fmt;
+use std::fs::File;
+use std::io::Read as _;
+use std::path::Path;
+
+use russh::keys::ssh_key::LineEnding;
+use russh::keys::{Algorithm, PrivateKey, PublicKey};
+use zeroize::Zeroizing;
+
+/// The kinds of key the credential form generates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KeyAlgorithm {
+    /// Short, fast, and what OpenSSH itself suggests.
+    #[default]
+    Ed25519,
+    /// For servers too old for Ed25519 (OpenSSH before 6.5).
+    Rsa,
+}
+
+impl KeyAlgorithm {
+    /// Every algorithm, in the order the form lists them.
+    pub const ALL: [KeyAlgorithm; 2] = [KeyAlgorithm::Ed25519, KeyAlgorithm::Rsa];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            KeyAlgorithm::Ed25519 => "Ed25519",
+            KeyAlgorithm::Rsa => "RSA 4096",
+        }
+    }
+
+    fn algorithm(self) -> Algorithm {
+        match self {
+            KeyAlgorithm::Ed25519 => Algorithm::Ed25519,
+            // 4096 bits, the size `ssh-key` makes.
+            KeyAlgorithm::Rsa => Algorithm::Rsa { hash: None },
+        }
+    }
+}
+
+/// A key pair the credential form just made, not saved anywhere yet.
+pub struct GeneratedKey {
+    key: PrivateKey,
+}
+
+impl GeneratedKey {
+    /// Blocks: finding the primes of an RSA key takes a while.
+    pub fn generate(algorithm: KeyAlgorithm) -> anyhow::Result<Self> {
+        let mut rng = russh::keys::key::safe_rng();
+        Ok(Self {
+            key: PrivateKey::random(&mut rng, algorithm.algorithm())?,
+        })
+    }
+
+    /// The public half as one line of `authorized_keys`, ending in
+    /// `comment` when there is one.
+    pub fn public_key_line(&self, comment: &str) -> String {
+        public_key_line(self.key.public_key(), comment)
+    }
+
+    /// The text of an OpenSSH private key file, encrypted with `passphrase`
+    /// unless that is empty.
+    ///
+    /// Blocks while it derives the encryption key from the passphrase,
+    /// which is slow on purpose.
+    pub fn encode(&self, comment: &str, passphrase: &str) -> anyhow::Result<Zeroizing<String>> {
+        let mut key = self.key.clone();
+        key.set_comment(comment.trim());
+        if !passphrase.is_empty() {
+            key = key.encrypt(&mut russh::keys::key::safe_rng(), passphrase)?;
+        }
+        Ok(key.to_openssh(LineEnding::LF)?)
+    }
+}
+
+impl fmt::Debug for GeneratedKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GeneratedKey")
+            .field("algorithm", &self.key.algorithm())
+            .finish_non_exhaustive()
+    }
+}
+
+fn public_key_line(key: &PublicKey, comment: &str) -> String {
+    let mut key = key.clone();
+    key.set_comment(comment.trim());
+    key.to_openssh().unwrap_or_default()
+}
+
+/// A private key as pasted into the credential form, with what could be
+/// read from it without its passphrase.
+pub struct PastedKey {
+    /// The text as it goes into the vault: blanks around it trimmed,
+    /// Windows line endings undone, one newline at the end.
+    text: Zeroizing<String>,
+    encrypted: bool,
+    /// Known when the format keeps it in the clear, or the key is not
+    /// encrypted.
+    public_key: Option<PublicKey>,
+}
+
+/// Why pasted text is not a private key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PastedKeyError {
+    Empty,
+    /// One line of `id_ed25519.pub`, the half that goes on the server.
+    PublicKey,
+    Unreadable,
+}
+
+impl PastedKey {
+    pub fn parse(text: &str) -> Result<Self, PastedKeyError> {
+        let unix = Zeroizing::new(text.replace("\r\n", "\n"));
+        let trimmed = unix.trim();
+        if trimmed.is_empty() {
+            return Err(PastedKeyError::Empty);
+        }
+        let file = Zeroizing::new(format!("{trimmed}\n"));
+        let first_line = trimmed.lines().next().unwrap_or_default();
+        if PublicKey::from_openssh(first_line).is_ok() {
+            return Err(PastedKeyError::PublicKey);
+        }
+        // OpenSSH's own format keeps the public half outside the encrypted
+        // part, so it is known even before the passphrase is.
+        if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----") {
+            let key = PrivateKey::from_openssh(trimmed).map_err(|_| PastedKeyError::Unreadable)?;
+            return Ok(Self {
+                text: file,
+                encrypted: key.is_encrypted(),
+                public_key: Some(key.public_key().clone()),
+            });
+        }
+        match russh::keys::decode_secret_key(trimmed, None) {
+            Ok(key) => Ok(Self {
+                text: file,
+                encrypted: false,
+                public_key: Some(key.public_key().clone()),
+            }),
+            Err(russh::keys::Error::KeyIsEncrypted) => Ok(Self::encrypted(file)),
+            Err(_) if looks_encrypted(trimmed) => Ok(Self::encrypted(file)),
+            Err(_) => Err(PastedKeyError::Unreadable),
+        }
+    }
+
+    fn encrypted(text: Zeroizing<String>) -> Self {
+        Self {
+            text,
+            encrypted: true,
+            public_key: None,
+        }
+    }
+
+    /// What goes into the vault.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Whether the key needs a passphrase to be used.
+    pub fn is_encrypted(&self) -> bool {
+        self.encrypted
+    }
+
+    /// The public half as one line of `authorized_keys`, with the key's own
+    /// comment, when the text gives it away without the passphrase.
+    pub fn public_key_line(&self) -> Option<String> {
+        self.public_key
+            .as_ref()
+            .and_then(|key| key.to_openssh().ok())
+    }
+}
+
+impl fmt::Debug for PastedKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PastedKey")
+            .field("text", &"<redacted>")
+            .field("encrypted", &self.encrypted)
+            .finish()
+    }
+}
+
+/// Whether a key that would not open without a passphrase says it is
+/// encrypted, in the formats that do not hand that back as an error:
+/// PKCS#8's `ENCRYPTED PRIVATE KEY`, the older PEM `Proc-Type: 4,ENCRYPTED`
+/// and PuTTY's `Encryption:` header.
+fn looks_encrypted(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim();
+        line == "-----BEGIN ENCRYPTED PRIVATE KEY-----"
+            || line == "Proc-Type: 4,ENCRYPTED"
+            || line
+                .strip_prefix("Encryption:")
+                .is_some_and(|cipher| cipher.trim() != "none")
+    })
+}
+
+/// The public half of the key in the file at `path`, as one line of
+/// `authorized_keys`: read from the private key when its format keeps the
+/// public half in the clear, else from `<path>.pub` beside it.
+///
+/// Blocks on the file system.
+pub fn read_public_key(path: &Path) -> Option<String> {
+    let from_key = read_small(path)
+        .and_then(|text| PastedKey::parse(&text).ok())
+        .and_then(|key| key.public_key_line());
+    from_key.or_else(|| {
+        let mut public_path = path.as_os_str().to_owned();
+        public_path.push(".pub");
+        let text = read_small(Path::new(&public_path))?;
+        let line = text.lines().map(str::trim).find(|line| !line.is_empty())?;
+        PublicKey::from_openssh(line).ok()?.to_openssh().ok()
+    })
+}
+
+/// 公钥（`authorized_keys` 的一行）是什么算法，凭据面板写在类型后面：`ED25519`、`RSA 4096`、
+/// `ECDSA P-256`。读不出来时是 `None`。
+pub fn key_algorithm(public_key: &str) -> Option<String> {
+    use russh::keys::ssh_key::EcdsaCurve;
+    let key = PublicKey::from_openssh(public_key.trim()).ok()?;
+    Some(match key.algorithm() {
+        Algorithm::Ed25519 => "ED25519".to_string(),
+        Algorithm::Rsa { .. } => match key.key_data().rsa() {
+            Some(rsa) => format!("RSA {}", rsa.key_size()),
+            None => "RSA".to_string(),
+        },
+        Algorithm::Ecdsa { curve } => match curve {
+            EcdsaCurve::NistP256 => "ECDSA P-256".to_string(),
+            EcdsaCurve::NistP384 => "ECDSA P-384".to_string(),
+            EcdsaCurve::NistP521 => "ECDSA P-521".to_string(),
+        },
+        other => other.as_str().to_uppercase(),
+    })
+}
+
+/// A file's text, if it is small enough to be a key. Anything else that was
+/// picked by mistake is not read whole.
+pub fn read_small(path: &Path) -> Option<Zeroizing<String>> {
+    const LARGEST_KEY: u64 = 64 * 1024;
+    let mut file = File::open(path).ok()?;
+    if file.metadata().ok()?.len() > LARGEST_KEY {
+        return None;
+    }
+    let mut text = Zeroizing::new(String::new());
+    file.read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ed25519() -> GeneratedKey {
+        GeneratedKey::generate(KeyAlgorithm::Ed25519).unwrap()
+    }
+
+    fn public_half(text: &str) -> PublicKey {
+        PrivateKey::from_openssh(text).unwrap().public_key().clone()
+    }
+
+    #[test]
+    fn a_generated_key_reads_back_from_its_file_text() {
+        let key = ed25519();
+        let text = key.encode(" 部署 ", "").unwrap();
+        let pasted = PastedKey::parse(&text).unwrap();
+        assert!(!pasted.is_encrypted());
+        let line = key.public_key_line(" 部署 ");
+        assert!(line.starts_with("ssh-ed25519 "), "{line}");
+        assert!(line.ends_with(" 部署"), "{line}");
+        assert_eq!(pasted.public_key_line(), Some(line));
+        // The comment written into the file is the one the line shows.
+        let decoded = russh::keys::decode_secret_key(&text, None).unwrap();
+        assert_eq!(decoded.comment().as_str_lossy(), "部署");
+    }
+
+    #[test]
+    fn a_passphrase_encrypts_the_key_and_opens_it_again() {
+        let key = ed25519();
+        let plain = key.encode("部署", "").unwrap();
+        let text = key.encode("部署", "correct horse").unwrap();
+        let pasted = PastedKey::parse(&text).unwrap();
+        assert!(pasted.is_encrypted());
+        // OpenSSH keeps the public half outside the encryption, without
+        // the comment, which is encrypted along with the key.
+        assert_eq!(pasted.public_key_line(), Some(key.public_key_line("")));
+        assert!(matches!(
+            russh::keys::decode_secret_key(&text, None),
+            Err(russh::keys::Error::KeyIsEncrypted)
+        ));
+        let opened = russh::keys::decode_secret_key(&text, Some("correct horse")).unwrap();
+        assert_eq!(opened.public_key(), &public_half(&plain));
+    }
+
+    #[test]
+    fn an_rsa_key_is_generated_too() {
+        let key = GeneratedKey::generate(KeyAlgorithm::Rsa).unwrap();
+        assert!(key.public_key_line("").starts_with("ssh-rsa "));
+    }
+
+    #[test]
+    fn pasted_text_is_tidied_for_the_vault() {
+        let text = ed25519().encode("", "").unwrap();
+        let windows = format!("\r\n  {}  \r\n\r\n", text.trim().replace('\n', "\r\n"));
+        let pasted = PastedKey::parse(&windows).unwrap();
+        assert_eq!(pasted.text(), text.as_str());
+        assert!(!pasted.text().contains('\r'));
+    }
+
+    #[test]
+    fn pasting_something_else_says_what_it_is() {
+        assert_eq!(PastedKey::parse(" \n ").unwrap_err(), PastedKeyError::Empty);
+        let public = ed25519().public_key_line("me@laptop");
+        assert_eq!(
+            PastedKey::parse(&public).unwrap_err(),
+            PastedKeyError::PublicKey
+        );
+        assert_eq!(
+            PastedKey::parse("hunter2").unwrap_err(),
+            PastedKeyError::Unreadable
+        );
+        assert_eq!(
+            PastedKey::parse(
+                "-----BEGIN OPENSSH PRIVATE KEY-----\nnot base64\n-----END OPENSSH PRIVATE KEY-----"
+            )
+            .unwrap_err(),
+            PastedKeyError::Unreadable
+        );
+    }
+
+    #[test]
+    fn older_encrypted_formats_are_taken_without_their_public_half() {
+        let pem = "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00112233445566778899AABBCCDDEEFF\n\nAAAA\n-----END RSA PRIVATE KEY-----";
+        let pasted = PastedKey::parse(pem).unwrap();
+        assert!(pasted.is_encrypted());
+        assert_eq!(pasted.public_key_line(), None);
+        let pkcs8 =
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----";
+        assert!(PastedKey::parse(pkcs8).unwrap().is_encrypted());
+    }
+
+    #[test]
+    fn the_debug_output_never_shows_the_key() {
+        let key = ed25519();
+        assert!(!format!("{key:?}").contains("OPENSSH"));
+        let text = key.encode("", "").unwrap();
+        let pasted = PastedKey::parse(&text).unwrap();
+        let debug = format!("{pasted:?}");
+        assert!(!debug.contains("OPENSSH"), "{debug}");
+    }
+
+    #[test]
+    fn the_algorithm_of_a_public_key_is_named_for_the_credential_list() {
+        assert_eq!(
+            key_algorithm(&ed25519().public_key_line("deploy")).as_deref(),
+            Some("ED25519")
+        );
+        let rsa = GeneratedKey::generate(KeyAlgorithm::Rsa).unwrap();
+        assert_eq!(
+            key_algorithm(&rsa.public_key_line("")).as_deref(),
+            Some("RSA 4096")
+        );
+        assert_eq!(key_algorithm("ssh-ed25519 not-base64"), None);
+        assert_eq!(key_algorithm(""), None);
+    }
+
+    #[test]
+    fn the_public_key_comes_from_the_key_file_or_the_pub_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = ed25519();
+
+        let plain = dir.path().join("id_plain");
+        std::fs::write(&plain, key.encode("plain", "").unwrap()).unwrap();
+        assert_eq!(read_public_key(&plain), Some(key.public_key_line("plain")));
+
+        // An older format that hides the public half: the .pub has it.
+        let hidden = dir.path().join("id_hidden");
+        std::fs::write(
+            &hidden,
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----\n",
+        )
+        .unwrap();
+        assert_eq!(read_public_key(&hidden), None);
+        let line = key.public_key_line("me@laptop");
+        std::fs::write(dir.path().join("id_hidden.pub"), format!("{line}\n")).unwrap();
+        assert_eq!(read_public_key(&hidden), Some(line));
+
+        assert_eq!(read_public_key(&dir.path().join("missing")), None);
+    }
+}

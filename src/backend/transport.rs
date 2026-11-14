@@ -13,10 +13,10 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use async_channel::Sender;
-use qishell_ssh::{
+use micaterm_ssh::{
     ChannelError, PtySize, SshHandle, find_cause, open_shell, resize_pty, write_shell,
 };
-use qishell_terminal::{
+use micaterm_terminal::{
     TERM_NAME, TerminalSize, TerminalTransport, TerminalTransportCommand, TerminalTransportEvent,
     TerminalTransportFactory,
 };
@@ -82,7 +82,7 @@ impl TerminalTransport for RemoteTransport {
         let stop = Arc::new(AtomicBool::new(false));
         let bridge_stop = stop.clone();
         let bridge = thread::Builder::new()
-            .name("qishell-remote-commands".into())
+            .name("micaterm-remote-commands".into())
             .spawn(move || {
                 while !bridge_stop.load(Ordering::Acquire) {
                     match commands.recv_timeout(Duration::from_millis(20)) {

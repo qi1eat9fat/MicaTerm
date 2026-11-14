@@ -9,13 +9,12 @@ use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use qishell_hosts::secrets::{InMemorySecretStore, SharedSecretStore};
-use qishell_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportProvider};
+use micaterm_hosts::secrets::{InMemorySecretStore, SharedSecretStore};
+use micaterm_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportProvider};
 
 use super::handlers;
 use super::host_sidebar::render_host_sidebar;
 use super::notices::NoticeTimes;
-use super::quick_connect::{QuickConnectAnchor, QuickConnectPopup};
 use super::remote::PromptQueue;
 use super::right_sidebar::{RightPanel, render_right_sidebar};
 use super::title_bar::{TitleBarState, render_title_bar};
@@ -35,7 +34,7 @@ use crate::settings::{SettingsStore, SettingsStoreEvent, WindowBackdrop, WindowS
 use crate::snippets::SnippetPanel;
 use crate::split::NodeId;
 use crate::tabs::{Tab, TabId, TabList, TabRail, TabSnapshot, TerminalTab};
-use crate::theme::{GAP, Tokens};
+use crate::theme::{Tokens, TypeScale, size};
 use crate::vault::{Vault, VaultStore, VaultStoreEvent};
 
 /// 窗口壳用到的外部服务。生产代码用 `WorkspaceServices::new()` 建真实的，
@@ -46,7 +45,7 @@ use crate::vault::{Vault, VaultStore, VaultStoreEvent};
 pub struct WorkspaceServices {
     /// 本地终端的传输：生产是本机 PTY，测试注入假的。
     pub local_terminals: SharedLocalTerminalTransportProvider,
-    /// 主机、凭据、命令片段：生产是数据目录里的 `qishell.db`，测试是内存里的（`HostData::empty`、`seed`）。
+    /// 主机、凭据、命令片段：生产是数据目录里的 `micaterm.db`，测试是内存里的（`HostData::empty`、`seed`）。
     /// 窗口壳构造时把它取走、包成 `HostStore` 实体，之后这里只剩一份空的。
     pub hosts: HostData,
     /// 数据库打不开时给用户看的原因（这次运行用的是只在内存里的空数据，改动不会保存）。
@@ -94,9 +93,9 @@ impl WorkspaceServices {
         // 连接读秘密经同一个存储（保险库，打不开时是内存里的）；主机密钥记在数据目录的 known_hosts。
         let known_hosts = crate::app::known_hosts_path()
             .unwrap_or_else(|_| std::path::PathBuf::from(crate::app::KNOWN_HOSTS_FILE));
-        let source = qishell_hosts::secrets::StoreSource::shared(secrets.clone());
+        let source = micaterm_hosts::secrets::StoreSource::shared(secrets.clone());
         let (sftp, sftp_problem) = sftp_provider(
-            qishell_ssh::SshConnector::new(known_hosts.clone(), source.clone()),
+            micaterm_ssh::SshConnector::new(known_hosts.clone(), source.clone()),
             crate::app::upload_resume_dir(),
             crate::app::download_resume_dir(),
         );
@@ -123,7 +122,7 @@ impl WorkspaceServices {
 /// 建 SFTP 连接。续传记录只放在数据目录里（ADR 0003）：取不到数据目录就不记，告诉用户，
 /// 不要静默写到当前工作目录。
 fn sftp_provider(
-    connector: qishell_ssh::SshConnector,
+    connector: micaterm_ssh::SshConnector,
     upload: std::io::Result<std::path::PathBuf>,
     download: std::io::Result<std::path::PathBuf>,
 ) -> (SshSftpTransportProvider, Option<SharedString>) {
@@ -158,8 +157,8 @@ fn open_vault() -> (Option<std::sync::Arc<Vault>>, Option<SharedString>) {
 pub struct Workspace {
     /// 窗口壳根节点的焦点：按钮一律经它派发 action，焦点为空时也能送到这里的处理器。
     pub(super) focus_handle: FocusHandle,
-    /// 开始卡片的焦点：没有标签时由它持有焦点，快捷键才有焦点路径可走。
-    pub(super) start_card_focus: FocusHandle,
+    /// 新标签页的焦点：没有标签时由它持有焦点，快捷键才有焦点路径可走。
+    pub(super) new_tab_focus: FocusHandle,
     pub(super) settings: Entity<SettingsStore>,
     pub(super) services: WorkspaceServices,
     /// 主机栏是否显示。
@@ -201,12 +200,6 @@ pub struct Workspace {
     pub(super) credential_panel: Entity<CredentialPanel>,
     /// 一直收连接表的事件（工单 12）。
     _remote_events: Task<()>,
-    /// 开着的快速连接弹层（工单 18）。
-    pub(super) quick_connect: Option<QuickConnectPopup>,
-    /// 「+ ⌄」画在哪里，快速连接弹层挂在它下面（工单 18）。
-    pub(super) quick_connect_anchor: std::rc::Rc<QuickConnectAnchor>,
-    /// 开始卡片的最近连接列表高亮第几行（工单 18）。
-    pub(super) start_highlight: usize,
     /// 等窗口停稳再写 `window.json` 的那一次（工单 26）；窗口又动了就换一个新的。
     pub(super) window_state_save: Option<Task<()>>,
     pub(super) subscriptions: Vec<Subscription>,
@@ -291,13 +284,13 @@ impl Workspace {
         apply(&settings.read(cx).settings(), window, cx);
         // 点终端的系统通知，回到那张卡片。
         Self::listen_for_notice_clicks(window, cx);
-        let start_card_focus = cx.focus_handle();
-        // 启动时没有标签：开始卡片持有焦点。
-        start_card_focus.focus(window, cx);
+        let new_tab_focus = cx.focus_handle();
+        // 启动时没有标签：新标签页持有焦点。
+        new_tab_focus.focus(window, cx);
         let remote_events = Self::listen_for_remote_events(&services, window, cx);
         let credential_panel = {
-            let (hosts, vault, target) = (hosts.clone(), vault.clone(), focus_handle.clone());
-            cx.new(|cx| CredentialPanel::new(hosts, vault, target, cx))
+            let (hosts, target) = (hosts.clone(), focus_handle.clone());
+            cx.new(|cx| CredentialPanel::new(hosts, target, cx))
         };
         let window_state_path = services
             .data_dir
@@ -305,7 +298,7 @@ impl Workspace {
             .map(|dir| crate::app::window_state_path(dir));
         let mut this = Self {
             focus_handle,
-            start_card_focus,
+            new_tab_focus,
             settings,
             services,
             host_sidebar_open: true,
@@ -327,9 +320,6 @@ impl Workspace {
             vault,
             credential_panel,
             _remote_events: remote_events,
-            quick_connect: None,
-            quick_connect_anchor: Default::default(),
-            start_highlight: 0,
             window_state_save: None,
             subscriptions,
         };
@@ -408,17 +398,17 @@ impl Workspace {
     }
 
     /// 主机栏里选中的主机。
-    pub fn selected_host(&self, cx: &App) -> Option<qishell_hosts::HostId> {
+    pub fn selected_host(&self, cx: &App) -> Option<micaterm_hosts::HostId> {
         self.host_list.read(cx).selected_host()
     }
 
     /// 主机栏搜索时高亮的主机。
-    pub fn highlighted_host(&self, cx: &App) -> Option<qishell_hosts::HostId> {
+    pub fn highlighted_host(&self, cx: &App) -> Option<micaterm_hosts::HostId> {
         self.host_list.read(cx).highlighted_host(cx)
     }
 
     /// 主机栏列出的主机，从上到下（搜索时只有匹配的）。
-    pub fn listed_hosts(&self, cx: &App) -> Vec<qishell_hosts::HostId> {
+    pub fn listed_hosts(&self, cx: &App) -> Vec<micaterm_hosts::HostId> {
         self.host_list.read(cx).listed_hosts(cx)
     }
 
@@ -485,7 +475,7 @@ impl Workspace {
             .map(|entity| entity.read(cx).screen_text(cx))
     }
 
-    /// 在前那个标签的焦点卡片。SFTP 标签、编辑器标签和开始卡片没有焦点卡片。
+    /// 在前那个标签的焦点卡片。SFTP 标签、编辑器标签和新标签页没有焦点卡片。
     pub fn focused_card(&self, cx: &App) -> Option<CardId> {
         self.active_terminal_tab()
             .map(|tab| tab.focused_card().read(cx).id())
@@ -503,12 +493,6 @@ impl Workspace {
             .and_then(|tab| tab.tree().ratio(node))
     }
 
-    /// 卡片终端内容的不透明度：焦点卡片 1，其余 0.85，窗口失活时 0.7。
-    pub fn card_opacity(&self, card: CardId, window: &Window, cx: &App) -> Option<f32> {
-        self.card(card, cx)
-            .map(|entity| entity.read(cx).content_opacity(window))
-    }
-
     /// 卡片图块上的程序名（「Neovim」；shell 在提示符下是 shell 名）。
     pub fn card_tile(&self, card: CardId, cx: &App) -> Option<String> {
         self.card(card, cx)
@@ -521,20 +505,15 @@ impl Workspace {
             .map(|entity| entity.read(cx).tile_program().off)
     }
 
-    /// 标签上叠放的图块的程序名，从前到后。
-    pub fn tab_tiles(&self, tab: TabId, cx: &App) -> Vec<String> {
+    /// 标签代表的程序名（终端标签是焦点卡片的）。
+    pub fn tab_tile(&self, tab: TabId, cx: &App) -> Option<String> {
         self.tabs
             .get(tab)
-            .map(|tab| {
-                tab.tiles(cx)
-                    .into_iter()
-                    .map(|program| program.name)
-                    .collect()
-            })
-            .unwrap_or_default()
+            .and_then(|tab| tab.tile(cx))
+            .map(|program| program.name)
     }
 
-    /// 卡片头部的状态点。
+    /// 卡片的状态点（标签上的点由它汇总）。
     pub fn card_dot(&self, card: CardId, cx: &App) -> Option<StatusDot> {
         self.card(card, cx)
             .map(|entity| entity.read(cx).status_dot(cx))
@@ -568,26 +547,29 @@ impl Render for Workspace {
         let open_cards = self.open_cards_by_host(cx);
         self.host_list
             .update(cx, |list, cx| list.set_open_cards(open_cards, cx));
-        // 有标签时是在前那个标签的内容，没有时是开始卡片。
-        let content = div()
-            .flex()
-            .flex_1()
-            .min_w_0()
-            .when(!self.host_sidebar_open, |content| content.pl(GAP))
-            .map(|content| match self.tabs.active_content() {
-                Some(tab) => content.child(tab.content(cx)),
-                None => content.child(self.render_start_card(&target, &tokens, window, cx)),
-            });
+        // 有标签时是在前那个标签的内容，没有时是新标签页。
+        let content =
+            div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .map(|content| match self.tabs.active_content() {
+                    Some(tab) => content.child(tab.content(cx)),
+                    None => content.child(self.render_new_tab_page(&target, &tokens, window, cx)),
+                });
+        // 主区域：内容底色，主机栏开着时左边一条细线（26 号 `.flush .panel`）。
         let main = div()
             .flex()
             .flex_col()
             .flex_1()
             .min_w_0()
+            .bg(tokens.content)
+            .when(self.host_sidebar_open, |main| {
+                main.border_l(size::LINE).border_color(tokens.line)
+            })
             .child(render_title_bar(
                 TitleBarState {
                     host_sidebar_open: self.host_sidebar_open,
-                    quick_connect_open: self.quick_connect.is_some(),
-                    anchor: &self.quick_connect_anchor(),
                     rail: &self.tab_rail,
                     tabs: self.tab_snapshots(cx),
                 },
@@ -601,10 +583,9 @@ impl Render for Workspace {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .pb(GAP)
                     .child(content)
                     .children(self.right_panel.map(|panel| match panel {
-                        RightPanel::Snippets => self.render_snippet_panel(&tokens, cx),
+                        RightPanel::Snippets => self.render_snippet_panel(&tokens, window, cx),
                         RightPanel::Credentials => self.credential_panel.clone().into_any_element(),
                     }))
                     .child(render_right_sidebar(
@@ -626,7 +607,6 @@ impl Render for Workspace {
             .map(|root| handlers::bind_hosts_actions(root, cx))
             .map(|root| handlers::bind_snippets_actions(root, cx))
             .map(|root| handlers::bind_remote_actions(root, cx))
-            .map(|root| handlers::bind_quick_connect_actions(root, cx))
             .map(|root| handlers::bind_vault_actions(root, cx))
             .map(|root| handlers::bind_credentials_actions(root, cx))
             .map(|root| handlers::bind_sftp_actions(root, cx))
@@ -636,19 +616,19 @@ impl Render for Workspace {
             .size_full()
             .overflow_hidden()
             .text_color(tokens.text)
-            // 不透明的两色标渐变；开了 Mica 时是半透明的，让系统的 Mica 透出来（工单 26）。
-            .bg(tokens.window_gradient(WindowBackdrop::current(cx)))
+            .text_size(TypeScale::current(cx).ui)
+            // 窗口底就是侧栏底；开了 Mica 时是半透明的，让系统的 Mica 从侧栏透出来（工单 26）。
+            .bg(tokens.window_background(WindowBackdrop::current(cx)))
             .when(self.host_sidebar_open, |root| {
                 root.child(render_host_sidebar(
-                    self.hosts.read(cx).hosts().len(),
                     self.host_list.clone(),
                     self.vault.read(cx).status(),
                     &target,
                     &tokens,
+                    TypeScale::current(cx),
                 ))
             })
             .child(main)
-            .children(self.render_quick_connect())
             .children(Root::render_sheet_layer(window, cx))
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))
@@ -656,7 +636,7 @@ impl Render for Workspace {
 }
 
 /// 主窗口的选项：无边框（标题栏自己画），开在上次的地方（`saved`，设置记住窗口时，工单 26）。
-/// 背景先不透明（渐变由根节点画），窗口壳应用设置时再按 Mica 开关换（`settings::apply`）。
+/// 背景先不透明（底色由根节点画），窗口壳应用设置时再按 Mica 开关换（`settings::apply`）。
 pub fn window_options(
     saved: Option<&super::WindowState>,
     settings: WindowSettings,
@@ -685,11 +665,11 @@ mod tests {
 
     use super::sftp_provider;
 
-    fn connector() -> qishell_ssh::SshConnector {
-        qishell_ssh::SshConnector::new(
+    fn connector() -> micaterm_ssh::SshConnector {
+        micaterm_ssh::SshConnector::new(
             std::path::PathBuf::from("known_hosts"),
-            qishell_hosts::secrets::StoreSource::shared(Arc::new(
-                qishell_hosts::secrets::InMemorySecretStore::default(),
+            micaterm_hosts::secrets::StoreSource::shared(Arc::new(
+                micaterm_hosts::secrets::InMemorySecretStore::default(),
             )),
         )
     }

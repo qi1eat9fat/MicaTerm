@@ -1,20 +1,20 @@
 // 参考 since2006/shell-rs @ b2a307a: src/explorer/file_pane.rs 改写
 // 裁剪：去掉两行工具栏、目录下拉、书签、历史（后退前进）、单栏「文件」的窄列表和目录跟随。
-// 外观按全部界面原型的 `fcard`：图标、「本机」或主机名、当前路径的头部，路径栏、文件列表、状态栏。
-//! 文件卡片：SFTP 标签里本地或远程的一侧。
+// 外观照 26 号「SFTP」的一栏（`.sf-col`）：路径栏、表格（`ui::table`）、状态栏，没有卡片外框和头部。
+//! 文件卡片：SFTP 标签里本地或远程的一侧（一栏）。
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::component::menu::ContextMenuExt as _;
-use gpui_kit::component::table::{DataTable, TableEvent, TableState};
-use gpui_kit::component::{Sizable as _, Size};
+use gpui_kit::base::POPUP_PRIORITY;
+use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use micaterm_ui::Menu;
 
-use super::file_listing::{ListPlaceholder, ListingContext, MenuHit, accept_drops, offer_drop};
+use super::file_listing::{ListPlaceholder, accept_drops, offer_drop};
 use super::file_menu::{CardMenuState, directory_menu, item_menu};
 use super::marquee::{self, ListMarquee, MarqueeList};
 use super::path_bar::PathEdit;
@@ -22,22 +22,17 @@ use super::{
     ClickMode, CursorMotion, FileEntry, FileListing, Selection, SftpTabId, ShowHiddenFiles,
     child_path,
 };
-use crate::app::SftpTabCommand;
 use crate::app::{
-    LOCAL_FILE_LIST_CONTEXT, REMOTE_FILE_LIST_CONTEXT, SftpAction, SftpDispatch as _,
+    CatalogIcon, LOCAL_FILE_LIST_CONTEXT, REMOTE_FILE_LIST_CONTEXT, SftpAction, SftpDispatch as _,
+    SftpTabCommand,
 };
 use crate::backend::sftp::{DirectoryListing, RemotePath, SharedLocalDirectoryProvider};
-use crate::backend::{Latency, latency_label};
-use crate::card::render_program_tile;
 use crate::i18n::t;
-use crate::programs::Program;
-use crate::theme::{CARD_HEADER_HEIGHT, CARD_RADIUS, STATUS_BAR_HEIGHT, Tokens};
+use crate::theme::{Tokens, TypeScale, size};
+use crate::ui::table;
 
 /// 目录读多久还没回来，状态栏才说「正在读取」：大多数目录一下就到，说了只会闪。
 const SLOW_LOAD: Duration = Duration::from_millis(300);
-
-/// 表格的行高（原型 `.ftab td`）。
-const ROW_HEIGHT: Pixels = px(25.);
 
 /// 文件卡片是本地还是远程的一侧。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,13 +63,6 @@ impl CardSide {
         match self {
             Self::Local => "local-card",
             Self::Remote => "remote-card",
-        }
-    }
-
-    pub(super) fn header_id(self) -> &'static str {
-        match self {
-            Self::Local => "local-header",
-            Self::Remote => "remote-header",
         }
     }
 
@@ -110,6 +98,14 @@ impl CardSide {
         match self {
             Self::Local => "local-file-list",
             Self::Remote => "remote-file-list",
+        }
+    }
+
+    /// 表格里放行的那一块（`uniform_list`）。
+    fn rows_id(self) -> &'static str {
+        match self {
+            Self::Local => "local-file-rows",
+            Self::Remote => "remote-file-rows",
         }
     }
 
@@ -156,29 +152,34 @@ impl LoadIntent {
     }
 }
 
-/// 文件卡片。
+/// 开着的右键菜单：画在鼠标处。
+struct OpenMenu {
+    position: Point<Pixels>,
+    view: Entity<Menu>,
+    _dismiss: Subscription,
+}
+
+/// 文件卡片：SFTP 标签里的一栏（26 号 `.sf-col`）。
 pub struct FileCard {
     pub(super) side: CardSide,
     /// 所在的 SFTP 标签，命令发给它。
-    tab: SftpTabId,
-    /// 头部的名称：「本机」或主机名。
+    pub(super) tab: SftpTabId,
+    /// 状态栏上的名称：「本机」或主机名。
     name: SharedString,
-    /// 头部的图块：本机是显示器，远程是主机的系统徽章。
-    tile: Program,
     pub(super) path: String,
     home: String,
-    table: Entity<TableState<FileListing>>,
-    /// 指针下的那一级路径。
-    pub(super) hovered_part: Option<String>,
+    pub(super) listing: FileListing,
+    scroll: UniformListScrollHandle,
+    list_focus: FocusHandle,
     /// 路径栏上一帧的宽度，决定折叠哪几级。
     pub(super) label_width: Rc<Cell<Option<Pixels>>>,
-    /// 列表上一帧的宽度：列按它的百分比摆。
-    list_width: Rc<Cell<Option<Pixels>>>,
-    /// 用过的最后一侧：标签再到前面来时焦点回到这里，边框也亮着。
+    /// 用过的最后一侧：标签再到前面来时焦点回到这里，选中的行也是 `--sel`。
     pub(super) current: bool,
-    selection: Selection,
-    menu_hit: Rc<RefCell<Option<MenuHit>>>,
-    marquee: ListMarquee,
+    pub(super) selection: Selection,
+    /// 上一次右键点在一行上（不是 `..`、不是空白处）：开文件的菜单还是空白处的菜单。
+    pub(super) menu_hit: Rc<Cell<bool>>,
+    menu: Option<OpenMenu>,
+    pub(super) marquee: ListMarquee,
     /// 正在读的目录是为什么读的。
     pending: Option<LoadIntent>,
     /// 下一次列目录后选中这一行（新建、重命名之后）。
@@ -195,10 +196,7 @@ pub struct FileCard {
     /// 读到过目录：这时候的空列表才是空目录。
     listed: bool,
     connection: ConnectionState,
-    /// `user@地址:端口`（远程一侧）。
-    endpoint: Option<SharedString>,
-    latency: Option<Latency>,
-    transfer_enabled: bool,
+    pub(super) transfer_enabled: bool,
     /// 这一侧有文件操作在跑（工单 21）。
     busy: bool,
     /// 路径栏的输入态。
@@ -209,48 +207,32 @@ pub struct FileCard {
 }
 
 impl FileCard {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         side: CardSide,
         tab: SftpTabId,
         name: SharedString,
-        tile: Program,
         home: String,
         dispatch: FocusHandle,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let mut listing = FileListing::new(side);
         listing.set_show_hidden(ShowHiddenFiles::get(side, cx));
-        // 选择归卡片（按名字多选）；表格自己的选行关着，免得画出另一种高亮。
-        let table = cx.new(|cx| {
-            TableState::new(listing, window, cx)
-                .row_selectable(false)
-                .col_selectable(false)
-                .cell_selectable(false)
-        });
-        let subscriptions = vec![
-            cx.subscribe(&table, |_, table, event: &TableEvent, cx| {
-                if let TableEvent::ColumnWidthsChanged(widths) = event {
-                    table.update(cx, |table, _| table.delegate_mut().set_widths(widths));
-                }
-            }),
-            cx.observe_global::<ShowHiddenFiles>(|card, cx| card.sync_hidden_files(cx)),
-        ];
-        let mut card = Self {
+        let subscriptions =
+            vec![cx.observe_global::<ShowHiddenFiles>(|card, cx| card.sync_hidden_files(cx))];
+        Self {
             side,
             tab,
             name,
-            tile,
             path: home.clone(),
             home,
-            table,
-            hovered_part: None,
+            listing,
+            scroll: UniformListScrollHandle::new(),
+            list_focus: cx.focus_handle(),
             label_width: Rc::default(),
-            list_width: Rc::default(),
             current: side == CardSide::Remote,
             selection: Selection::default(),
             menu_hit: Rc::default(),
+            menu: None,
             marquee: ListMarquee::default(),
             pending: None,
             select_after_load: None,
@@ -267,17 +249,13 @@ impl FileCard {
             } else {
                 ConnectionState::Connecting
             },
-            endpoint: None,
-            latency: None,
             transfer_enabled: false,
             busy: false,
             path_edit: None,
             dispatch,
             _subscriptions: subscriptions,
             load_task: None,
-        };
-        card.sync_listing(cx);
-        card
+        }
     }
 
     pub(super) fn is_remote(&self) -> bool {
@@ -313,14 +291,12 @@ impl FileCard {
     }
 
     /// 选中的名字，按显示的顺序：文件命令的对象。
-    pub fn selected_names(&self, cx: &App) -> Vec<String> {
-        let table = self.table.read(cx);
-        self.selection.targets(&table.delegate().order())
+    pub fn selected_names(&self, _: &App) -> Vec<String> {
+        self.selection.targets(&self.listing.order())
     }
 
-    pub fn selected_entries(&self, cx: &App) -> Vec<FileEntry> {
-        let table = self.table.read(cx);
-        let listing = table.delegate();
+    pub fn selected_entries(&self, _: &App) -> Vec<FileEntry> {
+        let listing = &self.listing;
         self.selection
             .targets(&listing.order())
             .iter()
@@ -329,38 +305,35 @@ impl FileCard {
     }
 
     /// 键盘光标所在的行。
-    pub fn cursor_entry(&self, cx: &App) -> Option<FileEntry> {
+    pub fn cursor_entry(&self, _: &App) -> Option<FileEntry> {
         let cursor = self.selection.cursor()?;
-        let table = self.table.read(cx);
-        let listing = table.delegate();
+        let listing = &self.listing;
         listing.entry(listing.position(cursor)?).cloned()
     }
 
     /// 显示的行，按显示的顺序。
-    pub fn entries(&self, cx: &App) -> Vec<FileEntry> {
-        self.table.read(cx).delegate().rows().to_vec()
+    pub fn entries(&self, _: &App) -> Vec<FileEntry> {
+        self.listing.rows().to_vec()
     }
 
     /// 目录里的全部，隐藏文件也在：新名字不能和它们撞。
-    pub fn listed_entries(&self, cx: &App) -> Vec<FileEntry> {
-        self.table.read(cx).delegate().listed().to_vec()
+    pub fn listed_entries(&self, _: &App) -> Vec<FileEntry> {
+        self.listing.listed().to_vec()
     }
 
     /// 这一侧的隐藏文件显示或不显示了：重新列行。隐藏起来的文件也从选中项里去掉。
     fn sync_hidden_files(&mut self, cx: &mut Context<Self>) {
         let show = ShowHiddenFiles::get(self.side, cx);
-        if self.table.read(cx).delegate().shows_hidden() == show {
+        if self.listing.shows_hidden() == show {
             return;
         }
-        self.table.update(cx, |table, cx| {
-            table.delegate_mut().set_show_hidden(show);
-            table.refresh(cx);
-        });
+        self.listing.set_show_hidden(show);
         self.update_selection(cx, |selection, order| selection.retain(order));
     }
 
-    pub fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.table.read(cx).focus_handle(cx)
+    /// 文件列表的焦点：键盘命令在它上面。
+    pub fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.list_focus.clone()
     }
 
     pub fn child_path_of(&self, name: &str) -> String {
@@ -400,19 +373,6 @@ impl FileCard {
     ) {
         self.connection = connection;
         self.transfer_enabled = transfer;
-        self.sync_listing(cx);
-        cx.notify();
-    }
-
-    /// 状态栏上的 `user@地址:端口` 和延迟。
-    pub(super) fn set_link(
-        &mut self,
-        endpoint: Option<SharedString>,
-        latency: Option<Latency>,
-        cx: &mut Context<Self>,
-    ) {
-        self.endpoint = endpoint;
-        self.latency = latency;
         cx.notify();
     }
 
@@ -421,17 +381,6 @@ impl FileCard {
             self.current = current;
             cx.notify();
         }
-    }
-
-    pub(super) fn hover_part(&mut self, path: &str, hovered: bool, cx: &mut Context<Self>) {
-        if hovered {
-            self.hovered_part = Some(path.to_string());
-        } else if self.hovered_part.as_deref() == Some(path) {
-            self.hovered_part = None;
-        } else {
-            return;
-        }
-        cx.notify();
     }
 
     /// 这一侧有文件操作在跑（工单 21）：菜单里改文件的项不能点。
@@ -454,42 +403,15 @@ impl FileCard {
         self.select_after_load = Some(name);
     }
 
-    /// 列表宽度变了：没拖过的列按原型的百分比重新摆，放得下就不用横着滚。
-    fn fit_columns(&mut self, width: Pixels, cx: &mut Context<Self>) {
-        self.table.update(cx, |table, cx| {
-            if table.delegate_mut().fit_columns(width) {
-                table.refresh(cx);
-            }
-        });
-    }
-
-    fn sync_listing(&mut self, cx: &mut Context<Self>) {
-        let context = ListingContext {
-            tab: self.tab,
-            path: self.path.clone(),
-            selection: Rc::new(self.selection.clone()),
-            transfer_enabled: self.transfer_enabled,
-            dispatch: Some(self.dispatch.clone()),
-            card: Some(cx.entity().downgrade()),
-            menu_hit: self.menu_hit.clone(),
-            geometry: self.marquee.geometry.clone(),
-            placeholder: self.placeholder(self.table.read(cx).delegate().hidden_count()),
-        };
-        self.table.update(cx, |table, cx| {
-            table.delegate_mut().configure(context);
-            cx.notify();
-        });
-    }
-
     /// 没有行时列表写什么：读到过目录才写「空目录」，之前写正在干什么。
     /// 空目录在重读时一直写「空目录」，读得久了才改口，免得快速刷新时闪。
     /// 只有隐藏文件、又不显示的目录不算空。
-    fn placeholder(&self, hidden: usize) -> ListPlaceholder {
+    fn placeholder(&self) -> ListPlaceholder {
         if self.connection == ConnectionState::Connecting {
             ListPlaceholder::Connecting
         } else if self.loading && (!self.listed || self.slow_load) {
             ListPlaceholder::Reading
-        } else if self.listed && hidden > 0 {
+        } else if self.listed && self.listing.hidden_count() > 0 {
             ListPlaceholder::OnlyHidden
         } else if self.listed {
             ListPlaceholder::Empty
@@ -508,23 +430,13 @@ impl FileCard {
         cx: &mut Context<Self>,
         change: impl FnOnce(&mut Selection, &[&str]),
     ) {
-        let order: Vec<String> = self
-            .table
-            .read(cx)
-            .delegate()
-            .order()
-            .into_iter()
-            .map(str::to_string)
-            .collect();
-        let order: Vec<&str> = order.iter().map(String::as_str).collect();
+        let order = self.listing.order();
         change(&mut self.selection, &order);
-        self.sync_listing(cx);
         cx.notify();
     }
 
     /// 鼠标点了一行，修饰键已经算好。
     pub fn click_row(&mut self, name: &str, mode: ClickMode, cx: &mut Context<Self>) {
-        self.clear_menu_row(cx);
         self.update_selection(cx, |selection, order| selection.click(name, mode, order));
     }
 
@@ -537,42 +449,37 @@ impl FileCard {
         }
     }
 
-    /// 表格给右键过的行描边，选择归我们，所以下一次点击、移动、拖动都把它清掉。
-    pub(super) fn clear_menu_row(&mut self, cx: &mut Context<Self>) {
-        self.table
-            .update(cx, |table, cx| table.set_right_clicked_row(None, cx));
-    }
-
     pub fn select_only(&mut self, name: &str, cx: &mut Context<Self>) {
         self.update_selection(cx, |selection, order| selection.select_only(name, order));
-        self.scroll_to_cursor(cx);
+        self.scroll_to_cursor();
     }
 
     pub fn move_cursor(&mut self, motion: CursorMotion, extend: bool, cx: &mut Context<Self>) {
-        self.clear_menu_row(cx);
-        let page = self.table.read(cx).visible_range().rows().len();
+        // 一页是列表里放得下的行数。
+        let page = self
+            .marquee
+            .geometry
+            .list
+            .get()
+            .map(|list| ((list.size.height - table::HEADER_HEIGHT) / table::ROW_HEIGHT) as usize)
+            .unwrap_or(1)
+            .max(1);
         self.update_selection(cx, |selection, order| {
             selection.move_cursor(motion, page, extend, order);
         });
-        self.scroll_to_cursor(cx);
+        self.scroll_to_cursor();
     }
 
-    /// 光标行出了可见范围才滚；表格自己的 `scroll_to_row` 总把那行放到最上面。
-    fn scroll_to_cursor(&mut self, cx: &mut Context<Self>) {
-        let Some(cursor) = self.selection.cursor().map(str::to_string) else {
+    /// 光标行出了可见范围才滚。
+    fn scroll_to_cursor(&mut self) {
+        let Some(ix) = self
+            .selection
+            .cursor()
+            .and_then(|cursor| self.listing.position(cursor))
+        else {
             return;
         };
-        self.table.update(cx, |table, cx| {
-            let Some(ix) = table.delegate().position(&cursor) else {
-                return;
-            };
-            let visible = table.visible_range().rows().clone();
-            if visible.is_empty() || ix < visible.start {
-                table.scroll_to_row(ix, cx);
-            } else if ix + 1 >= visible.end {
-                table.scroll_to_row(ix + 2 - visible.len().max(1), cx);
-            }
-        });
+        self.scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
     }
 
     pub fn toggle_selection(&mut self, cx: &mut Context<Self>) {
@@ -597,7 +504,6 @@ impl FileCard {
         self.pending = None;
         self.finish_loading();
         self.error = Some(message);
-        self.sync_listing(cx);
         cx.notify();
     }
 
@@ -614,7 +520,6 @@ impl FileCard {
         }
         self.pending = Some(intent);
         self.loading = true;
-        self.sync_listing(cx);
         let id = self.request_id;
         self.slow_load = false;
         self.slow_load_timer = Some(cx.spawn(async move |this, cx| {
@@ -622,7 +527,6 @@ impl FileCard {
             let _ = this.update(cx, |this, cx| {
                 if this.loading && this.request_id == id {
                     this.slow_load = true;
-                    this.sync_listing(cx);
                     cx.notify();
                 }
             });
@@ -674,7 +578,7 @@ impl FileCard {
             Ok(listing) => {
                 if listing.path() != self.path {
                     self.selection.clear();
-                    self.hovered_part = None;
+                    self.scroll.scroll_to_item(0, ScrollStrategy::Top);
                 }
                 self.path = listing.path().into();
                 self.listed = true;
@@ -687,10 +591,7 @@ impl FileCard {
                 if self.parent_path() != self.path {
                     rows.insert(0, FileEntry::parent());
                 }
-                self.table.update(cx, |table, cx| {
-                    table.delegate_mut().set_rows(rows);
-                    table.refresh(cx);
-                });
+                self.listing.set_rows(rows);
                 self.update_selection(cx, |selection, order| selection.retain(order));
                 if let Some(name) = self.select_after_load.take() {
                     self.select_only(&name, cx);
@@ -705,7 +606,6 @@ impl FileCard {
                     Some(LoadIntent::PathBar) => self.path_edit_failed(error.into(), cx),
                     Some(intent @ LoadIntent::Start { .. }) => {
                         if let Some(next) = intent.next_start() {
-                            self.sync_listing(cx);
                             cx.notify();
                             return Some(next);
                         }
@@ -713,7 +613,6 @@ impl FileCard {
                     }
                     _ => self.error = Some(error),
                 }
-                self.sync_listing(cx);
             }
         }
         cx.notify();
@@ -768,24 +667,55 @@ impl FileCard {
         }
     }
 
-    /// 状态栏显示的东西（原型 `fcard` 的 `stat`）。
-    fn status(&self, cx: &App) -> CardStatus {
-        let (items, selected, hidden) = {
-            let table = self.table.read(cx);
-            let listing = table.delegate();
-            let items = listing.rows().iter().filter(|row| !row.is_parent()).count();
-            (
-                items,
-                self.selection.targets(&listing.order()).len(),
-                listing.hidden_count(),
-            )
-        };
-        let hidden = (hidden > 0).then(|| t!("sftp_tab.status.hidden", count = hidden));
-        let counts = t!(
-            "sftp_tab.status.items_selected",
-            count = items,
-            selected = selected
+    /// 在 `position` 开右键菜单：右键点在一行上是文件的菜单，否则是空白处的菜单。
+    fn open_menu(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.menu_state(cx);
+        let on_item = self.menu_hit.get();
+        let focus = self.list_focus.clone();
+        let view = Menu::build(window, cx, move |menu, _, _| {
+            let menu = menu.action_context(focus);
+            if on_item {
+                item_menu(menu, &state)
+            } else {
+                directory_menu(menu, &state)
+            }
+        });
+        let dismiss = cx.subscribe_in(
+            &view,
+            window,
+            |this, menu: &Entity<Menu>, _: &DismissEvent, _, cx| {
+                if this.menu.as_ref().is_some_and(|open| &open.view == menu) {
+                    this.menu = None;
+                }
+                cx.notify();
+            },
         );
+        window.focus(&view.focus_handle(cx), cx);
+        self.menu = Some(OpenMenu {
+            position,
+            view,
+            _dismiss: dismiss,
+        });
+        cx.notify();
+    }
+
+    /// 状态栏（26 号 `.status`，用户定只留「本机 / 主机名」和「共几项 · 已选几项」）。
+    /// 正在连接、断开、读不出来、读得久了时名字后面写一句，平时不写连接状态。
+    fn status(&self) -> CardStatus {
+        let items = self
+            .listing
+            .rows()
+            .iter()
+            .filter(|row| !row.is_parent())
+            .count();
+        let selected = self.selection.targets(&self.listing.order()).len();
+        let counts = self.listed.then(|| {
+            t!(
+                "sftp_tab.status.items_selected",
+                count = items,
+                selected = selected
+            )
+        });
         let note = if let Some(name) = &self.opening {
             Some(t!("sftp_tab.status.opening", name = name))
         } else if self.slow_load {
@@ -793,101 +723,33 @@ impl FileCard {
         } else {
             None
         };
-        let problem = self.error.clone().map(SharedString::from);
-        match (self.side, self.connection) {
-            (CardSide::Local, _) => CardStatus {
-                state: None,
-                details: vec![counts],
-                problem,
-                note,
-                right: hidden.into_iter().collect(),
-            },
-            (CardSide::Remote, ConnectionState::Connecting) => CardStatus {
-                state: Some((t!("sftp_tab.status.connecting"), StatusTone::Pending)),
-                details: self.endpoint.clone().into_iter().collect(),
-                problem: None,
-                note: None,
-                right: Vec::new(),
-            },
-            (CardSide::Remote, ConnectionState::Connected) => CardStatus {
-                state: Some((t!("sftp_tab.status.connected"), StatusTone::Ok)),
-                details: self
-                    .endpoint
-                    .clone()
-                    .into_iter()
-                    .chain(self.latency.map(|latency| latency_label(latency).into()))
-                    .collect(),
-                problem,
-                note,
-                right: std::iter::once(counts).chain(hidden).collect(),
-            },
-            (CardSide::Remote, ConnectionState::Disconnected) => CardStatus {
-                state: Some((t!("sftp_tab.status.disconnected"), StatusTone::Bad)),
-                details: Vec::new(),
-                problem,
-                note: None,
-                right: self
-                    .listed
-                    .then(|| t!("sftp_tab.status.items", count = items))
-                    .into_iter()
-                    .collect(),
-            },
+        let (state, problem, note) = match self.connection {
+            ConnectionState::Connecting => (Some(t!("sftp_tab.status.connecting")), None, None),
+            ConnectionState::Disconnected => (
+                Some(t!("sftp_tab.status.disconnected")),
+                self.error.clone().map(SharedString::from),
+                None,
+            ),
+            ConnectionState::Connected => (None, self.error.clone().map(SharedString::from), note),
+        };
+        CardStatus {
+            disconnected: self.connection == ConnectionState::Disconnected,
+            state,
+            problem,
+            note,
+            counts,
         }
     }
 
-    fn render_header(&self, tokens: &Tokens) -> impl IntoElement + use<> {
-        let offline = self.connection != ConnectionState::Connected;
-        let tile = if offline {
-            self.tile.clone().offline()
+    fn render_status(&self, tokens: &Tokens, scale: TypeScale) -> impl IntoElement + use<> {
+        let status = self.status();
+        let icon = if self.is_remote() {
+            CatalogIcon::Server
         } else {
-            self.tile.clone()
+            CatalogIcon::Monitor
         };
-        div()
-            .id(self.side.header_id())
-            .test_support()
-            .aria_label(format!("{} {}", self.name, self.path))
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(7.))
-            .h(CARD_HEADER_HEIGHT)
-            .pl(px(12.))
-            .pr(px(8.))
-            .child(render_program_tile(
-                ElementId::Name(format!("{}-tile", self.side.card_id()).into()),
-                &tile,
-                tokens,
-            ))
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(px(12.5))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .whitespace_nowrap()
-                    .when(offline, |name| name.text_color(tokens.offline))
-                    .child(self.name.clone()),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .text_size(px(12.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(tokens.muted)
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .child(self.path.clone()),
-            )
-    }
-
-    fn render_status(&self, cx: &App, tokens: &Tokens) -> impl IntoElement + use<> {
-        let status = self.status(cx);
         let segment = |text: SharedString| div().min_w_0().truncate().child(text);
-        let state_color = status.state.as_ref().map(|(_, tone)| match tone {
-            StatusTone::Ok => tokens.busy,
-            StatusTone::Pending => tokens.faint,
-            StatusTone::Bad => tokens.bad,
-        });
+        let bad = tokens.err;
         div()
             .id(self.side.status_id())
             .test_support()
@@ -895,80 +757,79 @@ impl FileCard {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(12.))
-            .h(STATUS_BAR_HEIGHT)
+            .gap(px(10.))
+            .h(size::STATUS_BAR)
             .pl(px(12.))
             .pr(px(10.))
-            .text_size(px(11.))
-            .text_color(tokens.faint)
-            .border_t_1()
+            .border_t(size::LINE)
             .border_color(tokens.line)
+            .bg(tokens.tabbar)
+            .text_size(scale.ui)
+            .text_color(tokens.text2)
             .whitespace_nowrap()
             .overflow_hidden()
-            .when_some(status.state.clone(), |bar, (state, _)| {
-                bar.child(
-                    div()
-                        .flex_none()
-                        .when_some(state_color, |state, color| state.text_color(color))
-                        .child(format!("\u{25cf} {state}")),
-                )
-            })
-            .children(status.details.iter().cloned().map(segment))
-            .when_some(status.problem.clone(), |bar, problem| {
-                bar.child(segment(problem).text_color(tokens.bad))
-            })
-            .when_some(status.note.clone(), |bar, note| bar.child(segment(note)))
             .child(
                 div()
-                    .ml_auto()
                     .flex()
                     .flex_none()
-                    .gap(px(12.))
-                    .children(status.right.iter().cloned().map(segment)),
+                    .items_center()
+                    .gap(px(6.))
+                    // 13 的图标，和窗格状态栏一样往下挪半个像素才和字面居中（真程序 150% 实测）。
+                    .child(
+                        div()
+                            .flex_none()
+                            .relative()
+                            .top(px(0.5))
+                            .text_color(tokens.icon)
+                            .child(Icon::new(icon).size(px(13.))),
+                    )
+                    .child(self.name.clone()),
             )
+            .when_some(status.state.clone(), |bar, state| {
+                bar.child(segment(state).text_color(if status.disconnected {
+                    bad
+                } else {
+                    tokens.st_dim
+                }))
+            })
+            .when_some(status.problem.clone(), |bar, problem| {
+                bar.child(segment(problem).text_color(bad))
+            })
+            .when_some(status.note.clone(), |bar, note| bar.child(segment(note)))
+            .child(div().ml_auto().flex_none().children(status.counts.clone()))
     }
-}
-
-/// 状态的颜色：连着是绿的，正在连是灰的，断开是红的。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StatusTone {
-    Ok,
-    Pending,
-    Bad,
 }
 
 /// 状态栏显示的东西。
 struct CardStatus {
-    /// 「● 已连接」：只有远程一侧有。
-    state: Option<(SharedString, StatusTone)>,
-    details: Vec<SharedString>,
+    disconnected: bool,
+    /// 「正在连接」「已断开」：只有远程一侧有，连着时不写。
+    state: Option<SharedString>,
     /// 红字：断开的原因，或者读目录的错误。
     problem: Option<SharedString>,
-    /// 灰字：正在读取、正在打开。
+    /// 正在读取、正在打开。
     note: Option<SharedString>,
-    right: Vec<SharedString>,
+    /// 右边的「4 项 · 已选 1 项」，读到过目录才有。
+    counts: Option<SharedString>,
 }
 
 impl CardStatus {
-    /// 无障碍名称：状态栏上从左到右的每一段，用「 · 」隔开。测试靠它断言。
+    /// 无障碍名称：名字后面的每一段和右边的计数，用「 · 」隔开。测试靠它断言。
     fn label(&self) -> String {
         self.state
             .iter()
-            .map(|(state, _)| state.to_string())
-            .chain(self.details.iter().map(ToString::to_string))
-            .chain(self.problem.iter().map(ToString::to_string))
-            .chain(self.note.iter().map(ToString::to_string))
-            .chain(self.right.iter().map(ToString::to_string))
+            .chain(&self.problem)
+            .chain(&self.note)
+            .chain(&self.counts)
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(" \u{b7} ")
     }
 }
 
 impl MarqueeList for FileCard {
-    type Rows = FileListing;
-
-    fn table(&self) -> &Entity<TableState<FileListing>> {
-        &self.table
+    fn scroll_handle(&self) -> &UniformListScrollHandle {
+        &self.scroll
     }
 
     fn list_marquee(&self) -> &ListMarquee {
@@ -990,26 +851,24 @@ impl MarqueeList for FileCard {
     ) {
         FileCard::update_selection(self, cx, change);
     }
-
-    /// 任何一次按下都去掉 `DataTable` 给右键过的行画的描边：菜单对着什么，只看选中。
-    fn on_list_press(&mut self, cx: &mut Context<Self>) {
-        self.clear_menu_row(cx);
-    }
 }
 
 impl Render for FileCard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
+        let scale = TypeScale::current(cx);
         let side = self.side;
         let remote = self.is_remote();
-        let focused = self.current;
-        let card = cx.entity().downgrade();
+        let list_focus = self.list_focus.clone();
         let menu_hit = self.menu_hit.clone();
-        let list_focus = self.focus_handle(cx);
-        // 菜单的命令从列表派发：做完焦点还在列表，菜单上也查得到列表的按键。
-        let menu_focus = list_focus.clone();
-        let drop_highlight = tokens.selection_solid;
-        let header_focus = list_focus.clone();
+        let drop_highlight = tokens.sel;
+        let rows = self.listing.rows().len();
+        let list = if rows == 0 {
+            self.render_placeholder(self.placeholder(), &tokens)
+        } else {
+            table::body(side.rows_id(), rows, &self.scroll, cx, Self::render_rows)
+                .into_any_element()
+        };
         div()
             .id(side.card_id())
             .test_support()
@@ -1020,66 +879,40 @@ impl Render for FileCard {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .rounded(CARD_RADIUS)
-            .bg(if focused {
-                tokens.card_focused
-            } else {
-                tokens.card
-            })
-            .border_1()
-            .border_color(if focused {
-                tokens.card_focused_border
-            } else {
-                tokens.card_border
-            })
-            .shadow(vec![BoxShadow {
-                color: if focused {
-                    tokens.shadow_focused
-                } else {
-                    tokens.shadow
-                },
-                offset: point(px(0.), px(6.)),
-                blur_radius: px(22.),
-                spread_radius: px(-2.),
-                inset: false,
-            }])
-            .child(
-                // 点头部也把焦点交给这一侧的文件列表。
-                div()
-                    .flex_none()
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        window.focus(&header_focus, cx)
-                    })
-                    .child(self.render_header(&tokens)),
-            )
+            .bg(tokens.content)
+            .text_size(scale.ui)
             .child(self.render_path_bar(window, &tokens, cx))
             .child(
-                // 名称格和标题在按下冒泡时说一声，剩下的就是空白：从那里拖是框选，
-                // 点一下或者右键清掉选中（WinSCP）。
+                // 行和标题在按下冒泡时说一声，剩下的就是空白：从那里拖是框选，点一下或者右键清掉选中。
                 marquee::select_area(
                     div()
                         .id(side.list_id())
+                        .flex()
+                        .flex_col()
                         .flex_1()
                         .min_h_0()
-                        .mx(px(4.))
-                        .text_size(px(12.5))
-                        .key_context(side.key_context()),
+                        .key_context(side.key_context())
+                        .track_focus(&self.list_focus),
                     self,
                     cx,
                 )
-                // 行和列标题的右键在这个捕获之后才记，所以空白处什么都没记。
-                .capture_any_mouse_down({
-                    let menu_hit = menu_hit.clone();
-                    move |event, _, _| {
-                        if event.button == MouseButton::Right {
-                            *menu_hit.borrow_mut() = None;
-                        }
+                // 左键按下焦点给这一侧的列表；右键的焦点给菜单，关菜单时回到列表。
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    window.focus(&list_focus, cx)
+                })
+                // 行的右键在这个捕获之后才记，所以空白处什么都没记。
+                .capture_any_mouse_down(move |event, _, _| {
+                    if event.button == MouseButton::Right {
+                        menu_hit.set(false);
                     }
                 })
                 .on_mouse_down(
                     MouseButton::Right,
-                    cx.listener(|card, event: &MouseDownEvent, _, cx| {
-                        marquee::press_empty(card, event.modifiers, cx)
+                    cx.listener(|card, event: &MouseDownEvent, window, cx| {
+                        marquee::press_empty(card, event.modifiers, cx);
+                        card.open_menu(event.position, window, cx);
+                        // 开菜单时焦点给了菜单，别让列表在按下之后再把它抢回去。
+                        window.prevent_default();
                     }),
                 )
                 // 放到列表本身的文件进它的目录。
@@ -1103,56 +936,21 @@ impl Render for FileCard {
                         self.path.clone(),
                     )
                 })
-                // 行、列标题和空白处共用一个菜单，挂在容器上：两个菜单会一起开。
-                .context_menu(move |menu, _, cx| {
-                    let menu = menu.action_context(menu_focus.clone());
-                    let Some(state) = card.upgrade().map(|card| card.read(cx).menu_state(cx))
-                    else {
-                        return menu;
-                    };
-                    match menu_hit.borrow().clone() {
-                        Some(MenuHit::Item(_)) => item_menu(menu, &state),
-                        // 列标题没有菜单：空菜单不会打开。
-                        Some(MenuHit::Column(_)) => menu,
-                        None => directory_menu(menu, &state),
-                    }
-                })
-                .child(
-                    DataTable::new(&self.table)
-                        .stripe(false)
-                        .bordered(false)
-                        .with_size(Size::Size(ROW_HEIGHT)),
-                )
-                .child({
-                    // 上一帧有多宽决定列宽；变了下一帧生效。
-                    let (last, card) = (self.list_width.clone(), cx.entity().downgrade());
-                    canvas(
-                        move |bounds, window, _| {
-                            let width = bounds.size.width;
-                            if last.get() != Some(width) {
-                                last.set(Some(width));
-                                window.on_next_frame(move |_, cx| {
-                                    let _ = card.update(cx, |card, cx| card.fit_columns(width, cx));
-                                });
-                            }
-                        },
-                        |_, _, _, _| {},
-                    )
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                })
+                .child(self.render_header(&tokens, cx))
+                .child(list)
+                .child(table::scrollbar(&self.scroll))
                 .child(self.marquee.canvas())
-                .children(self.marquee.rectangle(cx)),
+                .children(self.marquee.rectangle(&tokens)),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        window.focus(&list_focus, cx)
-                    })
-                    .child(self.render_status(cx, &tokens)),
-            )
+            .child(self.render_status(&tokens, scale))
+            .children(self.menu.as_ref().map(|menu| {
+                deferred(
+                    anchored()
+                        .position(menu.position)
+                        .snap_to_window_with_margin(px(8.))
+                        .child(menu.view.clone()),
+                )
+                .with_priority(POPUP_PRIORITY)
+            }))
     }
 }

@@ -1,0 +1,2087 @@
+// 来自 since2006/shell-rs @ b2a307a: src/terminal/engine.rs
+// 裁剪：去掉 ZMODEM、关键字高亮、`exec --terminal`、保留终端内容、侧边执行与 SFTP 通道；
+// 连接问答、主机系统、延迟依赖 M2 的 micaterm-ssh / micaterm-hosts，先去掉（M2 #12 接回）。
+
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use alacritty_terminal::Term;
+use alacritty_terminal::event::{Event, EventListener, WindowSize};
+use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
+use alacritty_terminal::sync::FairMutex;
+use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::color::COUNT;
+use alacritty_terminal::term::search::RegexSearch;
+use alacritty_terminal::term::{ClipboardType, Config, Osc52, TermMode};
+use alacritty_terminal::vte::ansi::{
+    Color, CursorShape, CursorStyle, Processor, Rgb, Timeout as _,
+};
+use futures::future::{Either, select};
+use gpui_kit::SharedString;
+
+use crate::directory::ReportedDirectory;
+use crate::i18n::t;
+use crate::links::{LinkMarker, url_search, visible_links};
+use crate::notices::{NoticeScanner, ProgramNotice, TerminalNotice};
+use crate::search::{MatchMarker, SearchDirection, SearchMark, SearchPosition, TerminalSearch};
+use crate::{
+    SharedTerminalTransportFactory, TerminalColors, TerminalInteraction, TerminalLifecycle,
+    TerminalSize, TerminalStatus, TerminalTheme, TerminalTransportCommand, TerminalTransportEvent,
+};
+
+pub type AlacrittyTerm = Term<TerminalEventProxy>;
+
+#[derive(Clone, Debug)]
+pub struct TerminalCell {
+    pub character: String,
+    pub foreground: Color,
+    pub background: Color,
+    pub flags: Flags,
+    pub selected: bool,
+    pub search: SearchMark,
+    /// The link the cell belongs to, an index into the snapshot's `links`.
+    pub link: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalSnapshot {
+    pub columns: usize,
+    pub rows: usize,
+    pub cells: Vec<TerminalCell>,
+    pub cursor_row: Option<usize>,
+    pub cursor_column: usize,
+    pub cursor_shape: CursorShape,
+    pub cursor_blinking: bool,
+    pub display_offset: usize,
+    /// The lines above the screen, which the view can scroll back through.
+    pub history_size: usize,
+    pub colors: [Option<Rgb>; COUNT],
+    /// The addresses of the links on screen, by the cells' `link`.
+    pub links: Vec<gpui_kit::SharedString>,
+}
+
+impl TerminalSnapshot {
+    pub fn visible_text(&self) -> String {
+        self.cells
+            .chunks(self.columns)
+            .map(|row| {
+                row.iter()
+                    .filter(|cell| !cell.flags.contains(Flags::WIDE_CHAR_SPACER))
+                    .map(|cell| cell.character.as_str())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+pub struct TerminalEngine {
+    factory: SharedTerminalTransportFactory,
+    runtime: TerminalRuntime,
+    lifecycle: TerminalLifecycle,
+    title: Option<String>,
+    /// The open find, if any. Rendering reads it through `&self` and still
+    /// has to advance the search engine's cache, hence the `RefCell`.
+    search: RefCell<Option<TerminalSearch>>,
+    /// Finds the web addresses on screen, built once.
+    url_search: RefCell<RegexSearch>,
+
+    /// The theme, shared with the parser thread, which answers the colors
+    /// programs ask for from it.
+    theme: SharedTheme,
+    _theme_observer: gpui_kit::Subscription,
+    _interaction_observer: gpui_kit::Subscription,
+    /// The folder the shell last reported on this connection.
+    directory: Option<ReportedDirectory>,
+    generation: u64,
+    size: TerminalSize,
+    event_sender: mpsc::Sender<TerminalUiEvent>,
+    event_task: Option<gpui_kit::Task<()>>,
+}
+
+impl TerminalEngine {
+    pub fn new(factory: SharedTerminalTransportFactory, cx: &mut gpui_kit::Context<Self>) -> Self {
+        let size = TerminalSize::DEFAULT;
+        let generation = 1;
+        // A timer drains this standard channel on the UI thread. Parser
+        // threads therefore never wake GPUI's local executor directly, and a
+        // burst of terminal bytes results in a single render notification.
+        let (event_sender, event_receiver) = mpsc::channel();
+        let theme = Arc::new(Mutex::new(TerminalColors::current(cx)));
+        let runtime = TerminalRuntime::start(
+            generation,
+            size,
+            factory.create(),
+            event_sender.clone(),
+            theme.clone(),
+            TerminalInteraction::current(cx),
+        );
+        let theme_observer = cx.observe_global::<TerminalColors>(|this, cx| {
+            *this.theme.lock().unwrap_or_else(|error| error.into_inner()) =
+                TerminalColors::current(cx);
+        });
+        let interaction_observer = cx.observe_global::<TerminalInteraction>(|this, cx| {
+            this.runtime
+                .term
+                .lock()
+                .set_options(terminal_config(TerminalInteraction::current(cx)));
+            cx.notify();
+        });
+        let mut this = Self {
+            factory,
+            runtime,
+            lifecycle: TerminalLifecycle::Starting,
+            title: None,
+            search: RefCell::new(None),
+            url_search: RefCell::new(url_search()),
+            theme,
+            _theme_observer: theme_observer,
+            _interaction_observer: interaction_observer,
+            directory: None,
+            generation,
+            size,
+            event_sender,
+            event_task: None,
+        };
+        this.event_task = Some(Self::listen(event_receiver, cx));
+        this
+    }
+
+    fn listen(
+        events: mpsc::Receiver<TerminalUiEvent>,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> gpui_kit::Task<()> {
+        cx.spawn(async move |this, cx| {
+            // When the last frame was drawn, and whether output came in
+            // since: with the processor drawing, frames are spaced out
+            // (`crate::rendering::frame_due`).
+            let mut drawn: Option<Instant> = None;
+            let mut undrawn = false;
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                let batch: Vec<_> = events.try_iter().collect();
+                if batch.is_empty() && !undrawn {
+                    continue;
+                }
+                let now = Instant::now();
+                let draw = crate::rendering::frame_due(drawn, now);
+                if this
+                    .update(cx, |this, cx| {
+                        for event in batch {
+                            if let Some(event) = this.handle_event(event, cx) {
+                                cx.emit(event);
+                            }
+                        }
+                        if draw {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+                undrawn = !draw;
+                if draw {
+                    drawn = Some(now);
+                }
+            }
+        })
+    }
+
+    /// Fold one transport event into the engine's state. Anything the view
+    /// must hear about comes back as an event to emit.
+    fn handle_event(
+        &mut self,
+        event: TerminalUiEvent,
+        cx: &mut gpui_kit::App,
+    ) -> Option<TerminalEvent> {
+        if event.generation != self.generation {
+            return None;
+        }
+
+        match event.kind {
+            TerminalUiEventKind::Started => {
+                self.lifecycle = TerminalLifecycle::Running;
+                return Some(TerminalEvent::Started);
+            }
+            TerminalUiEventKind::Wakeup => {
+                self.runtime.wakeup_pending.store(false, Ordering::Release);
+            }
+            TerminalUiEventKind::Title(title) => self.title = sanitize_title(&title),
+            TerminalUiEventKind::ResetTitle => self.title = None,
+            TerminalUiEventKind::Exited { code, signal } => {
+                self.lifecycle = TerminalLifecycle::Exited { code, signal };
+                self.directory = None;
+            }
+            TerminalUiEventKind::Failed(error) => {
+                self.lifecycle = TerminalLifecycle::Failed(error);
+                self.directory = None;
+            }
+            // Each prompt reports the folder again: only a change is news.
+            TerminalUiEventKind::Directory(directory) => {
+                if self.directory.as_ref() != Some(&directory) {
+                    self.directory = Some(directory.clone());
+                    return Some(TerminalEvent::DirectoryChanged(directory));
+                }
+            }
+            TerminalUiEventKind::WorkingDirectory(folder) => {
+                return Some(TerminalEvent::WorkingDirectory(folder));
+            }
+            TerminalUiEventKind::ForegroundProgram(program) => {
+                return Some(TerminalEvent::ForegroundProgram(program));
+            }
+            TerminalUiEventKind::Output => {
+                self.runtime.output_pending.store(false, Ordering::Release);
+                return Some(TerminalEvent::Output);
+            }
+            TerminalUiEventKind::ClipboardStore(text) => {
+                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text));
+            }
+            TerminalUiEventKind::Notice(notice) => {
+                return Some(TerminalEvent::Notice(notice.cleaned()));
+            }
+            TerminalUiEventKind::ShellCommand(command) => {
+                return Some(TerminalEvent::ShellCommand(command));
+            }
+            TerminalUiEventKind::Bell => {
+                let line = cursor_line_text(&self.runtime.term.lock());
+                return Some(TerminalEvent::Notice(TerminalNotice::bell(&line)));
+            }
+        }
+        None
+    }
+
+    pub fn restart(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        self.generation = self.generation.saturating_add(1);
+        self.runtime.shutdown();
+        self.lifecycle = TerminalLifecycle::Starting;
+        self.title = None;
+        self.directory = None;
+        // The new emulator starts empty; matches in the old one mean nothing.
+        self.search.replace(None);
+        self.runtime = TerminalRuntime::start(
+            self.generation,
+            self.size,
+            self.factory.create(),
+            self.event_sender.clone(),
+            self.theme.clone(),
+            TerminalInteraction::current(cx),
+        );
+        cx.notify();
+    }
+
+    pub fn restart_with_factory(
+        &mut self,
+        factory: SharedTerminalTransportFactory,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        self.factory = factory;
+        self.restart(cx);
+    }
+
+    // M2 #12 接回：`reply_to_prompt`（连接问答的回答）。
+
+    pub fn shutdown(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        self.generation = self.generation.saturating_add(1);
+        self.lifecycle = TerminalLifecycle::Closing;
+        self.runtime.shutdown();
+        self.directory = None;
+        cx.notify();
+    }
+
+    pub fn stop(&mut self, message: &str, cx: &mut gpui_kit::Context<Self>) {
+        self.generation = self.generation.saturating_add(1);
+        self.runtime.shutdown();
+        self.directory = None;
+        if !message.is_empty() {
+            append_message(&self.runtime.term, message);
+        }
+        self.lifecycle = TerminalLifecycle::Exited {
+            code: 0,
+            signal: None,
+        };
+        cx.notify();
+    }
+
+    /// Show `text` (which may carry SGR colors) at the end of the screen as
+    /// if the program had printed it, without sending anything to it: what
+    /// the app has to say once a connection has ended.
+    pub fn append_output(&mut self, text: &str, cx: &mut gpui_kit::Context<Self>) {
+        append_text(&self.runtime.term, text);
+        cx.notify();
+    }
+
+    pub fn write(&self, bytes: impl Into<Vec<u8>>) {
+        if self.lifecycle.accepts_input() {
+            self.runtime.write(bytes.into());
+        }
+    }
+
+    /// Send bytes originating from the user. Unlike protocol writes such as
+    /// terminal query responses and focus reports, interactive input returns
+    /// to the live screen and retires the previous selection first.
+    pub fn send_user_input(&self, bytes: impl Into<Vec<u8>>) {
+        if !self.lifecycle.accepts_input() {
+            return;
+        }
+
+        let mut term = self.runtime.term.lock();
+        prepare_term_for_user_input(&mut term);
+        drop(term);
+        self.runtime.write(bytes.into());
+    }
+
+    pub fn prepare_for_user_input(&self) {
+        if !self.lifecycle.accepts_input() {
+            return;
+        }
+
+        let mut term = self.runtime.term.lock();
+        prepare_term_for_user_input(&mut term);
+    }
+
+    pub fn paste(&self, text: &str) {
+        self.send_user_input(encode_paste(text, self.mode()));
+    }
+
+    /// Put `command` on the shell's input line, as a paste, and with `run`
+    /// press Enter: what a click in 历史命令 and 命令片段 does. With
+    /// `replace`, in place of what is typed there. Says why not while the
+    /// shell is not running or a full-screen program has the keys.
+    pub fn enter_command(
+        &self,
+        command: &str,
+        run: bool,
+        replace: bool,
+    ) -> Result<(), SharedString> {
+        if !self.lifecycle.accepts_input() {
+            return Err(t!("terminal.command.not_connected"));
+        }
+        self.send_user_input(encode_command(command, run, replace, self.mode())?);
+        Ok(())
+    }
+
+    pub fn resize(&mut self, size: TerminalSize, cx: &mut gpui_kit::Context<Self>) {
+        if size == self.size {
+            return;
+        }
+        self.size = size;
+        *self
+            .runtime
+            .size
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = size;
+        self.runtime.term.lock().resize(size);
+        self.runtime.resize(size);
+        cx.notify();
+    }
+
+    pub fn scroll(&mut self, lines: i32, cx: &mut gpui_kit::Context<Self>) {
+        self.runtime
+            .term
+            .lock()
+            .scroll_display(Scroll::Delta(lines));
+        cx.notify();
+    }
+
+    /// Scrolls the view without a context, for the scrollbar's drag.
+    pub fn scrollback(&self) -> Scrollback {
+        Scrollback(self.runtime.term.clone())
+    }
+
+    pub fn start_selection(
+        &mut self,
+        point: Point,
+        side: Side,
+        selection_type: SelectionType,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        self.runtime.term.lock().selection = Some(Selection::new(selection_type, point, side));
+        cx.notify();
+    }
+
+    pub fn update_selection(&mut self, point: Point, side: Side, cx: &mut gpui_kit::Context<Self>) {
+        if let Some(selection) = self.runtime.term.lock().selection.as_mut() {
+            selection.update(point, side);
+        }
+        cx.notify();
+    }
+
+    /// Scroll the view `lines` (into the history when positive), then
+    /// move the selection's end to `column` of the view's row `row`: a drag
+    /// held past the top or the bottom, or the wheel turned while dragging,
+    /// takes in what comes into view.
+    pub fn scroll_selection(
+        &mut self,
+        lines: i32,
+        row: usize,
+        column: Column,
+        side: Side,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        let mut term = self.runtime.term.lock();
+        if lines != 0 {
+            term.scroll_display(Scroll::Delta(lines));
+        }
+        let row = row.min(term.screen_lines().saturating_sub(1)) as i32;
+        let point = Point::new(Line(row - term.grid().display_offset() as i32), column);
+        if let Some(selection) = term.selection.as_mut() {
+            selection.update(point, side);
+        }
+        drop(term);
+        cx.notify();
+    }
+
+    pub fn clear_selection(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        self.runtime.term.lock().selection = None;
+        cx.notify();
+    }
+
+    pub fn select_all(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        select_all(&mut self.runtime.term.lock());
+        cx.notify();
+    }
+
+    /// Open the find, or search the open one for `query`, focusing the newest
+    /// match at or above the bottom of the viewport.
+    pub fn set_search_query(&mut self, query: &str, cx: &mut gpui_kit::Context<Self>) {
+        let mut term = self.runtime.term.lock();
+        self.search
+            .borrow_mut()
+            .get_or_insert_with(TerminalSearch::new)
+            .set_query(query, &mut term);
+        drop(term);
+        cx.notify();
+    }
+
+    /// Focus the next match up (older output) or down (newer output).
+    pub fn step_search(&mut self, direction: SearchDirection, cx: &mut gpui_kit::Context<Self>) {
+        let mut term = self.runtime.term.lock();
+        if let Some(search) = self.search.borrow_mut().as_mut() {
+            search.step(direction, &mut term);
+        }
+        drop(term);
+        cx.notify();
+    }
+
+    pub fn clear_search(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        if self.search.replace(None).is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Where the focused match is, while the find has a query.
+    pub fn search_position(&self) -> Option<SearchPosition> {
+        self.search
+            .borrow()
+            .as_ref()
+            .and_then(|search| search.position())
+    }
+
+    /// Whether `clear_keeping_prompt` has anything to do: a full-screen program
+    /// owns its screen and has no scrollback to clear.
+    pub fn accepts_clear(&self) -> bool {
+        !self.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    /// Clear the screen and the scrollback, keeping only the line the cursor
+    /// is on (with everything wrapped into it), at the top. This happens in
+    /// the emulator alone; the shell is not told, and carries on writing from
+    /// the cursor, which stays beside its prompt.
+    pub fn clear_keeping_prompt(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        let mut term = self.runtime.term.lock();
+        if !clear_keeping_cursor_line(&mut term) {
+            return;
+        }
+        if let Some(search) = self.search.borrow_mut().as_mut() {
+            search.refresh(&mut term);
+        }
+        drop(term);
+        cx.notify();
+    }
+
+    pub fn selection_text(&self) -> Option<String> {
+        self.runtime.term.lock().selection_to_string()
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.selection_text().is_some_and(|text| !text.is_empty())
+    }
+
+    pub fn mode(&self) -> TermMode {
+        *self.runtime.term.lock().mode()
+    }
+
+    pub fn set_focused(&self, focused: bool) {
+        let mut term = self.runtime.term.lock();
+        if term.is_focused == focused {
+            return;
+        }
+        term.is_focused = focused;
+        if term.mode().contains(TermMode::FOCUS_IN_OUT) {
+            drop(term);
+            self.runtime
+                .write(if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec());
+        }
+    }
+
+    pub fn lifecycle(&self) -> &TerminalLifecycle {
+        &self.lifecycle
+    }
+
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    // M2 #12 接回：`latency`（连接的往返延迟）。
+
+    /// Counts the transports started: every reconnect is a new connection,
+    /// possibly to another machine.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The folder the shell last reported on this connection, if it has.
+    pub fn directory(&self) -> Option<&ReportedDirectory> {
+        self.directory.as_ref()
+    }
+
+    pub fn status(&self) -> TerminalStatus {
+        TerminalStatus::new(
+            self.lifecycle.clone(),
+            self.size.columns(),
+            self.size.rows(),
+        )
+    }
+
+    /// Whether the cursor blinks: the program may say. Cheaper than a
+    /// snapshot, which the blink timer would otherwise take twice a second.
+    pub fn cursor_blinking(&self) -> bool {
+        self.runtime.term.lock().cursor_style().blinking
+    }
+
+    pub fn snapshot(&self) -> TerminalSnapshot {
+        let term = self.runtime.term.lock();
+        let content = term.renderable_content();
+        let selection = content.selection;
+        let display_offset = content.display_offset as i32;
+        let cursor_row = content.cursor.point.line.0 + display_offset;
+        let cursor_point = content.cursor.point;
+        let cursor_shape = content.cursor.shape;
+        let columns = term.grid().columns();
+        let (matches, focused) = self
+            .search
+            .borrow_mut()
+            .as_mut()
+            .map(|search| search.visible(&term))
+            .unwrap_or_default();
+        let mut marker = MatchMarker::new(&matches, focused.as_ref());
+        let mut links = LinkMarker::new(visible_links(&term, &mut self.url_search.borrow_mut()));
+        let mut cells: Vec<_> = content
+            .display_iter
+            .map(|indexed| {
+                let mut character = indexed.cell.c.to_string();
+                if let Some(zerowidth) = indexed.cell.zerowidth() {
+                    character.extend(zerowidth);
+                }
+                TerminalCell {
+                    character,
+                    foreground: indexed.cell.fg,
+                    background: indexed.cell.bg,
+                    flags: indexed.cell.flags,
+                    selected: selection.is_some_and(|range| {
+                        range.contains_cell(&indexed, cursor_point, cursor_shape)
+                    }),
+                    search: marker.mark(indexed.point),
+                    link: links.mark(indexed.point, indexed.cell.hyperlink()),
+                }
+            })
+            .collect();
+        normalize_wide_character_selection(&mut cells, columns);
+        TerminalSnapshot {
+            columns,
+            rows: term.grid().screen_lines(),
+            cells,
+            cursor_row: (0..term.grid().screen_lines() as i32)
+                .contains(&cursor_row)
+                .then_some(cursor_row as usize),
+            cursor_column: content.cursor.point.column.0,
+            cursor_shape: content.cursor.shape,
+            cursor_blinking: term.cursor_style().blinking,
+            display_offset: content.display_offset,
+            history_size: term.grid().history_size(),
+            colors: std::array::from_fn(|index| content.colors[index]),
+            links: links.into_links(),
+        }
+    }
+}
+
+/// A terminal's view of its history, for the scrollbar, whose drag hands
+/// over a position and no context: whoever draws the terminal is told to
+/// redraw it. Taken for each frame, as a restart replaces the terminal.
+#[derive(Clone)]
+pub struct Scrollback(Arc<FairMutex<AlacrittyTerm>>);
+
+impl Scrollback {
+    /// Show the history from `lines` below its oldest line.
+    pub fn scroll_to(&self, lines: usize) {
+        scroll_to(&mut self.0.lock(), lines);
+    }
+}
+
+/// Lines are counted from the top, which stays put while output arrives
+/// below: the view stays where the pointer let it go.
+fn scroll_to(term: &mut AlacrittyTerm, lines: usize) {
+    let grid = term.grid();
+    let offset = grid.history_size().saturating_sub(lines);
+    let delta = offset as i32 - grid.display_offset() as i32;
+    term.scroll_display(Scroll::Delta(delta));
+}
+
+/// The text of the line the cursor is on, or of the nearest line above it
+/// on screen that has any: where a program that rings for an answer has
+/// its question.
+fn cursor_line_text(term: &AlacrittyTerm) -> String {
+    let mut line = term.grid().cursor.point.line;
+    loop {
+        let text: String = term.grid()[line]
+            .into_iter()
+            .filter(|cell| !cell.flags.contains(Flags::WIDE_CHAR_SPACER))
+            .map(|cell| cell.c)
+            .collect();
+        let text = text.trim();
+        if !text.is_empty() || line.0 <= 0 {
+            return text.to_string();
+        }
+        line = Line(line.0 - 1);
+    }
+}
+
+/// Keep the leading cell and spacer of a full-width glyph visually atomic,
+/// for the selection and for find highlights alike.
+/// Alacritty stores CJK glyphs in one `WIDE_CHAR` cell followed by a
+/// `WIDE_CHAR_SPACER`; painting only one half produces a one-column highlight
+/// that cannot line up with the two-column glyph.
+fn normalize_wide_character_selection(cells: &mut [TerminalCell], columns: usize) {
+    if columns == 0 {
+        return;
+    }
+
+    for row in cells.chunks_mut(columns) {
+        for column in 0..row.len().saturating_sub(1) {
+            if row[column].flags.contains(Flags::WIDE_CHAR)
+                && row[column + 1].flags.contains(Flags::WIDE_CHAR_SPACER)
+            {
+                let selected = row[column].selected || row[column + 1].selected;
+                row[column].selected = selected;
+                row[column + 1].selected = selected;
+                let search = row[column].search.max(row[column + 1].search);
+                row[column].search = search;
+                row[column + 1].search = search;
+            }
+        }
+    }
+}
+
+impl gpui_kit::EventEmitter<TerminalEvent> for TerminalEngine {}
+
+impl Drop for TerminalEngine {
+    fn drop(&mut self) {
+        self.runtime.shutdown();
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum TerminalEvent {
+    /// Emitted only by TerminalView for direct user input, never by the engine.
+    Input(crate::TerminalInputEvent),
+    /// The shell is there: connected, for a remote terminal, again after
+    /// each reconnection.
+    Started,
+    // M2 #12 接回：`PromptRequested`（连接问答）、`HostOsDetected`（主机系统）。
+    /// Something to show the user while they look elsewhere.
+    Notice(TerminalNotice),
+    /// The shell reported another folder than the last one.
+    DirectoryChanged(ReportedDirectory),
+    /// A local shell is in another folder than the last one, as this
+    /// computer tells.
+    WorkingDirectory(PathBuf),
+    /// 本地 shell 的前台程序换了（工单 06）：`None` 是 shell 自己在提示符下。
+    ForegroundProgram(Option<String>),
+    /// 程序有输出（工单 06 的绿点）。一批输出只发一次，最多每 16ms 一次。
+    Output,
+    /// shell 集成（OSC 133、633、3008）说命令开始跑了、回到提示符了（工单 17 的远程卡片用）。
+    ShellCommand(crate::ShellCommand),
+}
+
+struct TerminalRuntime {
+    term: Arc<FairMutex<AlacrittyTerm>>,
+    commands: mpsc::Sender<TerminalTransportCommand>,
+    size: Arc<Mutex<TerminalSize>>,
+    wakeup_pending: Arc<AtomicBool>,
+    /// 已经排了一个 `Output` 给 UI 线程、还没处理：这期间的输出不再排。
+    output_pending: Arc<AtomicBool>,
+}
+
+impl TerminalRuntime {
+    fn start(
+        generation: u64,
+        size: TerminalSize,
+        transport: Box<dyn crate::TerminalTransport>,
+        ui_events: mpsc::Sender<TerminalUiEvent>,
+        theme: SharedTheme,
+        interaction: TerminalInteraction,
+    ) -> Self {
+        let (commands, command_receiver) = mpsc::channel();
+        let (transport_events, transport_receiver) = async_channel::unbounded();
+        let shared_size = Arc::new(Mutex::new(size));
+        let wakeup_pending = Arc::new(AtomicBool::new(false));
+        let output_pending = Arc::new(AtomicBool::new(false));
+        let proxy = TerminalEventProxy {
+            generation,
+            commands: commands.clone(),
+            ui_events: ui_events.clone(),
+            size: shared_size.clone(),
+            wakeup_pending: wakeup_pending.clone(),
+            output_pending: output_pending.clone(),
+            replies: Arc::default(),
+            theme,
+        };
+        let parser_proxy = proxy.clone();
+        let config = terminal_config(interaction);
+        let term = Arc::new(FairMutex::new(AlacrittyTerm::new(config, &size, proxy)));
+
+        let mut parser = Parser {
+            term: term.clone(),
+            processor: Processor::new(),
+            notices: NoticeScanner::default(),
+            proxy: parser_proxy,
+        };
+        thread::Builder::new()
+            .name("micaterm-terminal-parser".into())
+            .spawn(move || {
+                loop {
+                    // Output inside a synchronized update is held back until
+                    // the program ends it. Alacritty's own event loop draws
+                    // it anyway once the update's time is up, so a program
+                    // that never ends it (killed mid-frame, or its connection
+                    // lost) does not freeze the screen; this loop has to too.
+                    let deadline = parser.processor.sync_timeout().sync_timeout();
+                    let event = match receive(&transport_receiver, deadline) {
+                        Received::Event(event) => event,
+                        Received::Closed => break,
+                        Received::Overdue => {
+                            {
+                                let mut term = parser.term.lock();
+                                if end_overdue_sync(&mut parser.processor, &mut term) {
+                                    parser.proxy.answer(&term);
+                                }
+                            }
+                            parser.proxy.wakeup();
+                            continue;
+                        }
+                    };
+                    match event {
+                        TerminalTransportEvent::Started => {
+                            parser.proxy.send(TerminalUiEventKind::Started);
+                        }
+                        TerminalTransportEvent::Output(bytes) => {
+                            parser.output(&bytes);
+                            parser.proxy.output_seen();
+                            parser.proxy.wakeup();
+                        }
+                        TerminalTransportEvent::ForegroundProgram(program) => {
+                            parser
+                                .proxy
+                                .send(TerminalUiEventKind::ForegroundProgram(program));
+                        }
+                        // M2 #12 接回：主机系统（`HostOsDetected`）、延迟（`Latency`）、
+                        // 连接问答（`Prompt`）。
+                        TerminalTransportEvent::WorkingDirectory(folder) => {
+                            parser
+                                .proxy
+                                .send(TerminalUiEventKind::WorkingDirectory(folder));
+                        }
+                        TerminalTransportEvent::Exited { code, signal } => {
+                            let description = signal
+                                .as_deref()
+                                .map(|signal| {
+                                    t!(
+                                        "terminal.notice.exited_signal",
+                                        signal = signal,
+                                        code = code
+                                    )
+                                })
+                                .unwrap_or_else(|| t!("terminal.notice.exited", code = code));
+                            append_message_with_processor(
+                                &parser.term,
+                                &mut parser.processor,
+                                &description,
+                            );
+                            parser
+                                .proxy
+                                .send(TerminalUiEventKind::Exited { code, signal });
+                            parser.proxy.wakeup();
+                            break;
+                        }
+                        TerminalTransportEvent::Failed(error) => {
+                            append_message_with_processor(
+                                &parser.term,
+                                &mut parser.processor,
+                                &t!("terminal.notice.error", error = error),
+                            );
+                            parser.proxy.send(TerminalUiEventKind::Failed(error));
+                            parser.proxy.wakeup();
+                        }
+                    }
+                }
+            })
+            .expect("terminal parser thread");
+
+        thread::Builder::new()
+            .name("micaterm-terminal-transport".into())
+            .spawn(move || {
+                if let Err(error) = transport.run(size, command_receiver, transport_events.clone())
+                {
+                    let _ = transport_events
+                        .send_blocking(TerminalTransportEvent::Failed(error.to_string()));
+                }
+            })
+            .expect("terminal transport thread");
+
+        Self {
+            term,
+            commands,
+            size: shared_size,
+            wakeup_pending,
+            output_pending,
+        }
+    }
+
+    fn write(&self, bytes: Vec<u8>) {
+        let _ = self.commands.send(TerminalTransportCommand::Write(bytes));
+    }
+
+    fn resize(&self, size: TerminalSize) {
+        let _ = self.commands.send(TerminalTransportCommand::Resize(size));
+    }
+
+    fn shutdown(&self) {
+        let _ = self.commands.send(TerminalTransportCommand::Shutdown);
+    }
+}
+
+fn terminal_config(interaction: TerminalInteraction) -> Config {
+    Config {
+        scrolling_history: 10_000,
+        default_cursor_style: CursorStyle {
+            shape: interaction.cursor_style.shape(),
+            blinking: interaction.cursor_blinking,
+        },
+        // Programs may copy to the clipboard (vim, tmux), never read it.
+        osc52: Osc52::OnlyCopy,
+        // Programs that ask may have keys told apart (`encode_key`):
+        // Shift+Enter is how Claude Code takes a new line.
+        kitty_keyboard: true,
+        ..Config::default()
+    }
+}
+
+impl Drop for TerminalRuntime {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+#[derive(Clone)]
+pub struct TerminalEventProxy {
+    generation: u64,
+    commands: mpsc::Sender<TerminalTransportCommand>,
+    ui_events: mpsc::Sender<TerminalUiEvent>,
+    size: Arc<Mutex<TerminalSize>>,
+    wakeup_pending: Arc<AtomicBool>,
+    output_pending: Arc<AtomicBool>,
+    /// What the output just parsed asks of the terminal, in the order it
+    /// asks, until `answer`.
+    replies: Arc<Mutex<Vec<Reply>>>,
+    theme: SharedTheme,
+}
+
+/// The theme a terminal's parser thread answers color queries from,
+/// swapped by the engine when `TerminalColors` changes.
+type SharedTheme = Arc<Mutex<&'static TerminalTheme>>;
+
+/// An answer to a query in the output.
+enum Reply {
+    Bytes(Vec<u8>),
+    /// OSC 4, 10, 11 or 12. The answer needs the colors the program set,
+    /// which only the one holding the terminal can read.
+    Color(usize, Arc<dyn Fn(Rgb) -> String + Send + Sync>),
+}
+
+impl EventListener for TerminalEventProxy {
+    fn send_event(&self, event: Event) {
+        match event {
+            Event::Title(title) => self.send(TerminalUiEventKind::Title(title)),
+            Event::ResetTitle => self.send(TerminalUiEventKind::ResetTitle),
+            Event::ColorRequest(index, formatter) => self.reply(Reply::Color(index, formatter)),
+            Event::PtyWrite(text) => self.reply(Reply::Bytes(text.into_bytes())),
+            Event::TextAreaSizeRequest(formatter) => {
+                let size = *self.size.lock().unwrap_or_else(|error| error.into_inner());
+                let response = formatter(WindowSize {
+                    num_lines: size.rows().min(u16::MAX as usize) as u16,
+                    num_cols: size.columns().min(u16::MAX as usize) as u16,
+                    cell_width: size.cell_width(),
+                    cell_height: size.cell_height(),
+                });
+                self.reply(Reply::Bytes(response.into_bytes()));
+            }
+            Event::Bell => {
+                self.send(TerminalUiEventKind::Bell);
+                self.wakeup();
+            }
+            Event::Wakeup
+            | Event::MouseCursorDirty
+            | Event::CursorBlinkingChange
+            | Event::Exit
+            | Event::ChildExit(_) => self.wakeup(),
+            // Only the clipboard: a program setting the primary selection
+            // on every selection must not overwrite it.
+            Event::ClipboardStore(ClipboardType::Clipboard, text) => {
+                self.send(TerminalUiEventKind::ClipboardStore(text));
+            }
+            Event::ClipboardStore(_, _) | Event::ClipboardLoad(_, _) => {}
+        }
+    }
+}
+
+impl TerminalEventProxy {
+    fn reply(&self, reply: Reply) {
+        self.replies
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push(reply);
+    }
+
+    /// Send the answers to what the output parsed into `term` asked, at
+    /// once and in the order asked. Programs read them in that order:
+    /// termenv (ollama, Charm's tools) asks for the background by OSC 11
+    /// and then for the cursor, which every terminal answers, and takes a
+    /// cursor report coming first to mean no OSC 11 answer is coming. The
+    /// shell would then read that answer as typed text.
+    fn answer(&self, term: &AlacrittyTerm) {
+        let replies = std::mem::take(
+            &mut *self
+                .replies
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        );
+        if replies.is_empty() {
+            return;
+        }
+        let theme = *self.theme.lock().unwrap_or_else(|error| error.into_inner());
+        let mut bytes = Vec::new();
+        for reply in replies {
+            match reply {
+                Reply::Bytes(reply) => bytes.extend(reply),
+                Reply::Color(index, formatter) => {
+                    // A color the program set itself, or else the theme's.
+                    let color = term.colors()[index].unwrap_or_else(|| theme.query_color(index));
+                    bytes.extend(formatter(color).into_bytes());
+                }
+            }
+        }
+        let _ = self.commands.send(TerminalTransportCommand::Write(bytes));
+    }
+
+    /// Queue an event for the UI thread, stamped with this run's generation.
+    fn send(&self, kind: TerminalUiEventKind) {
+        let _ = self.ui_events.send(TerminalUiEvent {
+            generation: self.generation,
+            kind,
+        });
+    }
+
+    fn wakeup(&self) {
+        if !self.wakeup_pending.swap(true, Ordering::AcqRel) {
+            self.send(TerminalUiEventKind::Wakeup);
+        }
+    }
+
+    /// 程序有输出：告诉 UI 线程一次，等它处理了再告诉下一次。
+    fn output_seen(&self) {
+        if !self.output_pending.swap(true, Ordering::AcqRel) {
+            self.send(TerminalUiEventKind::Output);
+        }
+    }
+}
+
+struct TerminalUiEvent {
+    generation: u64,
+    kind: TerminalUiEventKind,
+}
+
+enum TerminalUiEventKind {
+    Started,
+    Wakeup,
+    Title(String),
+    ResetTitle,
+    Exited {
+        code: u32,
+        signal: Option<String>,
+    },
+    Failed(String),
+    /// A program's copy, by OSC 52.
+    ClipboardStore(String),
+    /// A notification a program asked for, by OSC 9 or 777.
+    Notice(ProgramNotice),
+    /// The folder the shell reported, by OSC 7 or 1337.
+    Directory(ReportedDirectory),
+    /// The folder a local shell is in, as this computer tells.
+    WorkingDirectory(PathBuf),
+    /// 本地 shell 的前台程序（工单 06）。
+    ForegroundProgram(Option<String>),
+    /// 程序有输出（工单 06）。
+    Output,
+    Bell,
+    /// shell 集成说的命令状态（工单 17）。
+    ShellCommand(crate::ShellCommand),
+}
+
+fn append_message(term: &Arc<FairMutex<AlacrittyTerm>>, message: &str) {
+    let mut processor = Processor::new();
+    append_message_with_processor(term, &mut processor, message);
+}
+
+fn append_message_with_processor(
+    term: &Arc<FairMutex<AlacrittyTerm>>,
+    processor: &mut Processor,
+    message: &str,
+) {
+    let line = format!("\r\n\x1b[2m[{message}]\x1b[0m\r\n");
+    append_with_processor(term, processor, &line);
+}
+
+/// Feed `text` to the screen as if the program had printed it.
+fn append_text(term: &Arc<FairMutex<AlacrittyTerm>>, text: &str) {
+    let mut processor = Processor::new();
+    append_with_processor(term, &mut processor, text);
+}
+
+fn append_with_processor(
+    term: &Arc<FairMutex<AlacrittyTerm>>,
+    processor: &mut Processor,
+    line: &str,
+) {
+    let mut term = term.lock();
+    // A program that ended mid-frame left its synchronized update open:
+    // neither that frame nor this message would show.
+    if processor.sync_timeout().pending_timeout() {
+        processor.stop_sync(&mut *term);
+    }
+    processor.advance(&mut *term, line.as_bytes());
+}
+
+/// What waiting for the transport came to.
+enum Received<T> {
+    Event(T),
+    /// The deadline is up before anything came: an open synchronized
+    /// update's.
+    Overdue,
+    /// The transport is gone.
+    Closed,
+}
+
+/// The transport's next event; with a `deadline`, waiting only until then.
+fn receive<T>(events: &async_channel::Receiver<T>, deadline: Option<Instant>) -> Received<T> {
+    async_io::block_on(async {
+        let next = std::pin::pin!(events.recv());
+        let received = match deadline {
+            None => next.await,
+            // What has come already wins over a deadline that has passed.
+            Some(deadline) => match select(next, async_io::Timer::at(deadline)).await {
+                Either::Left((received, _)) => received,
+                Either::Right(_) => return Received::Overdue,
+            },
+        };
+        match received {
+            Ok(event) => Received::Event(event),
+            Err(_) => Received::Closed,
+        }
+    })
+}
+
+/// What the parser thread keeps: the emulator it feeds, and what reads
+/// the output beside it.
+struct Parser {
+    term: Arc<FairMutex<AlacrittyTerm>>,
+    processor: Processor,
+    /// Alacritty drops the notifications programs ask for.
+    notices: NoticeScanner,
+    proxy: TerminalEventProxy,
+}
+
+impl Parser {
+    /// Output for the emulator, and for what reads it beside: the
+    /// programs' notifications and folders.
+    fn output(&mut self, bytes: &[u8]) {
+        {
+            let mut term = self.term.lock();
+            // Output that never pauses gives the wait no chance to see the
+            // time is up.
+            end_overdue_sync(&mut self.processor, &mut term);
+            self.processor.advance(&mut *term, bytes);
+            self.proxy.answer(&term);
+        }
+        for notice in self.notices.scan(bytes) {
+            self.proxy.send(TerminalUiEventKind::Notice(notice));
+        }
+        if let Some(directory) = self.notices.take_directory() {
+            self.proxy.send(TerminalUiEventKind::Directory(directory));
+        }
+        if let Some(command) = self.notices.take_command() {
+            self.proxy.send(TerminalUiEventKind::ShellCommand(command));
+        }
+    }
+}
+
+/// Draw what an open synchronized update has held back, if its time is up.
+/// Says whether it was.
+fn end_overdue_sync(processor: &mut Processor, term: &mut AlacrittyTerm) -> bool {
+    let overdue = processor
+        .sync_timeout()
+        .sync_timeout()
+        .is_some_and(|deadline| deadline <= Instant::now());
+    if overdue {
+        processor.stop_sync(term);
+    }
+    overdue
+}
+
+/// Select the scrollback and the screen, from the first line with text to
+/// the last; the blank lines around them would only copy as empty lines.
+/// With no text at all, nothing.
+fn select_all(term: &mut AlacrittyTerm) {
+    let lines = term.topmost_line().0..=term.bottommost_line().0;
+    let has_text = |line: &i32| !term.grid()[Line(*line)].is_clear();
+    let first = lines.clone().find(has_text);
+    let last = lines.rev().find(has_text);
+    term.selection = first.zip(last).map(|(first, last)| {
+        let mut selection = Selection::new(
+            SelectionType::Simple,
+            Point::new(Line(first), Column(0)),
+            Side::Left,
+        );
+        selection.update(Point::new(Line(last), term.last_column()), Side::Right);
+        selection
+    });
+}
+
+/// 标题最多留多少个字符：远程卡片从 `user@host: 目录` 格式的标题里解析目录、悬停头部时显示完整标题
+/// （工单 17），截短了目录就错了，所以留得长一些。
+const TITLE_LIMIT: usize = 512;
+
+fn sanitize_title(title: &str) -> Option<String> {
+    let title: String = title
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(TITLE_LIMIT)
+        .collect();
+    (!title.trim().is_empty()).then_some(title)
+}
+
+fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    if mode.contains(TermMode::BRACKETED_PASTE) {
+        format!("\x1b[200~{}\x1b[201~", normalized.replace('\x1b', "")).into_bytes()
+    } else {
+        normalized.into_bytes()
+    }
+}
+
+/// What `TerminalEngine::enter_command` types: with `replace` Ctrl-E and
+/// Ctrl-U first, to the line's end and everything before it away (the
+/// emacs keys of bash, zsh and fish alike), then the command as a paste,
+/// then Enter to run it.
+///
+/// A full-screen program would take those keys for its own. A command of
+/// several lines can only be put on the line in a bracketed paste: without
+/// one, its first newline would run it.
+fn encode_command(
+    command: &str,
+    run: bool,
+    replace: bool,
+    mode: TermMode,
+) -> Result<Vec<u8>, SharedString> {
+    if mode.contains(TermMode::ALT_SCREEN) {
+        return Err(t!("terminal.command.full_screen"));
+    }
+    if !run && command.contains('\n') && !mode.contains(TermMode::BRACKETED_PASTE) {
+        return Err(t!("terminal.command.multiline"));
+    }
+    let mut bytes = if replace {
+        b"\x05\x15".to_vec()
+    } else {
+        Vec::new()
+    };
+    bytes.extend(encode_paste(command, mode));
+    if run {
+        bytes.push(b'\r');
+    }
+    Ok(bytes)
+}
+
+/// See `TerminalEngine::clear_keeping_prompt`. Returns whether anything was
+/// cleared.
+fn clear_keeping_cursor_line(term: &mut AlacrittyTerm) -> bool {
+    if term.mode().contains(TermMode::ALT_SCREEN) {
+        return false;
+    }
+    term.scroll_display(Scroll::Bottom);
+    term.selection = None;
+    let cursor = term.grid().cursor.point;
+    // The prompt may have wrapped onto the cursor's row; keep it whole. A part
+    // already pushed into the scrollback goes with the scrollback.
+    let start = term.line_search_left(cursor).line.max(Line(0));
+    let lines = start.0 as usize;
+    if lines > 0 {
+        let screen = Line(0)..Line(term.screen_lines() as i32);
+        let grid = term.grid_mut();
+        grid.scroll_up(&screen, lines);
+        grid.cursor.point.line -= lines;
+    }
+    term.grid_mut().clear_history();
+    true
+}
+
+fn prepare_term_for_user_input(term: &mut AlacrittyTerm) {
+    term.scroll_display(Scroll::Bottom);
+    term.selection = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alacritty_terminal::index::{Column, Line};
+    use alacritty_terminal::vte::ansi::NamedColor;
+
+    fn test_term(columns: usize, rows: usize) -> AlacrittyTerm {
+        test_term_with_channels(columns, rows).0
+    }
+
+    /// A terminal, with what it writes back to the program and what it
+    /// tells the UI.
+    fn test_term_with_channels(
+        columns: usize,
+        rows: usize,
+    ) -> (
+        AlacrittyTerm,
+        mpsc::Receiver<TerminalTransportCommand>,
+        mpsc::Receiver<TerminalUiEvent>,
+    ) {
+        let size = TerminalSize::new(columns, rows, 8, 16);
+        let (proxy, command_receiver, ui_receiver) = test_proxy(size);
+        let term = AlacrittyTerm::new(
+            terminal_config(TerminalInteraction::default()),
+            &size,
+            proxy,
+        );
+        (term, command_receiver, ui_receiver)
+    }
+
+    /// What a terminal of `size` with the light theme reports through,
+    /// with what it writes back to the program and what it tells the UI.
+    fn test_proxy(
+        size: TerminalSize,
+    ) -> (
+        TerminalEventProxy,
+        mpsc::Receiver<TerminalTransportCommand>,
+        mpsc::Receiver<TerminalUiEvent>,
+    ) {
+        let (commands, command_receiver) = mpsc::channel();
+        let (ui_events, ui_receiver) = mpsc::channel();
+        let proxy = TerminalEventProxy {
+            generation: 1,
+            commands,
+            ui_events,
+            size: Arc::new(Mutex::new(size)),
+            wakeup_pending: Arc::new(AtomicBool::new(false)),
+            output_pending: Arc::new(AtomicBool::new(false)),
+            replies: Arc::default(),
+            theme: Arc::new(Mutex::new(TerminalTheme::default_for(
+                gpui_kit::component::ThemeMode::Light,
+            ))),
+        };
+        (proxy, command_receiver, ui_receiver)
+    }
+
+    /// The answers go back together once the output is parsed, in the
+    /// order asked, the colors too: termenv asks for the background and
+    /// then for the cursor, and reads the answers in that order.
+    #[test]
+    fn queries_are_answered_in_the_order_asked() {
+        let size = TerminalSize::new(20, 4, 8, 16);
+        let (proxy, commands, _) = test_proxy(size);
+        let mut term = AlacrittyTerm::new(
+            terminal_config(TerminalInteraction::default()),
+            &size,
+            proxy.clone(),
+        );
+        feed(&mut term, b"ab\x1b]11;?\x1b\\\x1b[6n\x1b]4;1;?\x07");
+        assert!(commands.try_iter().next().is_none());
+        proxy.answer(&term);
+        let written: Vec<_> = commands
+            .try_iter()
+            .map(|command| match command {
+                TerminalTransportCommand::Write(bytes) => String::from_utf8(bytes).unwrap(),
+                _ => panic!("only writes"),
+            })
+            .collect();
+        assert_eq!(
+            written,
+            ["\x1b]11;rgb:fafa/fafa/fbfb\x1b\\\x1b[1;3R\x1b]4;1;rgb:c0c0/3a3a/2b2b\x07"]
+        );
+
+        // A color the program set is the one it hears back.
+        feed(&mut term, b"\x1b]11;rgb:12/34/56\x07\x1b]11;?\x07");
+        proxy.answer(&term);
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(TerminalTransportCommand::Write(bytes)) if bytes == b"\x1b]11;rgb:1212/3434/5656\x07"
+        ));
+        // Nothing asked, nothing written.
+        proxy.answer(&term);
+        assert!(commands.try_recv().is_err());
+    }
+
+    /// A program asks whether keys can be told apart (Claude Code does, to
+    /// take Shift+Enter), turns that on for as long as it runs and off
+    /// again.
+    #[test]
+    fn programs_may_turn_on_the_kitty_keyboard_protocol() {
+        let size = TerminalSize::new(20, 4, 8, 16);
+        let (proxy, commands, _) = test_proxy(size);
+        let mut term = AlacrittyTerm::new(
+            terminal_config(TerminalInteraction::default()),
+            &size,
+            proxy.clone(),
+        );
+        let answer = |term: &AlacrittyTerm| {
+            proxy.answer(term);
+            commands
+                .try_iter()
+                .map(|command| match command {
+                    TerminalTransportCommand::Write(bytes) => String::from_utf8(bytes).unwrap(),
+                    _ => panic!("only writes"),
+                })
+                .collect::<Vec<_>>()
+        };
+        feed(&mut term, b"\x1b[?u");
+        assert_eq!(answer(&term), ["\x1b[?0u"]);
+        feed(&mut term, b"\x1b[>5u\x1b[?u");
+        assert_eq!(answer(&term), ["\x1b[?5u"]);
+        assert!(term.mode().contains(TermMode::DISAMBIGUATE_ESC_CODES));
+        feed(&mut term, b"\x1b[<u");
+        assert!(!term.mode().intersects(TermMode::KITTY_KEYBOARD_PROTOCOL));
+    }
+
+    /// Each link on screen: the text of its cells and where it leads.
+    fn screen_links(term: &AlacrittyTerm) -> Vec<(String, String)> {
+        let mut marker = LinkMarker::new(visible_links(term, &mut url_search()));
+        let mut texts: Vec<String> = Vec::new();
+        for indexed in term.renderable_content().display_iter {
+            let Some(link) = marker.mark(indexed.point, indexed.cell.hyperlink()) else {
+                continue;
+            };
+            if texts.len() <= link {
+                texts.resize(link + 1, String::new());
+            }
+            if !indexed.cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                texts[link].push(indexed.cell.c);
+            }
+        }
+        let links = marker.into_links();
+        texts
+            .into_iter()
+            .zip(links.iter().map(ToString::to_string))
+            .collect()
+    }
+
+    fn link(text: &str, uri: &str) -> (String, String) {
+        (text.to_string(), uri.to_string())
+    }
+
+    #[test]
+    fn web_addresses_in_the_text_are_links_without_the_sentence_around_them() {
+        let mut term = test_term(80, 4);
+        feed(
+            &mut term,
+            "Docs: https://help.ubuntu.com. (see https://a.b/c)\r\n详见https://a.b/d，谢谢\r\n"
+                .as_bytes(),
+        );
+        feed(
+            &mut term,
+            b"https://en.wikipedia.org/wiki/Rust_(lang) ftp://a.b www.c.d\r\n",
+        );
+        assert_eq!(
+            screen_links(&term),
+            [
+                link("https://help.ubuntu.com", "https://help.ubuntu.com"),
+                link("https://a.b/c", "https://a.b/c"),
+                link("https://a.b/d", "https://a.b/d"),
+                link(
+                    "https://en.wikipedia.org/wiki/Rust_(lang)",
+                    "https://en.wikipedia.org/wiki/Rust_(lang)"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wrapped_address_is_one_link() {
+        let mut term = test_term(20, 4);
+        feed(&mut term, b"go https://example.com/a/long/path now\r\n");
+        let url = "https://example.com/a/long/path";
+        assert_eq!(screen_links(&term), [link(url, url)]);
+    }
+
+    #[test]
+    fn a_marked_link_leads_where_it_says_and_only_to_the_web() {
+        let mut term = test_term(80, 4);
+        feed(
+            &mut term,
+            "\x1b]8;;https://example.com/real\x1b\\示例\x1b]8;;\x1b\\ ".as_bytes(),
+        );
+        // The text of a marked link is not looked at: it is the mark that
+        // says where it goes.
+        feed(
+            &mut term,
+            b"\x1b]8;;https://x.y/\x1b\\https://elsewhere.z\x1b]8;;\x1b\\\r\n",
+        );
+        feed(
+            &mut term,
+            b"\x1b]8;;file://host/etc/hosts\x1b\\hosts\x1b]8;;\x1b\\\r\n",
+        );
+        assert_eq!(
+            screen_links(&term),
+            [
+                link("示例", "https://example.com/real"),
+                link("https://elsewhere.z", "https://x.y/"),
+            ]
+        );
+    }
+
+    #[test]
+    fn notifications_and_the_bell_reach_the_ui() {
+        let (mut term, _, ui_events) = test_term_with_channels(40, 4);
+        // The parser thread scans what it feeds the terminal.
+        let output = "构建中\r\n\x1b]777;notify;构建;完成\x07ok?\x07".as_bytes();
+        let mut scanner = NoticeScanner::default();
+        let found = scanner.scan(output);
+        feed(&mut term, output);
+        assert_eq!(
+            found,
+            [ProgramNotice {
+                title: Some("构建".into()),
+                body: "完成".into()
+            }]
+        );
+        let bells = ui_events
+            .try_iter()
+            .filter(|event| matches!(event.kind, TerminalUiEventKind::Bell))
+            .count();
+        assert_eq!(bells, 1, "the BEL ending the OSC does not ring");
+        assert_eq!(cursor_line_text(&term), "ok?");
+        // An empty cursor line gives the nearest line above with text.
+        feed(&mut term, b"\r\n\r\n");
+        assert_eq!(cursor_line_text(&term), "ok?");
+    }
+
+    #[test]
+    fn programs_may_copy_to_the_clipboard_but_not_read_it() {
+        let (mut term, commands, ui_events) = test_term_with_channels(20, 2);
+        feed(&mut term, b"\x1b]52;c;aGVsbG8=\x07");
+        let copied: Vec<_> = ui_events
+            .try_iter()
+            .filter_map(|event| match event.kind {
+                TerminalUiEventKind::ClipboardStore(text) => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(copied, ["hello"]);
+        // The primary selection is left alone, and asking for the clipboard
+        // gets no answer.
+        feed(&mut term, b"\x1b]52;p;aGVsbG8=\x07\x1b]52;c;?\x07");
+        assert!(
+            ui_events
+                .try_iter()
+                .all(|event| !matches!(event.kind, TerminalUiEventKind::ClipboardStore(_)))
+        );
+        assert!(commands.try_iter().next().is_none());
+    }
+
+    fn feed(term: &mut AlacrittyTerm, bytes: &[u8]) {
+        Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(term, bytes);
+    }
+
+    fn line_text(term: &AlacrittyTerm, line: i32) -> String {
+        term.grid()[Line(line)]
+            .into_iter()
+            .map(|cell| cell.c)
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    }
+
+    fn position(search: &TerminalSearch) -> (Option<usize>, usize) {
+        let position = search.position().unwrap();
+        (position.current(), position.total())
+    }
+
+    #[test]
+    fn find_reaches_into_the_scrollback_and_wraps() {
+        let mut term = test_term(10, 3);
+        feed(&mut term, b"err 1\r\nok\r\nerr 2\r\nok\r\nok\r\nerr 3");
+        assert!(term.history_size() > 0);
+        let mut search = TerminalSearch::new();
+
+        search.set_query("err", &mut term);
+        assert_eq!(position(&search), (Some(3), 3));
+
+        search.step(SearchDirection::Up, &mut term);
+        assert_eq!(position(&search), (Some(2), 3));
+        search.step(SearchDirection::Up, &mut term);
+        assert_eq!(position(&search), (Some(1), 3));
+        // The oldest match is in the scrollback; the view scrolls up to it.
+        assert!(term.grid().display_offset() > 0);
+        let (_, focused) = search.visible(&term);
+        assert_eq!(line_text(&term, focused.unwrap().start().line.0), "err 1");
+
+        search.step(SearchDirection::Up, &mut term);
+        assert_eq!(position(&search), (Some(3), 3));
+        search.step(SearchDirection::Down, &mut term);
+        assert_eq!(position(&search), (Some(1), 3));
+    }
+
+    #[test]
+    fn find_starts_at_the_first_match_on_screen() {
+        let mut term = test_term(10, 3);
+        feed(&mut term, b"err 1\r\nok\r\nok\r\nerr 2\r\nerr 3");
+        let mut search = TerminalSearch::new();
+        search.set_query("err", &mut term);
+        assert_eq!(position(&search), (Some(2), 3));
+        assert_eq!(term.grid().display_offset(), 0);
+    }
+
+    #[test]
+    fn find_is_literal_and_smart_case() {
+        let mut term = test_term(20, 2);
+        feed(&mut term, b"Error: err");
+        let mut search = TerminalSearch::new();
+        search.set_query("err", &mut term);
+        assert_eq!(position(&search).1, 2);
+        search.set_query("Err", &mut term);
+        assert_eq!(position(&search).1, 1);
+        search.set_query("e.r", &mut term);
+        assert_eq!(position(&search).1, 0);
+        assert_eq!(search.position().unwrap().label(), "无结果");
+        search.set_query("", &mut term);
+        assert!(search.position().is_none());
+    }
+
+    #[test]
+    fn focused_match_follows_output_into_the_scrollback() {
+        let mut term = test_term(10, 3);
+        feed(&mut term, b"one\r\nmark\r\n");
+        let mut search = TerminalSearch::new();
+        search.set_query("mark", &mut term);
+        feed(&mut term, b"two\r\nthree\r\nfour\r\n");
+
+        let (_, focused) = search.visible(&term);
+        let focused = focused.expect("the match is still in the buffer");
+        assert!(focused.start().line.0 < 0);
+        assert_eq!(line_text(&term, focused.start().line.0), "mark");
+        assert_eq!(position(&search), (Some(1), 1));
+    }
+
+    #[test]
+    fn find_highlights_both_cells_of_a_wide_match() {
+        let mut term = test_term(12, 2);
+        feed(&mut term, "a 日志".as_bytes());
+        let mut search = TerminalSearch::new();
+        search.set_query("日志", &mut term);
+        let (matches, focused) = search.visible(&term);
+        let mut marker = MatchMarker::new(&matches, focused.as_ref());
+        let marks: Vec<_> = (0..6)
+            .map(|column| marker.mark(Point::new(Line(0), Column(column))))
+            .collect();
+        assert_eq!(marks[1], SearchMark::None);
+        assert_eq!(marks[2], SearchMark::Focused);
+        assert_eq!(marks[4], SearchMark::Focused);
+    }
+
+    #[test]
+    fn clearing_keeps_only_the_prompt_line() {
+        let mut term = test_term(30, 4);
+        feed(&mut term, b"a\r\nb\r\nc\r\nd\r\ne\r\nroot@localhost:~# ls");
+        assert!(term.history_size() > 0);
+
+        assert!(clear_keeping_cursor_line(&mut term));
+
+        assert_eq!(term.history_size(), 0);
+        assert_eq!(line_text(&term, 0), "root@localhost:~# ls");
+        assert!((1..4).all(|line| line_text(&term, line).is_empty()));
+        assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(20)));
+        // The shell keeps writing beside its prompt.
+        feed(&mut term, b"\r\nfile");
+        assert_eq!(line_text(&term, 1), "file");
+    }
+
+    #[test]
+    fn clearing_keeps_a_wrapped_prompt_whole() {
+        let mut term = test_term(10, 4);
+        feed(&mut term, b"x\r\ny\r\n0123456789abc");
+        assert!(clear_keeping_cursor_line(&mut term));
+        assert_eq!(line_text(&term, 0), "0123456789");
+        assert_eq!(line_text(&term, 1), "abc");
+        assert_eq!(term.grid().cursor.point, Point::new(Line(1), Column(3)));
+    }
+
+    #[test]
+    fn clearing_leaves_a_full_screen_program_alone() {
+        let mut term = test_term(10, 3);
+        feed(&mut term, b"\x1b[?1049hvim");
+        assert!(!clear_keeping_cursor_line(&mut term));
+        assert_eq!(line_text(&term, 0), "vim");
+    }
+
+    #[test]
+    fn sanitizes_terminal_titles() {
+        assert_eq!(sanitize_title("hello\nworld"), Some("helloworld".into()));
+        assert_eq!(sanitize_title("\n\t"), None);
+    }
+
+    #[test]
+    fn terminal_size_implements_dimensions() {
+        let size = TerminalSize::new(120, 40, 9, 18);
+        assert_eq!(size.columns(), 120);
+        assert_eq!(size.screen_lines(), 40);
+    }
+
+    #[test]
+    fn default_cursor_is_a_blinking_block() {
+        let term = test_term(8, 2);
+        assert_eq!(term.cursor_style().shape, CursorShape::Block);
+        assert!(term.cursor_style().blinking);
+    }
+
+    #[test]
+    fn cursor_preferences_apply_and_programs_can_restore_the_default() {
+        use crate::TerminalCursorStyle;
+
+        let mut term = test_term(8, 2);
+        for (style, shape) in [
+            (TerminalCursorStyle::Block, CursorShape::Block),
+            (TerminalCursorStyle::Underline, CursorShape::Underline),
+            (TerminalCursorStyle::Beam, CursorShape::Beam),
+        ] {
+            for blinking in [false, true] {
+                let interaction = TerminalInteraction {
+                    cursor_style: style,
+                    cursor_blinking: blinking,
+                    ..TerminalInteraction::default()
+                };
+                term.set_options(terminal_config(interaction));
+                assert_eq!(term.cursor_style(), CursorStyle { shape, blinking });
+                // A program can request a steady block, then return to the
+                // user's preference with DECSCUSR 0.
+                feed(&mut term, b"\x1b[2 q");
+                assert_eq!(term.cursor_style().shape, CursorShape::Block);
+                assert!(!term.cursor_style().blinking);
+                feed(&mut term, b"\x1b[0 q");
+                assert_eq!(term.cursor_style(), CursorStyle { shape, blinking });
+            }
+        }
+    }
+
+    #[test]
+    fn parses_ansi_color_wide_characters_and_alternate_screen() {
+        let mut term = test_term(12, 3);
+        feed(&mut term, b"\x1b[31mA\x1b[0m");
+        assert_eq!(
+            term.grid()[Line(0)][Column(0)].fg,
+            Color::Named(NamedColor::Red)
+        );
+
+        feed(&mut term, "你".as_bytes());
+        assert!(
+            term.grid()[Line(0)][Column(1)]
+                .flags
+                .contains(Flags::WIDE_CHAR)
+        );
+        assert!(
+            term.grid()[Line(0)][Column(2)]
+                .flags
+                .contains(Flags::WIDE_CHAR_SPACER)
+        );
+
+        feed(&mut term, b"\x1b[?1049hB");
+        assert!(term.mode().contains(TermMode::ALT_SCREEN));
+        assert!((0..12).any(|column| term.grid()[Line(0)][Column(column)].c == 'B'));
+        feed(&mut term, b"\x1b[?1049l");
+        assert!(!term.mode().contains(TermMode::ALT_SCREEN));
+        assert_eq!(term.grid()[Line(0)][Column(0)].c, 'A');
+    }
+
+    #[test]
+    fn caps_scrollback_at_ten_thousand_lines() {
+        let mut term = test_term(4, 2);
+        feed(&mut term, "x\r\n".repeat(10_050).as_bytes());
+        assert_eq!(
+            term.grid().total_lines() - term.grid().screen_lines(),
+            10_000
+        );
+    }
+
+    #[test]
+    fn returns_selected_text() {
+        let mut term = test_term(8, 2);
+        feed(&mut term, b"hello");
+        term.selection = Some(Selection::new(
+            SelectionType::Simple,
+            Point::new(Line(0), Column(1)),
+            Side::Left,
+        ));
+        term.selection
+            .as_mut()
+            .unwrap()
+            .update(Point::new(Line(0), Column(3)), Side::Right);
+        assert_eq!(term.selection_to_string().as_deref(), Some("ell"));
+    }
+
+    #[test]
+    fn select_all_takes_the_scrollback_without_the_blank_lines_around_the_text() {
+        let mut term = test_term(10, 3);
+        select_all(&mut term);
+        assert_eq!(term.selection, None);
+
+        // Two blank lines scroll off the top first; the cursor ends on a
+        // blank line below the text.
+        feed(&mut term, b"\r\n\r\none\r\n  two  \r\nthree\r\nfour\r\n");
+        select_all(&mut term);
+        assert_eq!(
+            term.selection_to_string().as_deref(),
+            Some("one\n  two\nthree\nfour")
+        );
+    }
+
+    #[test]
+    fn supports_reverse_word_line_and_empty_selections() {
+        let mut term = test_term(20, 2);
+        feed(&mut term, b"alpha.txt beta");
+
+        term.selection = Some(Selection::new(
+            SelectionType::Simple,
+            Point::new(Line(0), Column(4)),
+            Side::Right,
+        ));
+        term.selection
+            .as_mut()
+            .unwrap()
+            .update(Point::new(Line(0), Column(1)), Side::Left);
+        assert_eq!(term.selection_to_string().as_deref(), Some("lpha"));
+
+        term.selection = Some(Selection::new(
+            SelectionType::Semantic,
+            Point::new(Line(0), Column(2)),
+            Side::Left,
+        ));
+        assert_eq!(term.selection_to_string().as_deref(), Some("alpha.txt"));
+
+        term.selection = Some(Selection::new(
+            SelectionType::Lines,
+            Point::new(Line(0), Column(7)),
+            Side::Left,
+        ));
+        assert_eq!(
+            term.selection_to_string().as_deref(),
+            Some("alpha.txt beta\n")
+        );
+
+        term.selection = Some(Selection::new(
+            SelectionType::Simple,
+            Point::new(Line(0), Column(0)),
+            Side::Left,
+        ));
+        assert_eq!(term.selection_to_string(), None);
+    }
+
+    #[test]
+    fn selected_text_preserves_cjk_and_joins_soft_wrapped_lines() {
+        let mut term = test_term(4, 2);
+        feed(&mut term, "ab你cd".as_bytes());
+        term.selection = Some(Selection::new(
+            SelectionType::Simple,
+            Point::new(Line(0), Column(1)),
+            Side::Left,
+        ));
+        term.selection
+            .as_mut()
+            .unwrap()
+            .update(Point::new(Line(1), Column(1)), Side::Right);
+        assert_eq!(term.selection_to_string().as_deref(), Some("b你cd"));
+    }
+
+    #[test]
+    fn wide_character_selection_highlights_both_grid_cells() {
+        let cell = |flags, selected| TerminalCell {
+            character: " ".into(),
+            foreground: Color::Named(NamedColor::Foreground),
+            background: Color::Named(NamedColor::Background),
+            flags,
+            selected,
+            search: if selected {
+                SearchMark::Match
+            } else {
+                SearchMark::None
+            },
+            link: None,
+        };
+        let mut cells = vec![
+            cell(Flags::WIDE_CHAR, true),
+            cell(Flags::WIDE_CHAR_SPACER, false),
+            cell(Flags::empty(), false),
+            cell(Flags::WIDE_CHAR, false),
+            cell(Flags::WIDE_CHAR_SPACER, true),
+            cell(Flags::empty(), false),
+        ];
+
+        normalize_wide_character_selection(&mut cells, 3);
+
+        assert!(cells[0].selected);
+        assert!(cells[1].selected);
+        assert!(!cells[2].selected);
+        assert!(cells[3].selected);
+        assert!(cells[4].selected);
+        assert!(!cells[5].selected);
+        assert_eq!(cells[1].search, SearchMark::Match);
+        assert_eq!(cells[3].search, SearchMark::Match);
+        assert_eq!(cells[2].search, SearchMark::None);
+    }
+
+    #[test]
+    fn the_scrollbar_counts_lines_from_the_top_of_the_history() {
+        let mut term = test_term(8, 2);
+        feed(&mut term, "1\r\n2\r\n3\r\n4\r\n5".as_bytes());
+        assert_eq!(term.grid().history_size(), 3);
+
+        scroll_to(&mut term, 0);
+        assert_eq!(term.grid().display_offset(), 3);
+        scroll_to(&mut term, 2);
+        assert_eq!(term.grid().display_offset(), 1);
+        // Past the bottom is the bottom.
+        scroll_to(&mut term, 10);
+        assert_eq!(term.grid().display_offset(), 0);
+    }
+
+    #[test]
+    fn user_input_returns_to_bottom_and_clears_selection() {
+        let mut term = test_term(8, 2);
+        feed(&mut term, "one\r\ntwo\r\nthree\r\n".as_bytes());
+        term.scroll_display(Scroll::Delta(2));
+        term.selection = Some(Selection::new(
+            SelectionType::Semantic,
+            Point::new(Line(-1), Column(1)),
+            Side::Left,
+        ));
+        assert!(term.grid().display_offset() > 0);
+        assert!(term.selection.is_some());
+
+        prepare_term_for_user_input(&mut term);
+
+        assert_eq!(term.grid().display_offset(), 0);
+        assert!(term.selection.is_none());
+    }
+
+    #[test]
+    fn bracketed_paste_filters_escape_and_normalizes_newlines() {
+        assert_eq!(
+            encode_paste("a\r\nb\x1bc", TermMode::BRACKETED_PASTE),
+            b"\x1b[200~a\nbc\x1b[201~"
+        );
+        assert_eq!(encode_paste("a\rb", TermMode::default()), b"a\nb");
+    }
+
+    #[test]
+    fn a_command_takes_the_place_of_the_input_line_and_runs_on_enter() {
+        assert_eq!(
+            encode_command("ls -l", false, true, TermMode::BRACKETED_PASTE),
+            Ok(b"\x05\x15\x1b[200~ls -l\x1b[201~".to_vec())
+        );
+        assert_eq!(
+            encode_command("ls -l", true, true, TermMode::default()),
+            Ok(b"\x05\x15ls -l\r".to_vec())
+        );
+        // Not replacing, only the command.
+        assert_eq!(
+            encode_command("dir", true, false, TermMode::default()),
+            Ok(b"dir\r".to_vec())
+        );
+        // Several lines wait on the line only in a bracketed paste.
+        let lines = "for f in *\ndo echo $f\ndone";
+        assert!(encode_command(lines, false, true, TermMode::BRACKETED_PASTE).is_ok());
+        assert!(encode_command(lines, false, true, TermMode::default()).is_err());
+        assert!(encode_command(lines, true, true, TermMode::default()).is_ok());
+        // vim and less have the keys to themselves.
+        assert!(encode_command("ls", true, true, TermMode::ALT_SCREEN).is_err());
+    }
+
+    /// Sends its events, then stays quiet until shut down, as a shell does
+    /// when nothing is typed.
+    struct ScriptedTransport(Vec<TerminalTransportEvent>);
+
+    impl crate::TerminalTransport for ScriptedTransport {
+        fn run(
+            self: Box<Self>,
+            _: TerminalSize,
+            commands: mpsc::Receiver<TerminalTransportCommand>,
+            events: async_channel::Sender<TerminalTransportEvent>,
+        ) -> anyhow::Result<()> {
+            for event in self.0 {
+                events.send_blocking(event)?;
+            }
+            while let Ok(command) = commands.recv() {
+                if matches!(command, TerminalTransportCommand::Shutdown) {
+                    break;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// A terminal whose transport plays `script`.
+    fn run_script(script: Vec<TerminalTransportEvent>) -> TerminalRuntime {
+        let (ui_events, _) = mpsc::channel();
+        TerminalRuntime::start(
+            1,
+            TerminalSize::new(40, 4, 8, 16),
+            Box::new(ScriptedTransport(script)),
+            ui_events,
+            Arc::new(Mutex::new(TerminalTheme::default_for(
+                gpui_kit::component::ThemeMode::Light,
+            ))),
+            TerminalInteraction::default(),
+        )
+    }
+
+    /// The screen's text once it holds `text`, or what it holds after two
+    /// seconds of waiting.
+    fn screen_once_it_shows(runtime: &TerminalRuntime, text: &str) -> String {
+        let started = Instant::now();
+        loop {
+            let term = runtime.term.lock();
+            let screen = (0..4)
+                .map(|line| {
+                    term.grid()[Line(line)]
+                        .into_iter()
+                        .filter(|cell| !cell.flags.contains(Flags::WIDE_CHAR_SPACER))
+                        .map(|cell| cell.c)
+                        .collect::<String>()
+                        .trim_end()
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            drop(term);
+            if screen.contains(text) || started.elapsed() > Duration::from_secs(2) {
+                return screen;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn an_update_left_open_is_drawn_once_its_time_is_up() {
+        // `printf '\e[?2026h'`, or a program killed between beginning a
+        // frame and ending it: nothing ends the update.
+        let started = Instant::now();
+        let runtime = run_script(vec![
+            TerminalTransportEvent::Started,
+            TerminalTransportEvent::Output(b"before \x1b[?2026hframe".to_vec()),
+        ]);
+        assert!(screen_once_it_shows(&runtime, "before frame").contains("before frame"));
+        // Held back meanwhile, as the update asked.
+        assert!(started.elapsed() >= Duration::from_millis(150));
+    }
+
+    #[test]
+    fn an_update_ended_in_time_is_drawn_whole() {
+        let runtime = run_script(vec![
+            TerminalTransportEvent::Output(b"\x1b[?2026hone ".to_vec()),
+            TerminalTransportEvent::Output(b"two\x1b[?2026l".to_vec()),
+        ]);
+        assert!(screen_once_it_shows(&runtime, "one two").contains("one two"));
+    }
+
+    #[test]
+    fn a_program_that_ends_mid_frame_still_shows_the_frame_and_its_exit() {
+        let runtime = run_script(vec![
+            TerminalTransportEvent::Output(b"\x1b[?2026hframe".to_vec()),
+            TerminalTransportEvent::Exited {
+                code: 137,
+                signal: None,
+            },
+        ]);
+        let screen = screen_once_it_shows(&runtime, "退出码 137");
+        assert!(screen.contains("frame"), "{screen}");
+        assert!(screen.contains("[进程已退出，退出码 137]"), "{screen}");
+    }
+
+    #[test]
+    fn output_that_never_pauses_does_not_hold_an_update_open() {
+        let mut term = test_term(40, 4);
+        let mut processor: Processor = Processor::new();
+        processor.advance(&mut term, b"\x1b[?2026hframe");
+        assert!(!end_overdue_sync(&mut processor, &mut term));
+        assert_eq!(line_text(&term, 0), "");
+        thread::sleep(Duration::from_millis(160));
+        assert!(end_overdue_sync(&mut processor, &mut term));
+        assert_eq!(line_text(&term, 0), "frame");
+        // Done with, the next output is drawn as it comes.
+        processor.advance(&mut term, b" more");
+        assert_eq!(line_text(&term, 0), "frame more");
+    }
+
+    #[test]
+    fn waiting_stops_at_the_deadline_but_not_before_what_has_come() {
+        // Something comes in the end, so a wait past the deadline fails the
+        // test rather than hangs it.
+        let (late, receiver) = async_channel::unbounded();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(1));
+            let _ = late.send_blocking(0);
+        });
+        let soon = Instant::now() + Duration::from_millis(20);
+        assert!(matches!(receive(&receiver, Some(soon)), Received::Overdue));
+        assert!(Instant::now() >= soon);
+
+        let (sender, receiver) = async_channel::unbounded();
+        sender.send_blocking(1).unwrap();
+        let past = Instant::now();
+        assert!(matches!(receive(&receiver, Some(past)), Received::Event(1)));
+        sender.send_blocking(2).unwrap();
+        assert!(matches!(receive(&receiver, None), Received::Event(2)));
+        drop(sender);
+        assert!(matches!(receive(&receiver, None), Received::Closed));
+    }
+}

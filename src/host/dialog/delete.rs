@@ -6,7 +6,7 @@
 
 use gpui_kit::*;
 
-use qishell_hosts::HostId;
+use micaterm_hosts::HostId;
 
 use crate::host::HostStore;
 use crate::i18n::t;

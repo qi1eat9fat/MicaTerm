@@ -11,11 +11,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_channel::{Receiver, Sender};
-use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer, has_sftp_server};
-use qishell_ssh::{
+use micaterm_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer, has_sftp_server};
+use micaterm_ssh::{
     ConnectionPrompt, ConnectionPromptKind, ConnectionPromptReply, ConnectionSecret, HostLogin,
 };
-use qishell_ssh::{LoginMethod, SshConnector};
+use micaterm_ssh::{LoginMethod, SshConnector};
 use tempfile::TempDir;
 
 use super::sftp::{

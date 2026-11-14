@@ -1,8 +1,8 @@
-//! 窗口背景：不透明的渐变（默认），或者 Mica（设置 › 外观 › Mica 背景，工单 26）。
+//! 窗口背景：不透明的侧栏底色（默认），或者 Mica（设置 › 外观 › Mica 背景，工单 26）。
 //!
 //! Mica 由系统在窗口后面画（DWM 的 `DWMWA_SYSTEMBACKDROP_TYPE`），GPUI 用
-//! `WindowBackgroundAppearance::MicaBackdrop` 打开它；窗口壳根节点的渐变改成半透明，
-//! 让 Mica 从标题栏、主机栏、卡片之间的间隙透出来（`Tokens::window_gradient`）。
+//! `WindowBackgroundAppearance::MicaBackdrop` 打开它；窗口壳根节点的底色换成半透明的 Mica 渐变，
+//! 让 Mica 从侧栏透出来（`Tokens::window_background`；内容区、标签栏、状态栏各自有不透明的底）。
 //!
 //! 只在 Windows 11 22H2（build 22621）及以上生效。GPUI 在更低的版本上不设 Mica，
 //! 却照样把窗口清成全透明，窗口就成了一块玻璃；所以这里先看系统版本，
@@ -14,7 +14,7 @@ use gpui_kit::{App, Global, Window, WindowBackgroundAppearance};
 /// 窗口现在用的背景。`apply` 设它，窗口壳画根节点时读它。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WindowBackdrop {
-    /// 不透明的两色标渐变。
+    /// 不透明的侧栏底色。
     #[default]
     Opaque,
     /// 系统的 Mica 材质，上面盖一层半透明的渐变。

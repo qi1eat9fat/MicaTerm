@@ -1,7 +1,7 @@
 //! 终端交互（工单 03）的 UI 测试：复制粘贴、全选、清屏、字号的快捷键，查找条，右键行为，
 //! 选中即复制，Ctrl+单击打开链接，鼠标事件交给程序，OSC 52，kitty 键盘协议，通知和响铃，
 //! 只按 Ctrl 的组合交给终端。本地终端一律用假传输，不起真的 shell。
-// 用例参考 since2006/shell-rs @ b2a307a: tests/ui/terminal.rs，按 QiShell 的元素 id 改写。
+// 用例参考 since2006/shell-rs @ b2a307a: tests/ui/terminal.rs，按 MicaTerm 的元素 id 改写。
 
 use std::time::Duration;
 
@@ -9,9 +9,9 @@ use gpui_kit::{
     ClipboardItem, InputEvent as _, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point,
 };
-use qishell::settings::RightClick;
-use qishell_terminal::TerminalLifecycle;
-use qishell_terminal::actions::{CopyTerminal, SelectAllTerminal};
+use micaterm::settings::RightClick;
+use micaterm_terminal::TerminalLifecycle;
+use micaterm_terminal::actions::{CopyTerminal, SelectAllTerminal};
 
 use crate::support::*;
 
@@ -124,7 +124,7 @@ fn assert_nothing_written(
 fn update_settings(
     cx: &mut TestAppContext,
     workspace: &Entity<Workspace>,
-    change: impl FnOnce(&mut qishell::settings::AppSettings),
+    change: impl FnOnce(&mut micaterm::settings::AppSettings),
 ) {
     cx.update(|cx| {
         let settings = workspace.read(cx).settings().clone();
@@ -229,7 +229,7 @@ fn ctrl_shift_k_clears_the_screen_keeping_the_prompt_line(cx: &mut TestAppContex
 
 // ---- 字号 ----
 
-/// Ctrl+= / Ctrl+- 一次一像素，Ctrl+0 回到默认的 11.6；改的是设置里的终端字号。
+/// Ctrl+= / Ctrl+- 一次一像素，Ctrl+0 回到默认的 13；改的是设置里的终端字号。
 #[gpui_kit::test]
 fn ctrl_plus_minus_and_zero_size_the_terminal_text(cx: &mut TestAppContext) {
     let (handle, workspace, factory) = open_running(cx, FakeTerminalFactory::default());
@@ -246,16 +246,16 @@ fn ctrl_plus_minus_and_zero_size_the_terminal_text(cx: &mut TestAppContext) {
     };
 
     in_frame(cx, handle, |window, cx| window.press("ctrl-=", cx));
-    assert_eq!(size(cx), 12.6);
+    assert_eq!(size(cx), 14.);
     in_frame(cx, handle, |window, cx| {
         window.press("ctrl--", cx);
         window.press("ctrl--", cx);
     });
-    assert_eq!(size(cx), 10.6);
+    assert_eq!(size(cx), 12.);
     in_frame(cx, handle, |window, cx| window.press("ctrl-0", cx));
-    assert_eq!(size(cx), 11.6);
+    assert_eq!(size(cx), 13.);
     // 开着的终端跟着变。
-    cx.update(|cx| assert_eq!(cx.global::<qishell_terminal::TerminalFont>().size, px(11.6)));
+    cx.update(|cx| assert_eq!(cx.global::<micaterm_terminal::TerminalFont>().size, px(13.)));
     // 这几个键是终端的功能，不会也发给 shell。
     assert_nothing_written(cx, handle, &factory);
 }
@@ -344,6 +344,42 @@ fn f3_steps_from_the_terminal_too(cx: &mut TestAppContext) {
         window.press("f3", cx);
     });
     wait_for_find_count(cx, handle, "2/2");
+}
+
+/// 查找浮卡上的按钮（26 号「查找条」）：没有匹配时上下点不了；有匹配时点下一个 / 上一个跳，
+/// 点关闭收起卡片、键盘还给终端。
+#[gpui_kit::test]
+fn the_find_card_buttons_step_and_close(cx: &mut TestAppContext) {
+    let (handle, _, _) = open_printing(cx, "gamma gamma\r\n", "gamma gamma");
+    in_frame(cx, handle, |window, cx| window.press("ctrl-shift-f", cx));
+    in_frame(cx, handle, |window, cx| window.input("zeta", cx));
+    wait_for_find_count(cx, handle, "无结果");
+    in_frame(cx, handle, |window, cx| {
+        window.click("terminal-find-next", cx)
+    });
+    wait_for_find_count(cx, handle, "无结果");
+
+    in_frame(cx, handle, |window, cx| {
+        window.press("ctrl-a", cx);
+        window.input("gamma", cx);
+    });
+    wait_for_find_count(cx, handle, "1/2");
+    in_frame(cx, handle, |window, cx| {
+        window.click("terminal-find-next", cx)
+    });
+    wait_for_find_count(cx, handle, "2/2");
+    in_frame(cx, handle, |window, cx| {
+        window.click("terminal-find-previous", cx)
+    });
+    wait_for_find_count(cx, handle, "1/2");
+
+    in_frame(cx, handle, |window, cx| {
+        window.click("terminal-find-close", cx)
+    });
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("terminal-find").is_none());
+        assert_eq!(window.find(TERMINAL).focused(), Some(true));
+    });
 }
 
 // ---- 右键行为 ----
@@ -576,7 +612,7 @@ fn no_binding_takes_ctrl_with_a_letter_inside_a_terminal(cx: &mut TestAppContext
         let keymap = cx.key_bindings();
         let keymap = keymap.borrow();
         // 终端在窗口里的键上下文路径。
-        let path = ["Root", "Workspace", qishell_terminal::TERMINAL_KEY_CONTEXT]
+        let path = ["Root", "Workspace", micaterm_terminal::TERMINAL_KEY_CONTEXT]
             .map(|context| gpui_kit::KeyContext::parse(context).unwrap());
         for letter in 'a'..='z' {
             let keystroke = gpui_kit::Keystroke::parse(&format!("ctrl-{letter}")).unwrap();
@@ -708,7 +744,7 @@ fn a_bell_notice_is_titled_as_a_bell(cx: &mut TestAppContext) {
 fn closing_a_card_forgets_when_it_last_notified(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open_running(cx, FakeTerminalFactory::default());
     activate_window(cx, handle);
-    dispatch(cx, handle, qishell::app::SplitRight);
+    split_again(cx, handle, micaterm::app::SplitRight);
     assert!(wait_until(cx, handle, |cx| cx.update(|cx| running(
         &workspace,
         CardId(2),
@@ -724,6 +760,6 @@ fn closing_a_card_forgets_when_it_last_notified(cx: &mut TestAppContext) {
 
     dispatch(cx, handle, CloseCard(CardId(2)));
     cx.update(|cx| assert_eq!(workspace.read(cx).notified_cards(), [CardId(1)]));
-    dispatch(cx, handle, qishell::app::CloseTab(TabId(1)));
+    dispatch(cx, handle, micaterm::app::CloseTab(TabId(1)));
     cx.update(|cx| assert!(workspace.read(cx).notified_cards().is_empty()));
 }

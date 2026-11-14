@@ -77,7 +77,7 @@ pub fn render_drop_line(
         .test_support()
         .absolute()
         .rounded(LINE_THICKNESS / 2.)
-        .bg(tokens.accent)
+        .bg(tokens.text)
         .map(|line| match edge {
             DropEdge::Top | DropEdge::Bottom => line.left(inset).right(inset).h(LINE_THICKNESS),
             DropEdge::Left | DropEdge::Right => line.top(inset).bottom(inset).w(LINE_THICKNESS),

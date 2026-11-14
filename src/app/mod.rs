@@ -10,7 +10,10 @@ pub mod shortcuts;
 pub mod win32;
 
 pub use actions::*;
-pub use assets::{AppAssets, CatalogIcon};
+pub use assets::{
+    AppAssets, CatalogIcon, MARK_ICON, MARK_THIN_ICON, SERVER_PLUS_ICON, TRIANGLE_DOWN_ICON,
+    TRIANGLE_RIGHT_ICON,
+};
 pub use paths::{DATA_DIR_ENV, DATA_DIR_NAME, SETTINGS_FILE, data_dir, data_dir_of, settings_path};
 pub use paths::{DATABASE_FILE, database_path};
 pub use paths::{KNOWN_HOSTS_FILE, known_hosts_path};
@@ -18,16 +21,16 @@ pub use paths::{VAULT_FILE, vault_path};
 pub use paths::{WINDOW_STATE_FILE, window_state_path};
 pub use paths::{download_resume_dir, upload_resume_dir};
 pub use quit::{quit_held_back, set_quit_guard};
-pub use shortcuts::EDITOR_CONTEXT;
+pub use shortcuts::{EDITOR_CONTEXT, EDITOR_FIND_CONTEXT};
 pub use shortcuts::{LOCAL_FILE_LIST_CONTEXT, REMOTE_FILE_LIST_CONTEXT};
 
 use gpui_kit::App;
 
 /// 产品名：窗口标题、系统通知、可执行文件的版本信息都用它。
-pub const PRODUCT_NAME: &str = "QiShell";
+pub const PRODUCT_NAME: &str = "MicaTerm";
 
-/// 系统显示 QiShell 的通知和任务栏按钮时用的身份（Windows 的 AppUserModelID）。
-pub const APP_IDENTITY: &str = "com.qishell.QiShell";
+/// 系统显示 MicaTerm 的通知和任务栏按钮时用的身份（Windows 的 AppUserModelID）。
+pub const APP_IDENTITY: &str = "com.micaterm.MicaTerm";
 
 /// 初始化 gpui-kit 和应用的全局量。
 pub fn init(cx: &mut App) {

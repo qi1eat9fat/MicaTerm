@@ -1,14 +1,14 @@
 // 参考 since2006/shell-rs @ b2a307a: src/ssh/route_tests.rs 改写
-// 裁剪：去掉 Telnet、老服务器的密钥交换、工作线程的运行时提前退出（QiShell 的连接都建在共享运行时上）；
-// 跳板改用 qishell-ssh 的 `TestServer`（它也能转发 direct-tcpip 通道）。
+// 裁剪：去掉 Telnet、老服务器的密钥交换、工作线程的运行时提前退出（MicaTerm 的连接都建在共享运行时上）；
+// 跳板改用 micaterm-ssh 的 `TestServer`（它也能转发 direct-tcpip 通道）。
 
 //! 跳板和代理（工单 15）：对着进程内的几台 russh 测试服务器和代理真的登录。
 //! 只连本机回环地址，不碰用户的主机和保险库。
 
 use std::sync::{Arc, Mutex};
 
-use qishell_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer, closed_port};
-use qishell_ssh::{
+use micaterm_ssh::testing::{TEST_PASSWORD, TEST_USER, TestServer, closed_port};
+use micaterm_ssh::{
     AgentLocation, ConnectionPromptKind, HostLogin, JumpLogin, LoginMethod, LoginRoute, ProxyKind,
     ProxyLogin, SecretRef, SshConnector,
 };
