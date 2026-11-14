@@ -139,13 +139,10 @@ crates/
 patches/                上游 crate 的本地补丁（见各目录 README）
 locales/                界面文案
 tests/ui/               界面测试
-docs/                   设计规格（spec.md）与架构决定（adr/）
 ```
-
-术语见 [GLOSSARY.md](GLOSSARY.md)，设计规格见 [docs/spec.md](docs/spec.md)。
 
 ## 许可
 
 [GPL-3.0](LICENSE)。
 
-终端、SSH、主机等模块拷自 [shell-rs](https://github.com/since2006/shell-rs) 并裁剪改造（见 [ADR 0002](docs/adr/0002-gpl-and-copy-from-shellrs.md)），原 MIT 部分的许可和版权声明保留在各 crate 的 `LICENSE` 里。内置字体 JetBrains Mono 采用 [SIL OFL 1.1](assets/fonts/OFL.txt)，系统徽章来自 [Simple Icons](https://simpleicons.org)（CC0）。
+终端、SSH、主机等模块拷自 [shell-rs](https://github.com/since2006/shell-rs) 并裁剪改造，原 MIT 部分的许可和版权声明保留在各 crate 的 `LICENSE` 里。内置字体 JetBrains Mono 采用 [SIL OFL 1.1](assets/fonts/OFL.txt)，系统徽章来自 [Simple Icons](https://simpleicons.org)（CC0）。
