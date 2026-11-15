@@ -572,6 +572,7 @@ impl Render for Workspace {
                     host_sidebar_open: self.host_sidebar_open,
                     rail: &self.tab_rail,
                     tabs: self.tab_snapshots(cx),
+                    vault: self.vault.read(cx).status(),
                 },
                 &target,
                 &tokens,
@@ -610,7 +611,6 @@ impl Render for Workspace {
             .when(self.host_sidebar_open, |root| {
                 root.child(render_host_sidebar(
                     self.host_list.clone(),
-                    self.vault.read(cx).status(),
                     &target,
                     &tokens,
                     TypeScale::current(cx),

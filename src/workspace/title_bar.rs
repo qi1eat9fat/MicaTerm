@@ -1,6 +1,6 @@
 //! 主区域顶部的标题栏，也就是 26 号的标签栏（高 32、比内容暗一档、下边一条细线）：从左到右是
 //! 「展开主机栏」（主机栏收起时）、标签、「+」（新建本地终端标签）、拖动区、
-//! 深浅切换、设置，最后是窗口按钮。分屏按钮在每张卡片自己的状态栏上（2026-11-14 分屏重做）。
+//! 深浅切换、保险库锁（设了主密码时）、设置，最后是窗口按钮。分屏按钮在每张卡片自己的状态栏上（2026-11-14 分屏重做）。
 //!
 //! 不用 gpui-component 的 `TitleBar`：它把子元素整块当作拖动区。这里只给 `title-drag`
 //! 那块空白标 `WindowControlArea::Drag`，标签轨道和按钮都不在拖动区里。
@@ -14,11 +14,13 @@ use crate::ui::icon_button::IconButton;
 use gpui_kit::component::ActiveTheme as _;
 
 use crate::app::{
-    CatalogIcon, NewLocalTerminalTab, OpenSettings, ToggleAppearance, ToggleHostSidebar,
+    CatalogIcon, LockVault, NewLocalTerminalTab, OpenSettings, ToggleAppearance, ToggleHostSidebar,
+    UnlockVault,
 };
 use crate::i18n::t;
 use crate::tabs::{TabRail, TabSnapshot};
 use crate::theme::{Tokens, size};
+use crate::vault::VaultStatus;
 
 /// macOS 上主机栏收起时，给红绿灯让出的宽度。
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(72.);
@@ -30,6 +32,8 @@ pub(super) struct TitleBarState<'a> {
     /// 标签轨道：画 `tabs`，也接住拖着的标签（工单 29）。
     pub rail: &'a TabRail,
     pub tabs: Vec<TabSnapshot>,
+    /// 保险库的状态（没有保险库时是 `None`），决定画不画锁、画哪一把。
+    pub vault: Option<VaultStatus>,
 }
 
 /// 点击和菜单都经 `target`（窗口壳的焦点）派发。
@@ -46,6 +50,7 @@ pub(super) fn render_title_bar(
         host_sidebar_open,
         rail,
         tabs,
+        vault,
     } = state;
     let dark = cx.theme().is_dark();
     let tabs = rail.render(tabs, target, tokens, window, cx);
@@ -127,7 +132,7 @@ pub(super) fn render_title_bar(
                 .window_control_area(WindowControlArea::Drag),
         )
         .child(
-            // 26 号 `.tools`：深浅切换、设置。
+            // 26 号 `.tools`：深浅切换、保险库锁、设置。
             div()
                 .id("title-tools")
                 .test_support()
@@ -153,6 +158,9 @@ pub(super) fn render_title_bar(
                     }
                     .dispatch(Box::new(ToggleAppearance), target, tokens),
                 )
+                .children(vault_button(vault).map(|(id, icon, label, action)| {
+                    bar_button(id, icon, label).dispatch(action, target, tokens)
+                }))
                 .child(
                     bar_button(
                         "open-settings",
@@ -163,4 +171,26 @@ pub(super) fn render_title_bar(
                 ),
         )
         .child(render_window_buttons(tokens, window))
+}
+
+/// 保险库锁：解锁着显示打开的锁，点了立即锁定；锁着显示锁，点了弹解锁框。
+/// 没设主密码（或者没有保险库）时不画：没有锁定这回事。
+fn vault_button(
+    vault: Option<VaultStatus>,
+) -> Option<(&'static str, CatalogIcon, SharedString, Box<dyn Action>)> {
+    match vault? {
+        VaultStatus::Unlocked { .. } => Some((
+            "lock-vault",
+            CatalogIcon::LockOpen,
+            t!("vault.title_bar.lock"),
+            Box::new(LockVault),
+        )),
+        VaultStatus::Locked => Some((
+            "unlock-vault",
+            CatalogIcon::Lock,
+            t!("vault.title_bar.unlock"),
+            Box::new(UnlockVault),
+        )),
+        _ => None,
+    }
 }

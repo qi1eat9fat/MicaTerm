@@ -98,14 +98,10 @@ vault.key_lost.cancel:
   zh-CN: 取消
 vault.key_lost.reset:
   zh-CN: 重置保险库
-vault.sidebar.lock:
+vault.title_bar.lock:
   zh-CN: 锁定保险库
-vault.sidebar.unlock:
+vault.title_bar.unlock:
   zh-CN: 解锁保险库
-vault.sidebar.unlocked:
-  zh-CN: 保险库已解锁
-vault.sidebar.locked:
-  zh-CN: 保险库已锁定
 vault.field.locked:
   zh-CN: 已保存，保险库锁定中 · 解锁后修改
 vault.field.unlock:
