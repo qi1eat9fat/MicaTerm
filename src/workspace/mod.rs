@@ -1,5 +1,6 @@
 //! 窗口壳：无边框窗口里的标题栏、主机栏、标签区、右侧栏，以及**全部 action 的处理器**。
 //!
+//! - `frame`：把窗口壳的 action 处理器挂到 `Root` 外层的插件，对话框里派发的 action 也到得了；
 //! - `view`：`Workspace` 实体、注入式构造（`new_with_services`）和 render；
 //! - `handlers/`：处理器按领域分文件（`window`、`tabs`、`cards`、`terminal`、`settings`），
 //!   每个文件提供 `bind_<领域>_actions`，render 里只挂这几个函数，各工单只改自己那个文件；
@@ -12,6 +13,7 @@
 //!
 //! 功能模块不依赖窗口壳；窗口壳持有它们、转发 action。
 
+mod frame;
 mod handlers;
 mod host_sidebar;
 mod new_tab_page;
@@ -26,3 +28,8 @@ mod window_state;
 pub use right_sidebar::{FilesButton, RightPanel};
 pub use view::{Workspace, WorkspaceServices, window_options};
 pub use window_state::{WindowState, default_window_size, window_placement};
+
+/// 窗口壳要的全局初始化（注册 `Root` 插件）。在 `gpui_kit::init` 之后调用。
+pub fn init(cx: &mut gpui_kit::App) {
+    frame::init(cx);
+}

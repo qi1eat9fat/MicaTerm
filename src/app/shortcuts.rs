@@ -507,7 +507,6 @@ pub fn all() -> impl Iterator<Item = &'static Shortcut> {
 
 /// 把整张表绑上。在 `gpui_kit::init` 之后调用，gpui-kit 自己的绑定保留在前面。
 pub fn bind(cx: &mut App) {
-    let mapper = cx.keyboard_mapper().clone();
     let bindings = all()
         .filter(|shortcut| !shortcut.platform_keys().is_empty())
         .map(|shortcut| {
@@ -520,7 +519,7 @@ pub fn bind(cx: &mut App) {
                 context,
                 false,
                 None,
-                mapper.as_ref(),
+                cx,
             )
             .expect("valid keystroke")
         })
@@ -528,21 +527,31 @@ pub fn bind(cx: &mut App) {
     cx.bind_keys(bindings);
     // 终端里的 Tab 和 Shift+Tab 发给 shell，不让焦点跳走（终端 crate 自带的绑定）。
     cx.bind_keys(micaterm_terminal::terminal_key_bindings());
-    cx.bind_keys(shell_keys_in_terminal());
+    let shell_keys = shell_keys_in_terminal(cx);
+    cx.bind_keys(shell_keys);
 }
 
 /// 在终端里，只按 Ctrl 加字母全部留给 shell（Ctrl+C 中断、tmux 的 Ctrl+B、readline 的 Ctrl+W）。
 /// 按键先过绑定、再到终端，而 gpui-kit 的根节点把 Ctrl+C 绑成了复制：界面里有选中文字时，
 /// 它就会吞掉中断。终端上下文里的 `NoAction` 比外层的绑定优先，把这些键让回给终端。
 // 参考 since2006/shell-rs @ b2a307a: src/app/shortcuts.rs 的 `shell_keys_in_terminal`
-fn shell_keys_in_terminal() -> Vec<KeyBinding> {
+fn shell_keys_in_terminal(cx: &App) -> Vec<KeyBinding> {
+    let context = Rc::new(
+        KeyBindingContextPredicate::parse(micaterm_terminal::TERMINAL_KEY_CONTEXT)
+            .expect("valid key context"),
+    );
     ('a'..='z')
         .map(|letter| {
-            KeyBinding::new(
+            // 按键串是运行时拼的，`KeyBinding::new` 只收 `'static` 字符串，所以走 `load`。
+            KeyBinding::load(
                 &format!("ctrl-{letter}"),
-                NoAction {},
-                Some(micaterm_terminal::TERMINAL_KEY_CONTEXT),
+                Box::new(NoAction {}),
+                Some(context.clone()),
+                false,
+                None,
+                cx,
             )
+            .expect("valid keystroke")
         })
         .collect()
 }

@@ -51,7 +51,7 @@ pub(super) fn apply_backdrop(wanted: bool, mode: ThemeMode, window: &mut Window,
     // Mica 的底色跟着窗口的「深色模式」属性走，GPUI 按系统的深浅色设它；应用外观单独设成
     // 深色（或浅色）时要改成应用的，否则深色界面下透出来的是浅色 Mica。
     //
-    // GPUI（gpui-pre-windows 0.3.2）只在两处按系统写这个属性：建窗口时（`WindowsWindow::new`，
+    // GPUI（gpui-pre-windows 0.3.12）只在两处按系统写这个属性：建窗口时（`WindowsWindow::new`，
     // 早于窗口壳建好、第一次应用设置），和收到 `WM_SETTINGCHANGE`「ImmersiveColorSet」时
     // （`handle_system_theme_changed`：先调外观回调，紧接着同步写属性）。那个外观回调
     // （gpui-pre 的 `on_appearance_changed`）只往前台派一个任务，`observe_window_appearance`

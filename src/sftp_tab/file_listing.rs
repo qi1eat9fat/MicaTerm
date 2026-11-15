@@ -389,7 +389,7 @@ impl FileCard {
                 let modifiers = event.modifiers();
                 let mode = if modifiers.shift {
                     ClickMode::Extend
-                } else if modifiers.secondary() {
+                } else if modifiers.secondary(cx) {
                     ClickMode::Toggle
                 } else {
                     ClickMode::Replace
@@ -491,7 +491,7 @@ impl FileCard {
         let label = label.on_mouse_down(MouseButton::Left, {
             let name = name.to_string();
             move |event, _, cx| {
-                if !event.modifiers.secondary() && !event.modifiers.shift {
+                if !event.modifiers.secondary(cx) && !event.modifiers.shift {
                     let _ = card.update(cx, |card, cx| card.select_pressed(&name, cx));
                 }
             }

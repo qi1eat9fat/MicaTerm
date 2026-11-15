@@ -11,8 +11,8 @@ license = "GPL-3.0-only"
 [dependencies]
 anyhow = "1"
 # 模型里的文本类型：GPUI 自己的 SharedString，单独拆出来的小 crate（只依赖 serde 和 smol_str），
-# 和 gpui-kit 0.6.1 用的是同一个类型，界面直接拿模型用，不用转换。
-gpui-pre-shared-string = "0.3.2"
+# 和 gpui-kit 0.9.1 用的是同一个类型，界面直接拿模型用，不用转换。
+gpui-pre-shared-string = "0.3.12"
 # 凭据的 secret_id：随机字母数字。
 rand = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }

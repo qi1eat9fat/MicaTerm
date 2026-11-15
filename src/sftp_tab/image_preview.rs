@@ -270,8 +270,8 @@ impl ImageView {
                     .overflow_scroll()
                     .track_scroll(&self.scroll)
                     // Ctrl 加滚轮是缩放，不是滚动。
-                    .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
-                        if !event.modifiers.secondary() {
+                    .on_scroll(cx.listener(|this, event: &ScrollEvent, _, cx| {
+                        if !event.modifiers.secondary(cx) {
                             return;
                         }
                         cx.stop_propagation();

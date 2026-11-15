@@ -352,7 +352,9 @@ impl Render for PreviewDialog {
             }))
             .flex()
             .flex_col()
-            .size_full()
+            .w_full()
+            .flex_1()
+            .min_h_0()
             .text_color(tokens.text)
             .child(header)
             .child(
@@ -485,7 +487,13 @@ pub(super) fn open_preview_dialog(
                 .rounded(px(14.))
                 .close_button(false)
                 .overlay_closable(false)
-                .child(view.clone())
+                // 放进 `content` 而不是 `child`：`child` 放在对话框体的滚动区里（gpui-kit 0.9 起
+                // 外面还包了一层回弹），那里的高度对子元素不确定，预览就会被图片撑得比窗口还高。
+                // `content` 直接是对话框那一列的 flex 项，预览按 flex 撑满，图片在自己的画框里滚。
+                .content({
+                    let view = view.clone();
+                    move |content, _, _| content.min_h_0().child(view.clone())
+                })
         },
         move |window, cx| {
             if let Some(focus) = &return_focus {

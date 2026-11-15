@@ -16,7 +16,7 @@ async-io = "2"
 # 本地 PowerShell 的 `-EncodedCommand`（工单 31）。
 base64 = "0.22"
 futures = "0.3"
-gpui-kit = { version = "0.6.1" }
+gpui-kit = { version = "0.9.1" }
 # 右键菜单（和应用里的菜单是同一个组件）。
 micaterm-ui = { path = "../micaterm-ui" }
 portable-pty = "0.9"
@@ -44,6 +44,6 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
-gpui-kit = { version = "0.6.1", features = ["test-support"] }
+gpui-kit = { version = "0.9.1", features = ["test-support"] }
 regex = "1"
 tempfile = "3"

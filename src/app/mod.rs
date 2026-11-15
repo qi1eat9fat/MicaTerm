@@ -35,6 +35,8 @@ pub const APP_IDENTITY: &str = "com.micaterm.MicaTerm";
 /// 初始化 gpui-kit 和应用的全局量。
 pub fn init(cx: &mut App) {
     gpui_kit::init(cx);
+    // 窗口壳的 action 处理器包在 `Root` 最外层，在 gpui-kit 的插件之后注册。
+    crate::workspace::init(cx);
     crate::i18n::init();
     fonts::register(cx);
     // 在 gpui-kit 自己的绑定之后：同一个键后绑的胜出。

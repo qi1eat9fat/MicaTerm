@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use gpui_kit::{
     ClipboardItem, InputEvent as _, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point,
+    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent, ScrollSource, TouchPhase, Window, point,
 };
 use micaterm::settings::RightClick;
 use micaterm_terminal::TerminalLifecycle;
@@ -517,7 +517,7 @@ fn ctrl_click_opens_a_link(cx: &mut TestAppContext) {
 
     in_frame(cx, handle, |window, cx| {
         let link = cell_center(window, &factory, 2, 1);
-        click_at(window, link, Modifiers::secondary_key(), cx);
+        click_at(window, link, Modifiers::secondary_key(cx), cx);
     });
     assert_eq!(cx.opened_url().as_deref(), Some("https://example.com/docs"));
 }
@@ -538,11 +538,12 @@ fn mouse_events_go_to_a_program_that_asks_and_shift_selects(cx: &mut TestAppCont
         click_at(window, from, Modifiers::shift(), cx);
         let position = cell_center(window, &factory, 4, 1);
         window.dispatch_event(
-            ScrollWheelEvent {
+            ScrollEvent {
                 position,
                 delta: ScrollDelta::Lines(point(0., 1.)),
                 modifiers: Modifiers::default(),
                 touch_phase: TouchPhase::Moved,
+                source: ScrollSource::Pointer,
             }
             .to_platform_input(),
             cx,
@@ -612,10 +613,14 @@ fn no_binding_takes_ctrl_with_a_letter_inside_a_terminal(cx: &mut TestAppContext
         let keymap = cx.key_bindings();
         let keymap = keymap.borrow();
         // 终端在窗口里的键上下文路径。
-        let path = ["Root", "Workspace", micaterm_terminal::TERMINAL_KEY_CONTEXT]
+        let path = ["Workspace", "Root", micaterm_terminal::TERMINAL_KEY_CONTEXT]
             .map(|context| gpui_kit::KeyContext::parse(context).unwrap());
         for letter in 'a'..='z' {
-            let keystroke = gpui_kit::Keystroke::parse(&format!("ctrl-{letter}")).unwrap();
+            let keystroke = gpui_kit::Keystroke::parse_with_os(
+                &format!("ctrl-{letter}"),
+                cx.platform_info().os,
+            )
+            .unwrap();
             let (bindings, _) = keymap.bindings_for_input(&[keystroke], &path);
             let taken: Vec<_> = bindings
                 .iter()

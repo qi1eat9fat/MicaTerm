@@ -3,9 +3,9 @@
 //! 唯一的 UI 级 seam 是注入式构造 `Workspace::new_with_services`：生产代码传真实服务，
 //! 无头 UI 测试传假实现（`tests/ui/support/mod.rs` 的 `fake_services`）。
 
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -595,22 +595,10 @@ impl Render for Workspace {
                         &tokens,
                     )),
             );
+        // action 处理器不挂在这里，挂在包住整个 `Root` 的外层（`render_frame`）。
         div()
             .id("workspace")
-            .key_context("Workspace")
             .track_focus(&self.focus_handle)
-            .map(|root| handlers::bind_window_actions(root, cx))
-            .map(|root| handlers::bind_tabs_actions(root, cx))
-            .map(|root| handlers::bind_cards_actions(root, cx))
-            .map(|root| handlers::bind_terminal_actions(root, cx))
-            .map(|root| handlers::bind_settings_actions(root, cx))
-            .map(|root| handlers::bind_hosts_actions(root, cx))
-            .map(|root| handlers::bind_snippets_actions(root, cx))
-            .map(|root| handlers::bind_remote_actions(root, cx))
-            .map(|root| handlers::bind_vault_actions(root, cx))
-            .map(|root| handlers::bind_credentials_actions(root, cx))
-            .map(|root| handlers::bind_sftp_actions(root, cx))
-            .map(|root| handlers::bind_editor_actions(root, cx))
             .relative()
             .flex()
             .size_full()
@@ -629,9 +617,35 @@ impl Render for Workspace {
                 ))
             })
             .child(main)
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
+    }
+}
+
+impl Workspace {
+    /// 包住整个 `Root`（窗口壳内容、对话框、侧滑层、通知）的外层：`Workspace` 键上下文和全部
+    /// action 处理器挂在这里，对话框里派发的 action 也冒泡得到（见 `frame` 模块）。
+    pub(super) fn render_frame(
+        &mut self,
+        surface: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id("workspace-frame")
+            .key_context("Workspace")
+            .map(|root| handlers::bind_window_actions(root, cx))
+            .map(|root| handlers::bind_tabs_actions(root, cx))
+            .map(|root| handlers::bind_cards_actions(root, cx))
+            .map(|root| handlers::bind_terminal_actions(root, cx))
+            .map(|root| handlers::bind_settings_actions(root, cx))
+            .map(|root| handlers::bind_hosts_actions(root, cx))
+            .map(|root| handlers::bind_snippets_actions(root, cx))
+            .map(|root| handlers::bind_remote_actions(root, cx))
+            .map(|root| handlers::bind_vault_actions(root, cx))
+            .map(|root| handlers::bind_credentials_actions(root, cx))
+            .map(|root| handlers::bind_sftp_actions(root, cx))
+            .map(|root| handlers::bind_editor_actions(root, cx))
+            .size_full()
+            .child(surface)
+            .into_any_element()
     }
 }
 

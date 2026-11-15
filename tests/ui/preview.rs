@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use gpui_kit::{
-    Bounds, ElementId, InputEvent as _, Modifiers, Pixels, ScrollDelta, ScrollWheelEvent,
+    Bounds, ElementId, InputEvent as _, Modifiers, Pixels, ScrollDelta, ScrollEvent, ScrollSource,
     TouchPhase, point,
 };
 use micaterm::app::{OpenHostSftp, SftpAction, SftpTabCommand};
@@ -240,15 +240,16 @@ fn scroll_picture(cx: &mut TestAppContext, fixture: &Fixture, by: f32, secondary
     in_frame(cx, fixture.handle, |window, cx| {
         let position = window.find("preview-image").bounds().center();
         window.dispatch_event(
-            ScrollWheelEvent {
+            ScrollEvent {
                 position,
                 delta: ScrollDelta::Pixels(point(px(0.), px(by))),
                 modifiers: if secondary {
-                    Modifiers::secondary_key()
+                    Modifiers::secondary_key(cx)
                 } else {
                     Modifiers::default()
                 },
                 touch_phase: TouchPhase::Moved,
+                source: ScrollSource::Pointer,
             }
             .to_platform_input(),
             cx,

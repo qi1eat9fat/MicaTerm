@@ -20,12 +20,10 @@ path = "src/lib.rs"
 # 后续工单新建 crate 时不用改这里。
 [workspace]
 members = ["crates/*"]
-# 打补丁的上游 crate 不是工作区成员，不跑我们的测试和 clippy。
-exclude = ["patches/*"]
 resolver = "3"
 
 [dependencies]
-gpui-kit = { version = "0.6.1", features = [
+gpui-kit = { version = "0.9.1", features = [
     # 编辑器的语法高亮（工单 23）：`tree-sitter` 本身带 JSON。每个语法都是要编译的 C 代码，所以名单不加长。
     "tree-sitter",
     "tree-sitter-bash",
@@ -94,18 +92,13 @@ raw-window-handle = "0.6"
 winresource = "0.1"
 
 [dev-dependencies]
-gpui-kit = { version = "0.6.1", features = ["test-support"] }
+gpui-kit = { version = "0.9.1", features = ["test-support"] }
 # 进程内的 SSH 测试服务器（`micaterm_ssh::testing`），backend 的连接测试用。
 micaterm-ssh = { path = "crates/micaterm-ssh", features = ["testing"] }
 # 测试用内存数据库（`HostDatabase::in_memory`）。
 micaterm-hosts = { path = "crates/micaterm-hosts", features = ["testing"] }
 regex = "1"
 tempfile = "3"
-
-# 上游 crate 的本地补丁副本，见各自目录下的 README.md。
-[patch.crates-io]
-# 修 DirectX 混合状态的 alpha，浅色 Mica 下字不发重、圆角边缘没有深色虚线（工单 30）。
-gpui-pre-windows = { path = "patches/gpui-pre-windows" }
 
 [profile.release]
 lto = "thin"

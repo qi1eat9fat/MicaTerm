@@ -136,7 +136,6 @@ crates/
   micaterm-ssh/         SSH 连接、登录、代理、SFTP 传输
   micaterm-hosts/       主机 / 凭据 / 命令片段的模型与数据库、保险库加密
   micaterm-ui/          应用和终端共用的界面组件
-patches/                上游 crate 的本地补丁（见各目录 README）
 locales/                界面文案
 tests/ui/               界面测试
 ```
