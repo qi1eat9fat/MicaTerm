@@ -84,6 +84,49 @@ fn columns(side: CardSide) -> Vec<TableColumn> {
     }
 }
 
+/// 卡片窄得放不下所有列时，名称列至少留这么宽（含图标和左右边距）。
+const NAME_MIN_WIDTH: Pixels = px(140.);
+
+/// 放不下时先收起哪几列，越前面越先收；名称列从不收。
+fn fold_order(side: CardSide) -> &'static [&'static str] {
+    match side {
+        CardSide::Local => &["type", "size", "modified"],
+        CardSide::Remote => &["owner", "rights", "size", "modified"],
+    }
+}
+
+/// `width` 宽的列表里要收起哪几列：名称列留够 `NAME_MIN_WIDTH`，不够就按 `order` 一列列收。
+fn folded_columns(
+    columns: &[TableColumn],
+    order: &[&'static str],
+    width: Pixels,
+) -> Vec<&'static str> {
+    let fixed = |key: &str| {
+        columns
+            .iter()
+            .find(|column| column.key == key)
+            .and_then(|column| match column.width {
+                ColumnWidth::Fixed(width) => Some(width),
+                ColumnWidth::Fill => None,
+            })
+            .unwrap_or_default()
+    };
+    let mut needed = NAME_MIN_WIDTH
+        + columns
+            .iter()
+            .map(|column| fixed(column.key))
+            .fold(Pixels::ZERO, |sum, width| sum + width);
+    let mut folded = Vec::new();
+    for &key in order {
+        if needed <= width {
+            break;
+        }
+        needed -= fixed(key);
+        folded.push(key);
+    }
+    folded
+}
+
 /// 列标题，按列的键。
 fn column_title(key: &str) -> SharedString {
     match key {
@@ -99,20 +142,27 @@ fn column_title(key: &str) -> SharedString {
 
 /// 一侧文件列表的行和列。
 pub struct FileListing {
+    /// 这一侧所有的列。
+    all_columns: Vec<TableColumn>,
+    /// 放得下、显示出来的列（`fit` 按宽度从 `all_columns` 里挑）。
     columns: Vec<TableColumn>,
+    fold_order: &'static [&'static str],
     /// 目录里的全部，读到的样子。
     listed: Vec<FileEntry>,
     /// 显示的行，排好序：`listed` 去掉不显示的隐藏文件。
     rows: Vec<FileEntry>,
     show_hidden: bool,
-    /// 按哪一列、哪个方向排；`None` 是按名称升序。
-    sort: Option<(usize, SortDirection)>,
+    /// 按哪一列（列的键）、哪个方向排；`None` 是按名称升序。
+    sort: Option<(&'static str, SortDirection)>,
 }
 
 impl FileListing {
     pub fn new(side: CardSide) -> Self {
+        let all_columns = columns(side);
         Self {
-            columns: columns(side),
+            columns: all_columns.clone(),
+            all_columns,
+            fold_order: fold_order(side),
             listed: Vec::new(),
             rows: Vec::new(),
             show_hidden: false,
@@ -124,23 +174,36 @@ impl FileListing {
         &self.columns
     }
 
+    /// 按列表的宽度挑显示哪几列（上一帧量的，还没量过就全显示）：名称列放不下就收起次要的列。
+    pub(super) fn fit(&mut self, width: Option<Pixels>) {
+        let folded = width
+            .map(|width| folded_columns(&self.all_columns, self.fold_order, width))
+            .unwrap_or_default();
+        self.columns = self
+            .all_columns
+            .iter()
+            .filter(|column| !folded.contains(&column.key))
+            .cloned()
+            .collect();
+    }
+
     /// 点列标题排序：降序、升序、回到按名称。
-    pub(super) fn cycle_sort(&mut self, col_ix: usize) {
+    pub(super) fn cycle_sort(&mut self, key: &'static str) {
         self.sort = match self.sort {
-            Some((ix, SortDirection::Descending)) if ix == col_ix => {
-                Some((col_ix, SortDirection::Ascending))
+            Some((sorted, SortDirection::Descending)) if sorted == key => {
+                Some((key, SortDirection::Ascending))
             }
-            Some((ix, SortDirection::Ascending)) if ix == col_ix => None,
-            _ => Some((col_ix, SortDirection::Descending)),
+            Some((sorted, SortDirection::Ascending)) if sorted == key => None,
+            _ => Some((key, SortDirection::Descending)),
         };
         self.apply_sort();
     }
 
     /// 这一列标题后面的箭头：排序的那一列才有，没选时是按名称升序（26 号 `.sf-hd .so`）。
-    pub(super) fn sort_arrow(&self, col_ix: usize) -> Option<SortDirection> {
+    pub(super) fn sort_arrow(&self, key: &str) -> Option<SortDirection> {
         match self.sort {
-            Some((ix, direction)) if ix == col_ix => Some(direction),
-            None if self.columns[col_ix].key == "name" => Some(SortDirection::Ascending),
+            Some((sorted, direction)) if sorted == key => Some(direction),
+            None if key == "name" => Some(SortDirection::Ascending),
             _ => None,
         }
     }
@@ -205,11 +268,7 @@ impl FileListing {
     fn apply_sort(&mut self) {
         let (key, descending) = self
             .sort
-            .and_then(|(col_ix, direction)| {
-                self.columns
-                    .get(col_ix)
-                    .map(|column| (column.key, direction == SortDirection::Descending))
-            })
+            .map(|(key, direction)| (key, direction == SortDirection::Descending))
             .unwrap_or(("name", false));
         let start = usize::from(self.rows.first().is_some_and(FileEntry::is_parent));
         self.rows[start..].sort_by(|a, b| {
@@ -239,11 +298,12 @@ impl FileCard {
         let columns = self.listing.columns();
         header_row(tokens).children((0..columns.len()).map(|col_ix| {
             let geometry = geometry.clone();
-            header_cell(columns, col_ix, self.listing.sort_arrow(col_ix), tokens)
+            let key = columns[col_ix].key;
+            header_cell(columns, col_ix, self.listing.sort_arrow(key), tokens)
                 .on_any_mouse_down(move |_, _, _| geometry.pressed.set(Pressed::Title))
                 .on_click(cx.listener(move |card, _, _, cx| {
                     cx.stop_propagation();
-                    card.listing.cycle_sort(col_ix);
+                    card.listing.cycle_sort(key);
                     cx.notify();
                 }))
                 .test_support()
@@ -671,5 +731,39 @@ impl Render for FileDragPreview {
             .test_support()
             .aria_label(text)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CardSide, columns, fold_order, folded_columns};
+    use gpui_kit::px;
+
+    fn folded(side: CardSide, width: f32) -> Vec<&'static str> {
+        folded_columns(&columns(side), fold_order(side), px(width))
+    }
+
+    #[test]
+    fn keeps_every_column_when_they_fit() {
+        assert!(folded(CardSide::Remote, 600.).is_empty());
+        assert!(folded(CardSide::Local, 500.).is_empty());
+    }
+
+    #[test]
+    fn folds_minor_columns_in_order_when_narrow() {
+        // 远程定宽列共 356，名称至少 140。
+        assert_eq!(folded(CardSide::Remote, 420.), ["owner"]);
+        assert_eq!(folded(CardSide::Remote, 400.), ["owner", "rights"]);
+        // 本地定宽列共 296。
+        assert_eq!(folded(CardSide::Local, 353.), ["type"]);
+        assert_eq!(folded(CardSide::Local, 280.), ["type", "size"]);
+    }
+
+    #[test]
+    fn leaves_only_the_name_when_very_narrow() {
+        assert_eq!(
+            folded(CardSide::Remote, 100.),
+            ["owner", "rights", "size", "modified"]
+        );
     }
 }

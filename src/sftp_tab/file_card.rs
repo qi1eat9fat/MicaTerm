@@ -173,6 +173,8 @@ pub struct FileCard {
     list_focus: FocusHandle,
     /// 路径栏上一帧的宽度，决定折叠哪几级。
     pub(super) label_width: Rc<Cell<Option<Pixels>>>,
+    /// 文件列表上一帧的宽度，决定收起哪几列。
+    list_width: Rc<Cell<Option<Pixels>>>,
     /// 用过的最后一侧：标签再到前面来时焦点回到这里，选中的行也是 `--sel`。
     pub(super) current: bool,
     pub(super) selection: Selection,
@@ -229,6 +231,7 @@ impl FileCard {
             scroll: UniformListScrollHandle::new(),
             list_focus: cx.focus_handle(),
             label_width: Rc::default(),
+            list_width: Rc::default(),
             current: side == CardSide::Remote,
             selection: Selection::default(),
             menu_hit: Rc::default(),
@@ -862,6 +865,24 @@ impl Render for FileCard {
         let list_focus = self.list_focus.clone();
         let menu_hit = self.menu_hit.clone();
         let drop_highlight = tokens.sel;
+        // 上一帧列表有多宽决定显示哪几列；宽度变了下一帧生效。
+        self.listing.fit(self.list_width.get());
+        let measure_list = {
+            let (width, card) = (self.list_width.clone(), cx.entity_id());
+            canvas(
+                move |bounds, window, _| {
+                    if width.get() != Some(bounds.size.width) {
+                        width.set(Some(bounds.size.width));
+                        window.on_next_frame(move |_, cx| cx.notify(card));
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        };
         let rows = self.listing.rows().len();
         let list = if rows == 0 {
             self.render_placeholder(self.placeholder(), &tokens)
@@ -940,6 +961,7 @@ impl Render for FileCard {
                 .child(list)
                 .child(table::scrollbar(&self.scroll))
                 .child(self.marquee.canvas())
+                .child(measure_list)
                 .children(self.marquee.rectangle(&tokens)),
             )
             .child(self.render_status(&tokens, scale))
