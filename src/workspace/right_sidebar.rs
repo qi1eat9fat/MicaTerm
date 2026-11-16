@@ -6,16 +6,27 @@
 //! 没有远程文件可开时变灰，悬停说为什么。
 //! 另外两个点一下在右边展开宽 280 的面板，再点一下收起，展开时图标显示成按下的样子。
 //! 凭据下面隔一条细线是「Agent」（Agent CLI 工单 07）：展开宽 440 的 Agent 面板，收起时 Agent 照常在跑。
+//!
+//! 面板左边那条细线可以左右拖（`with_panel`）：三种面板各记各的宽度，收起再展开还是拖到的宽度；
+//! 窗口变宽变窄时面板宽度不变，内容区让出或吃下差额。
 
+use std::ops::Range;
+
+use gpui_kit::base::{ResizableState, h_resizable, resizable_panel};
 use gpui_kit::*;
 
+use crate::agent::AGENT_PANEL_WIDTH;
 use crate::app::{CatalogIcon, OpenSftp, ShowAgent, ShowCredentials, ShowSnippets};
 use crate::i18n::t;
 use crate::theme::{Tokens, size};
 use crate::ui::icon_button::IconButton;
+use crate::ui::resize::invisible_handle;
 
 /// 图标栏里按钮的边长（`.rail .ib`）。
 const RAIL_BUTTON: Pixels = px(26.);
+
+/// 拖面板时内容区（终端、SFTP……）至少留这么宽。
+const MIN_CONTENT_WIDTH: Pixels = px(240.);
 
 /// 右侧栏展开的面板，同一时间最多一个。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +37,71 @@ pub enum RightPanel {
     Credentials,
     /// 应用内的 Agent（Agent CLI 工单 07）。
     Agent,
+}
+
+impl RightPanel {
+    /// 第一次展开时的宽度；之后是用户拖到的宽度。
+    fn default_width(self) -> Pixels {
+        match self {
+            RightPanel::Snippets | RightPanel::Credentials => size::DOCK_PANEL_WIDTH,
+            RightPanel::Agent => AGENT_PANEL_WIDTH,
+        }
+    }
+
+    /// 拖的时候面板宽度能到的范围（内容区另有 `MIN_CONTENT_WIDTH` 的下限）。
+    fn width_range(self) -> Range<Pixels> {
+        match self {
+            RightPanel::Snippets | RightPanel::Credentials => px(200.)..px(640.),
+            RightPanel::Agent => px(320.)..px(1200.),
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            RightPanel::Snippets => 0,
+            RightPanel::Credentials => 1,
+            RightPanel::Agent => 2,
+        }
+    }
+}
+
+/// 三种面板各自拖到的宽度（resizable 组件的状态）。存在实体里：面板收起时元素状态就没了。
+pub struct RightPanelWidths {
+    states: [Entity<ResizableState>; 3],
+}
+
+impl RightPanelWidths {
+    pub fn new(cx: &mut App) -> Self {
+        Self {
+            states: std::array::from_fn(|_| cx.new(|_| ResizableState::default())),
+        }
+    }
+
+    /// 内容区和展开的面板之间隔一条能左右拖的分隔线（线是面板自己的左边线，柄里不画东西）。
+    pub fn with_panel(
+        &self,
+        panel: RightPanel,
+        content: impl IntoElement,
+        panel_element: AnyElement,
+    ) -> AnyElement {
+        let ix = panel.index();
+        h_resizable(("right-panel-split", ix))
+            .with_state(&self.states[ix])
+            .with_handle_appearance(invisible_handle("right-panel-handle"))
+            .child(
+                resizable_panel()
+                    .size_range(MIN_CONTENT_WIDTH..Pixels::MAX)
+                    .child(content),
+            )
+            .child(
+                resizable_panel()
+                    .size(panel.default_width())
+                    .size_range(panel.width_range())
+                    .fixed()
+                    .child(panel_element),
+            )
+            .into_any_element()
+    }
 }
 
 /// 图标栏 Agent 图标右上角的点（工单 09，26 号 `.rail .rdot`）：和标签状态点同一套颜色。

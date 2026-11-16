@@ -16,7 +16,7 @@ use super::handlers;
 use super::host_sidebar::render_host_sidebar;
 use super::notices::NoticeTimes;
 use super::remote::PromptQueue;
-use super::right_sidebar::{RightPanel, render_right_sidebar};
+use super::right_sidebar::{RightPanel, RightPanelWidths, render_right_sidebar};
 use super::title_bar::{TitleBarState, render_title_bar};
 use crate::app::PRODUCT_NAME;
 use crate::backend::sftp::{
@@ -215,6 +215,8 @@ pub struct Workspace {
     pub(super) host_list: Entity<HostList>,
     /// 右侧栏展开的面板。
     pub(super) right_panel: Option<RightPanel>,
+    /// 右侧各面板拖到的宽度。
+    pub(super) right_panel_widths: RightPanelWidths,
     /// 右侧 Agent 面板里跑着的 Agent（Agent CLI 工单 07）：收起面板时还在。
     pub(super) agent: Option<crate::agent::AgentPanel>,
     /// Agent 们最后看到的屏幕（工单 09，屏幕规则等它停下来才判）。
@@ -358,6 +360,7 @@ impl Workspace {
             hosts,
             host_list,
             right_panel: None,
+            right_panel_widths: RightPanelWidths::new(cx),
             agent: None,
             agent_screens: Default::default(),
             snippet_panel,
@@ -609,6 +612,22 @@ impl Render for Workspace {
                     Some(tab) => content.child(tab.content(cx)),
                     None => content.child(self.render_new_tab_page(&target, &tokens, window, cx)),
                 });
+        // 展开了面板时，内容区和面板之间是一条能左右拖的分隔线。
+        let body = match self.right_panel {
+            Some(panel) => {
+                let panel_element = match panel {
+                    RightPanel::Snippets => self.render_snippet_panel(&tokens, window, cx),
+                    RightPanel::Credentials => self.credential_panel.clone().into_any_element(),
+                    RightPanel::Agent => match &self.agent {
+                        Some(agent) => agent.render(&target, &tokens),
+                        None => div().into_any_element(),
+                    },
+                };
+                self.right_panel_widths
+                    .with_panel(panel, content, panel_element)
+            }
+            None => content.into_any_element(),
+        };
         // 主区域：内容底色，主机栏开着时左边一条细线（26 号 `.flush .panel`）。
         let main = div()
             .flex()
@@ -636,15 +655,7 @@ impl Render for Workspace {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(content)
-                    .children(self.right_panel.map(|panel| match panel {
-                        RightPanel::Snippets => self.render_snippet_panel(&tokens, window, cx),
-                        RightPanel::Credentials => self.credential_panel.clone().into_any_element(),
-                        RightPanel::Agent => match &self.agent {
-                            Some(agent) => agent.render(&target, &tokens),
-                            None => div().into_any_element(),
-                        },
-                    }))
+                    .child(div().flex().flex_1().min_w_0().child(body))
                     .child(render_right_sidebar(
                         self.right_panel,
                         self.files_button(cx),

@@ -17,7 +17,7 @@ use crate::i18n::t;
 use crate::theme::{Tokens, size};
 use crate::ui::icon_button::IconButton;
 
-/// 面板宽度：终端要宽一些（凭据、片段是 280）。
+/// 面板第一次展开的宽度：终端要宽一些（凭据、片段是 280）。之后是用户拖到的宽度。
 pub const AGENT_PANEL_WIDTH: Pixels = px(440.);
 
 /// 面板里跑着的 Agent。
@@ -159,8 +159,9 @@ impl AgentPanel {
             .test_support()
             .flex()
             .flex_col()
-            .flex_none()
-            .w(AGENT_PANEL_WIDTH)
+            // 宽度由外面的可拖分隔决定（默认 `AGENT_PANEL_WIDTH`），这里填满。
+            .flex_1()
+            .min_w_0()
             .h_full()
             .border_l(size::LINE)
             .border_color(tokens.line)

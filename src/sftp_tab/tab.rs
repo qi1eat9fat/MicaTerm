@@ -10,10 +10,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use gpui_kit::base::{
-    ResizableState, ResizeHandleContext, ResizeHandleRenderer, h_resizable, resizable_panel,
-    v_resizable,
-};
+use gpui_kit::base::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -35,6 +32,7 @@ use crate::programs::Program;
 use crate::theme::{Tokens, size};
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Choice, ChoiceButton, ChoiceTone, ConfirmLine, open_choice_dialog};
+use crate::ui::resize::invisible_handle;
 
 /// 每次连接一个新的代号：对话框比连接活得久时，它发的命令和问题的回答作废。
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -798,20 +796,6 @@ impl Render for SftpTab {
                 )
             })
     }
-}
-
-/// 间隙就是拖动柄（同卡片分屏）：柄里什么都不画，命中区和光标还是库的。
-fn invisible_handle(id: &'static str) -> ResizeHandleRenderer {
-    Rc::new(move |_: &ResizeHandleContext, _, _| {
-        Some(
-            div()
-                .id(id)
-                .test_support()
-                .absolute()
-                .inset_0()
-                .into_any_element(),
-        )
-    })
 }
 
 /// 本地一侧从哪里开始：设置的目录 → 「下载」 → 主目录，去掉重复的。返回第一个和后面的退路。

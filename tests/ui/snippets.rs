@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use gpui_kit::{ClipboardItem, InputEvent as _, Modifiers, MouseMoveEvent, Window};
+use gpui_kit::{ClipboardItem, InputEvent as _, Modifiers, MouseMoveEvent, Window, point};
 use micaterm::app::{EditSnippet, ShowSnippets};
 use micaterm::host::{SnippetDraft, SnippetId};
 use micaterm::workspace::RightPanel;
@@ -150,6 +150,45 @@ fn snippet_names(workspace: &Entity<Workspace>, cx: &mut TestAppContext) -> Vec<
 
 fn terminal_focused(window: &mut Window) -> Option<bool> {
     window.find(("terminal", 1usize)).focused()
+}
+
+#[gpui_kit::test]
+fn the_line_left_of_the_panel_drags_its_width_and_the_width_survives_closing(
+    cx: &mut TestAppContext,
+) {
+    let (handle, _, _) = open_snippets(cx, hosts_with_snippets());
+    let width = |cx: &mut TestAppContext| {
+        in_frame(cx, handle, |window, _| {
+            window.find("snippets").bounds().size.width
+        })
+    };
+    let drag_by = |cx: &mut TestAppContext, dx: f32| {
+        in_frame(cx, handle, |window, cx| {
+            // 从面板的左边线上按下（在柄的命中区里）：库按鼠标位置定内容区的右边。
+            let handle = window.find("right-panel-handle").bounds();
+            let from = point(window.find("snippets").bounds().left(), handle.center().y);
+            window.drag(from, point(from.x + px(dx), from.y), cx);
+        });
+        cx.run_until_parked();
+    };
+    assert_eq!(width(cx), px(280.));
+
+    // 往左拖 60：面板变宽 60，卡片让出来。
+    drag_by(cx, -60.);
+    assert_eq!(width(cx), px(340.));
+    in_frame(cx, handle, |window, _| {
+        let panel = window.find("snippets").bounds();
+        assert!(window.find(("card", 1usize)).bounds().right() <= panel.left());
+    });
+
+    // 收起再展开：还是拖到的宽度。
+    in_frame(cx, handle, |window, cx| window.press("ctrl-shift-s", cx));
+    in_frame(cx, handle, |window, cx| window.press("ctrl-shift-s", cx));
+    assert_eq!(width(cx), px(340.));
+
+    // 往右拖过头：停在下限 200。
+    drag_by(cx, 400.);
+    assert_eq!(width(cx), px(200.));
 }
 
 #[gpui_kit::test]

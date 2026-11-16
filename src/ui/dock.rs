@@ -1,4 +1,4 @@
-//! 右侧停靠面板（26 号 `.dk`，照 Zed 停靠面板）：宽 280、左右留 8、内容底、左边一条细线，
+//! 右侧停靠面板（26 号 `.dk`，照 Zed 停靠面板）：默认宽 280（左边线可拖）、左右留 8、内容底、左边一条细线，
 //! 从右侧图标栏展开；凭据、片段两个面板共用这里的外框、标题行、分组标题和搜索框。
 //!
 //! - 标题行（`.dk-h`）：高 32、左留 8；标题是正文色界面字，后面可跟「→ 焦点卡片名」（13 的线条箭头 +
@@ -33,8 +33,9 @@ pub fn dock_panel(id: &'static str, tokens: &Tokens) -> Stateful<Div> {
         .relative()
         .flex()
         .flex_col()
-        .flex_none()
-        .w(size::DOCK_PANEL_WIDTH)
+        // 宽度由外面的可拖分隔决定（`RightPanelWidths`），这里填满。
+        .flex_1()
+        .min_w_0()
         .min_h_0()
         .px(px(8.))
         .bg(tokens.content)
