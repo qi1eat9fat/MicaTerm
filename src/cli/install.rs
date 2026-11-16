@@ -1,5 +1,6 @@
 // 来自 since2006/shell-rs @ b2a307a: src/cli/install.rs（Agent CLI 工单 05）
-// 改动：程序名 `micaterm`；Skill 只装 Claude Code、Codex 和通用的 `~/.agents/skills`（规格第 2 节）；
+// 改动：程序名 `micaterm`；Skill 装 Claude Code、Codex、WorkBuddy（2026-11-16 照 shell-rs 加）和通用的
+// `~/.agents/skills`（规格第 2 节）；
 // Windows 上 MicaTerm 是便携的，命令一律放在程序目录下的 `bin`，拷的是旁边的 `micaterm-cli.exe`
 // （`bin` 里的副本自己认得上一级的数据目录，见 `app::data_dir_of`）。
 
@@ -30,17 +31,26 @@ pub enum AgentKind {
     Generic,
     Codex,
     ClaudeCode,
+    /// WorkBuddy（腾讯的桌面 AI 助手）：没有能在面板里跑的命令，只装 Skill，
+    /// 让它在自己的终端里用 `micaterm`（和 shell-rs 一样）。
+    WorkBuddy,
 }
 
 impl AgentKind {
     /// In the order the settings page lists them.
-    pub const ALL: [AgentKind; 3] = [AgentKind::ClaudeCode, AgentKind::Codex, AgentKind::Generic];
+    pub const ALL: [AgentKind; 4] = [
+        AgentKind::ClaudeCode,
+        AgentKind::Codex,
+        AgentKind::WorkBuddy,
+        AgentKind::Generic,
+    ];
 
     pub fn label(self) -> SharedString {
         match self {
             AgentKind::Generic => t!("cli.agent.generic"),
             AgentKind::Codex => "Codex".into(),
             AgentKind::ClaudeCode => "Claude Code".into(),
+            AgentKind::WorkBuddy => "WorkBuddy".into(),
         }
     }
 
@@ -57,6 +67,7 @@ impl AgentKind {
             AgentKind::Generic => "agents",
             AgentKind::Codex => "codex",
             AgentKind::ClaudeCode => "claude",
+            AgentKind::WorkBuddy => "workbuddy",
         }
     }
 
@@ -67,6 +78,7 @@ impl AgentKind {
             AgentKind::Generic => &[".agents", "skills"],
             AgentKind::Codex => &[".codex", "skills"],
             AgentKind::ClaudeCode => &[".claude", "skills"],
+            AgentKind::WorkBuddy => &[".workbuddy", "skills"],
         }
     }
 }
@@ -462,6 +474,10 @@ mod tests {
         assert_eq!(
             paths.skill_file(AgentKind::Codex),
             file(&[".codex", "skills"])
+        );
+        assert_eq!(
+            paths.skill_file(AgentKind::WorkBuddy),
+            file(&[".workbuddy", "skills"])
         );
     }
 

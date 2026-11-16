@@ -319,6 +319,53 @@ fn the_command_and_a_skill_are_installed_and_removed_from_the_page(cx: &mut Test
     assert!(std::fs::symlink_metadata(&paths.bin_link).is_err());
 }
 
+/// WorkBuddy（2026-11-16 照 shell-rs 加）：只装 Skill，装到 `~/.workbuddy/skills`；
+/// 那一行说本机有没有 WorkBuddy（用户目录下有没有 `.workbuddy`）。
+#[gpui_kit::test]
+fn the_workbuddy_skill_says_whether_workbuddy_is_here(cx: &mut TestAppContext) {
+    let root = tempfile::tempdir().unwrap();
+    let paths = install_paths(root.path());
+    let services = WorkspaceServices {
+        cli_install: Some(paths.clone()),
+        ..fake_services()
+    };
+    let (handle, _) = open_workspace_with(cx, settings_store(), services);
+    open_category(cx, handle);
+    cx.run_until_parked();
+    let note = |cx: &mut TestAppContext| {
+        in_frame(cx, handle, |window, _| {
+            window
+                .find("cli-skill-workbuddy-status")
+                .label()
+                .unwrap_or_default()
+                .to_string()
+        })
+    };
+    let before = note(cx);
+    assert!(before.starts_with("未安装"), "{before}");
+    assert!(before.contains("没检测到 WorkBuddy"), "{before}");
+
+    // 装了 WorkBuddy 以后再装 Skill：写到它的 skills 目录，这一行说检测到了。
+    std::fs::create_dir_all(paths.home.join(".workbuddy")).unwrap();
+    in_frame(cx, handle, |window, cx| {
+        window.click("cli-skill-workbuddy-install", cx)
+    });
+    cx.run_until_parked();
+    let skill = paths
+        .home
+        .join(".workbuddy")
+        .join("skills")
+        .join("micaterm")
+        .join("SKILL.md");
+    assert_eq!(
+        std::fs::read_to_string(&skill).unwrap(),
+        micaterm::cli::SKILL
+    );
+    let after = note(cx);
+    assert!(after.starts_with("已安装"), "{after}");
+    assert!(after.contains("已检测到 WorkBuddy"), "{after}");
+}
+
 #[gpui_kit::test]
 fn an_older_copy_of_the_command_is_brought_up_to_date_at_startup(cx: &mut TestAppContext) {
     let root = tempfile::tempdir().unwrap();

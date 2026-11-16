@@ -40,7 +40,7 @@ pub fn hook_file(paths: &IntegrationPaths, agent: AgentKind) -> Option<PathBuf> 
     match agent {
         AgentKind::ClaudeCode => Some(paths.home.join(".claude").join("settings.json")),
         AgentKind::Codex => Some(paths.home.join(".codex").join("config.toml")),
-        AgentKind::Generic => None,
+        AgentKind::Generic | AgentKind::WorkBuddy => None,
     }
 }
 
@@ -76,7 +76,7 @@ pub fn hook_status(paths: &IntegrationPaths, agent: AgentKind) -> HookStatus {
             Some((_, line)) => HookStatus::Blocked(foreign_notify(line)),
             None => HookStatus::Missing,
         },
-        AgentKind::Generic => HookStatus::Missing,
+        AgentKind::Generic | AgentKind::WorkBuddy => HookStatus::Missing,
     }
 }
 
@@ -133,7 +133,7 @@ pub fn install_hooks(paths: &IntegrationPaths, agent: AgentKind) -> io::Result<(
             new.push('\n');
             new
         }
-        AgentKind::Generic => return Ok(()),
+        AgentKind::Generic | AgentKind::WorkBuddy => return Ok(()),
     };
     write_with_backup(&file, &text, &new)
 }
@@ -165,7 +165,7 @@ pub fn remove_hooks(paths: &IntegrationPaths, agent: AgentKind) -> io::Result<()
             }
             _ => return Ok(()),
         },
-        AgentKind::Generic => return Ok(()),
+        AgentKind::Generic | AgentKind::WorkBuddy => return Ok(()),
     };
     write_with_backup(&file, &text, &new)
 }

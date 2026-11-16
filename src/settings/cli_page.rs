@@ -195,7 +195,15 @@ fn install_rows(
             Some(SkillStatus::Missing) => t!("settings.cli.skill_missing"),
             Some(SkillStatus::Outdated) => t!("settings.cli.skill_outdated"),
         };
-        let note = match agent.description() {
+        // WorkBuddy 没有能在 Agent 面板里跑的命令，只装 Skill：说清楚，再说本机有没有它。
+        let description = match (agent, &status) {
+            (AgentKind::WorkBuddy, Some(status)) if status.workbuddy_found => {
+                Some(t!("settings.cli.workbuddy_found"))
+            }
+            (AgentKind::WorkBuddy, Some(_)) => Some(t!("settings.cli.workbuddy_missing")),
+            _ => agent.description(),
+        };
+        let note = match description {
             Some(description) => t!("settings.cli.note_with", note = note, more = description),
             None => note,
         };

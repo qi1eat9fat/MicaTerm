@@ -31,6 +31,8 @@ pub struct IntegrationStatus {
     skills: Vec<(AgentKind, SkillStatus)>,
     /// 状态 hook 装没装（工单 09）：只有 Claude Code、Codex。
     hooks: Vec<(AgentKind, HookStatus)>,
+    /// 本机装了 WorkBuddy（用户目录下有 `.workbuddy`）。
+    pub workbuddy_found: bool,
 }
 
 impl IntegrationStatus {
@@ -53,6 +55,7 @@ impl IntegrationStatus {
                 .iter()
                 .map(|agent| (*agent, hook_status(paths, *agent)))
                 .collect(),
+            workbuddy_found: paths.home.join(".workbuddy").is_dir(),
         }
     }
 

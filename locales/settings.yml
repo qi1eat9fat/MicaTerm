@@ -147,6 +147,10 @@ settings.cli.skill_outdated:
   zh-CN: 装的是旧版本
 settings.cli.note_with:
   zh-CN: "%{note}。%{more}"
+settings.cli.workbuddy_found:
+  zh-CN: 已检测到 WorkBuddy。装上后在 WorkBuddy 里就能让它用 micaterm；它不在 Agent 面板里启动
+settings.cli.workbuddy_missing:
+  zh-CN: 没检测到 WorkBuddy（用户目录下没有 .workbuddy）
 settings.cli.install_off:
   zh-CN: 这次运行不能安装
 settings.cli.checking:

@@ -249,6 +249,22 @@ fn the_settings_switch_installs_the_claude_hooks(cx: &mut TestAppContext) {
                 && window.find("cli-hooks-claude").checked() == Some(false)
         })
     });
+    // 「Agent 状态」在这一页靠下，测试窗口里要往下滚才看得见。
+    in_frame(cx, handle, |window, cx| {
+        use gpui_kit::InputEvent as _;
+        let position = window.find("agent-command").bounds().center();
+        window.dispatch_event(
+            gpui_kit::ScrollEvent {
+                position,
+                delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-2000.))),
+                modifiers: gpui_kit::Modifiers::default(),
+                touch_phase: gpui_kit::TouchPhase::Moved,
+                source: gpui_kit::ScrollSource::Pointer,
+            }
+            .to_platform_input(),
+            cx,
+        );
+    });
     in_frame(cx, handle, |window, cx| {
         window.click("cli-hooks-claude", cx)
     });
