@@ -129,6 +129,7 @@ fn hooks_light_the_rail_while_the_panel_is_closed_and_name_the_state_when_open(
     let endpoint = endpoint(&dir, "panel");
     let (handle, workspace) = open(cx, Some(&endpoint), fake_local_terminals(), None);
     dispatch(cx, handle, ShowAgent);
+    start_new_agent(cx, handle);
     let me = cx.update(|cx| {
         workspace
             .read(cx)

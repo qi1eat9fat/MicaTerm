@@ -3,6 +3,26 @@ agent.panel.title:
   zh-CN: Agent
 agent.panel.restart:
   zh-CN: 重新开始
+agent.start.folder:
+  zh-CN: 文件夹
+agent.start.folder_choose:
+  zh-CN: 选择…
+agent.start.folder_prompt:
+  zh-CN: 选择 Agent 的工作文件夹
+agent.start.folder_home:
+  zh-CN: 主目录
+agent.start.conversation:
+  zh-CN: 对话
+agent.start.new:
+  zh-CN: 新对话
+agent.start.selected:
+  zh-CN: "%{title}（已选）"
+agent.start.reading:
+  zh-CN: 正在读这个文件夹的历史对话…
+agent.start.no_resume_agent:
+  zh-CN: "%{agent} 只能开新对话"
+agent.start.start:
+  zh-CN: 启动
 agent.panel.handed:
   zh-CN: 已把 %{card} 交给 Agent，说明填在输入框里，按 Enter 发送
 agent.prompt.handoff:

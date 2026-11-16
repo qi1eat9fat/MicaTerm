@@ -85,6 +85,9 @@ pub struct WorkspaceServices {
     /// 自动检测 Agent 命令时找的 `PATH`（Agent CLI 工单 07）：生产是 `None`（这个进程的）；
     /// 测试给空的，结果不看跑测试的机器装没装 claude。
     pub agent_path: Option<std::ffi::OsString>,
+    /// Claude Code 放对话记录的目录（启动框看文件夹里有没有上次的对话）：生产是
+    /// `CLAUDE_CONFIG_DIR` 或 `~/.claude`；测试默认 `None`（哪里都没聊过），要测时给临时目录。
+    pub agent_history: Option<std::path::PathBuf>,
 }
 
 impl WorkspaceServices {
@@ -138,6 +141,7 @@ impl WorkspaceServices {
             cli,
             cli_install: IntegrationPaths::system(),
             agent_path: None,
+            agent_history: crate::agent::claude_config_dir(),
             data_dir,
         }
     }

@@ -1,7 +1,9 @@
 //! 右侧的 Agent 面板（Agent CLI 工单 07，26 号「Agent 面板」屏）：和凭据、片段同一种停靠面板，宽 440；
-//! 标题行「Agent」+ 淡字程序名，右边「重新开始」；交给它卡片而它已在跑时，标题下一行提示说明填在
+//! 标题行「Agent」+ 淡字程序名和工作文件夹名，右边「重新开始」（先弹启动框选文件夹和对话）；交给它卡片而它已在跑时，标题下一行提示说明填在
 //! 输入框里；下面是 Agent 的终端（本地终端，程序是设置里的 Agent 命令）。整个窗口一份，收起时
 //! Agent 照常在跑。
+
+use std::path::PathBuf;
 
 use gpui_kit::component::Icon;
 use gpui_kit::*;
@@ -33,6 +35,8 @@ pub struct AgentPanel {
     pub tracker: AgentTracker,
     /// 回合结束以后面板看见过没有：看见过图标栏就不再亮点。
     pub turn_seen: bool,
+    /// 它在哪个文件夹里启动的（启动框里选的）；`None` 是连主目录都找不到时（标题行不写）。
+    pub directory: Option<PathBuf>,
 }
 
 impl AgentPanel {
@@ -70,6 +74,27 @@ impl AgentPanel {
         )
     }
 
+    /// 程序名后面淡字的工作文件夹名（`· ssh`），无障碍名是完整路径。
+    fn folder_label(&self, tokens: &Tokens) -> Option<impl IntoElement> {
+        let directory = self.directory.as_ref()?;
+        let full: SharedString = directory.to_string_lossy().into_owned().into();
+        // 盘符根目录（`E:\`）没有文件名，写完整路径。
+        let name: SharedString = directory
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned().into())
+            .unwrap_or_else(|| full.clone());
+        Some(
+            div()
+                .id("agent-panel-folder")
+                .test_support()
+                .aria_label(full)
+                .min_w_0()
+                .truncate()
+                .text_color(tokens.st_dim)
+                .child(format!("· {name}")),
+        )
+    }
+
     pub fn render(&self, target: &FocusHandle, tokens: &Tokens) -> AnyElement {
         let header = div()
             .flex()
@@ -95,6 +120,7 @@ impl AgentPanel {
                     .text_color(tokens.st_dim)
                     .child(self.name.clone()),
             )
+            .children(self.folder_label(tokens))
             .children(self.state_chip(tokens))
             .child(div().flex_1())
             .child(

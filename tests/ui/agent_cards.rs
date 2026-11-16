@@ -172,6 +172,7 @@ fn a_card_handed_to_the_agent_is_listed_read_and_typed_into_until_taken_back(
     assert!(!status(cx, handle).starts_with("Agent"));
 
     dispatch(cx, handle, HandCardToAgent(CardId(1)));
+    start_new_agent(cx, handle);
     assert!(
         status(cx, handle).starts_with("Agent · 已连接"),
         "{}",
@@ -235,6 +236,7 @@ fn a_card_handed_to_the_agent_is_listed_read_and_typed_into_until_taken_back(
 
     // 再交一次照旧用原来的 ID。
     dispatch(cx, handle, HandCardToAgent(CardId(1)));
+    start_new_agent(cx, handle);
     assert_eq!(cards(cx, &endpoint)[0]["id"], card.as_str());
 
     // 收回：不再列出，原来的 ID 读不了、也打不进命令。
@@ -269,6 +271,7 @@ fn a_card_handed_to_the_agent_is_listed_read_and_typed_into_until_taken_back(
 
     // 再交出去是新的 ID。
     dispatch(cx, handle, HandCardToAgent(CardId(1)));
+    start_new_agent(cx, handle);
     let again = cards(cx, &endpoint);
     assert_ne!(again[0]["id"], card.as_str());
 }
@@ -284,6 +287,7 @@ fn the_card_menu_hands_the_card_over_and_takes_it_back(cx: &mut TestAppContext) 
     assert!(!labels.contains(&"收回".to_string()), "{labels:?}");
 
     click_terminal_menu(cx, handle, 1, "交给 Agent");
+    start_new_agent(cx, handle);
     assert_eq!(cards(cx, &endpoint).len(), 1);
     let labels = terminal_menu_labels(cx, handle, 1);
     assert!(labels.contains(&"收回".to_string()), "{labels:?}");
@@ -390,6 +394,7 @@ fn handing_a_card_starts_the_agent_with_a_prompt_or_fills_in_its_input(cx: &mut 
     let before = provider.launches().len();
 
     dispatch(cx, handle, HandCardToAgent(CardId(1)));
+    start_new_agent(cx, handle);
     let card = cards(cx, &endpoint)[0]["id"].as_str().unwrap().to_string();
     let host = cx.update(|cx| {
         workspace
@@ -454,6 +459,7 @@ fn handing_a_card_starts_the_agent_with_a_prompt_or_fills_in_its_input(cx: &mut 
     dispatch(cx, handle, TakeCardBack(CardId(1)));
     let typed_before = local.written_text().len();
     dispatch(cx, handle, HandCardToAgent(CardId(1)));
+    start_new_agent(cx, handle);
     let again = cards(cx, &endpoint)[0]["id"].as_str().unwrap().to_string();
     assert_ne!(again, card);
     assert_eq!(provider.launches().len(), before + 1, "没有另开");
@@ -486,6 +492,7 @@ fn without_an_agent_command_the_card_is_still_handed_over(cx: &mut TestAppContex
     let before = provider.launches().len();
 
     dispatch(cx, handle, HandCardToAgent(CardId(1)));
+    start_new_agent(cx, handle);
     let listed = cards(cx, &endpoint);
     assert_eq!(listed.len(), 1, "交出去了");
     assert_eq!(provider.launches().len(), before, "没有启动 Agent");

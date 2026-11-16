@@ -32,6 +32,19 @@ pub struct AgentProgram {
     pub bundled: bool,
 }
 
+impl AgentProgram {
+    /// 能不能接着以前的对话（启动框列不列历史对话）：只有 Claude Code 认得 `--resume`。
+    pub fn can_resume(&self) -> bool {
+        self.kind == Some(AgentKind::ClaudeCode)
+    }
+
+    /// 接着对话 `id` 要加的参数（放在命令行后面、交卡片的说明前面）；不能接着时 `None`。
+    pub fn resume_args(&self, id: &str) -> Option<Vec<String>> {
+        self.can_resume()
+            .then(|| vec!["--resume".to_string(), id.to_string()])
+    }
+}
+
 /// 不在 `PATH` 里、自动检测也认的一份安装。
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct KnownInstall {
@@ -137,7 +150,11 @@ fn on_path(name: &str, path: &OsStr, extensions: Option<&OsStr>) -> bool {
 }
 
 /// Claude Code 可执行文件的文件名。
-const CLAUDE_EXE: &str = if cfg!(windows) { "claude.exe" } else { "claude" };
+const CLAUDE_EXE: &str = if cfg!(windows) {
+    "claude.exe"
+} else {
+    "claude"
+};
 
 /// 本机不在 `PATH` 里的 Claude Code，按优先顺序：官方安装脚本装的 `~/.local/bin/claude`
 /// （GUI 程序的 `PATH` 常常没有它），再是 Claude 桌面版自带的。阻塞：会看文件系统。
@@ -176,7 +193,10 @@ fn desktop_data_dirs() -> Vec<PathBuf> {
     if cfg!(windows)
         && let Some(local) = dirs::data_local_dir()
     {
-        found.extend(children_starting_with(&local.join("Claude-Data"), "claude_"));
+        found.extend(children_starting_with(
+            &local.join("Claude-Data"),
+            "claude_",
+        ));
         found.extend(
             children_starting_with(&local.join("Packages"), "Claude_")
                 .into_iter()
@@ -224,7 +244,10 @@ fn newest_bundled(data_dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBu
             }
         }
     }
-    found.into_iter().max_by_key(|(time, _)| *time).map(|(_, file)| file)
+    found
+        .into_iter()
+        .max_by_key(|(time, _)| *time)
+        .map(|(_, file)| file)
 }
 
 #[cfg(test)]
@@ -239,9 +262,13 @@ mod tests {
         assert_eq!(claude.name.as_ref(), "Claude Code");
         assert_eq!(claude.kind, Some(AgentKind::ClaudeCode));
 
-        let quoted =
-            agent_program_in(Some(r#""C:\Tools\codex.cmd" --full-auto"#), empty, None, &[])
-                .unwrap();
+        let quoted = agent_program_in(
+            Some(r#""C:\Tools\codex.cmd" --full-auto"#),
+            empty,
+            None,
+            &[],
+        )
+        .unwrap();
         assert_eq!(quoted.kind, Some(AgentKind::Codex));
 
         let other = agent_program_in(Some("aider --yes"), empty, None, &[]).unwrap();
@@ -302,6 +329,20 @@ mod tests {
     }
 
     #[test]
+    fn only_claude_code_resumes_a_conversation() {
+        let empty = OsStr::new("");
+        let claude = agent_program_in(Some("claude"), empty, None, &[]).unwrap();
+        assert!(claude.can_resume());
+        assert_eq!(
+            claude.resume_args("abc").unwrap(),
+            ["--resume".to_string(), "abc".to_string()]
+        );
+        let codex = agent_program_in(Some("codex"), empty, None, &[]).unwrap();
+        assert!(!codex.can_resume());
+        assert_eq!(codex.resume_args("abc"), None);
+    }
+
+    #[test]
     fn the_newest_bundled_claude_code_is_found_with_or_without_a_hash_folder() {
         let data = tempfile::tempdir().unwrap();
         let root = data.path().join("claude-code");
@@ -310,7 +351,10 @@ mod tests {
         let old = root.join("2.1.300").join(CLAUDE_EXE);
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::write(&old, "").unwrap();
-        assert_eq!(newest_bundled([data.path().to_path_buf()]), Some(old.clone()));
+        assert_eq!(
+            newest_bundled([data.path().to_path_buf()]),
+            Some(old.clone())
+        );
 
         let new = root.join("2.1.325").join("806e0a45e6f5").join(CLAUDE_EXE);
         std::fs::create_dir_all(new.parent().unwrap()).unwrap();

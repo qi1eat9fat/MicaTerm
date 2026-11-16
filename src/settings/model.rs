@@ -53,6 +53,9 @@ pub struct CliSettings {
     pub enabled: bool,
     /// 应用内启动 Agent 时运行的命令（Agent CLI 工单 07）；`None` 是自动检测（先找 claude，再找 codex）。
     pub agent_command: Option<String>,
+    /// 应用内的 Agent 在哪个文件夹里启动：Agent 面板标题行的「换文件夹」选的，下次启动还用它。
+    /// `None` 是主目录；文件夹不在了（数据目录拷到了别的电脑）也退回主目录。
+    pub agent_directory: Option<PathBuf>,
 }
 
 /// 应用 → 窗口。
@@ -81,6 +84,10 @@ impl AppSettings {
             .map(|shell| shell.trim().to_string())
             .filter(|shell| !shell.is_empty());
         self.sftp = self.sftp.normalized();
+        self.cli.agent_directory = self
+            .cli
+            .agent_directory
+            .filter(|directory| !directory.as_os_str().is_empty());
         self
     }
 }

@@ -2,6 +2,7 @@
 //! 启动前缺什么先弹确认框，补好再启动；找不到 Agent 命令时不启动，「打开设置」跳到 Agent 那一页。
 //! 本地终端是假的，Agent 不会真的启动；装命令、装 Skill 用临时目录。
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use micaterm::app::{RestartAgent, ShowAgent};
@@ -62,7 +63,11 @@ fn agent_id(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> Option<St
     })
 }
 
-fn has(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &'static str) -> bool {
+fn has(
+    cx: &mut TestAppContext,
+    handle: WindowHandle<Root>,
+    id: impl Into<ElementId> + 'static,
+) -> bool {
     in_frame(cx, handle, move |window, _| window.try_find(id).is_some())
 }
 
@@ -94,7 +99,11 @@ fn the_rail_icon_starts_the_agent_and_collapsing_keeps_it_running(cx: &mut TestA
     );
     let before = provider.launches().len();
 
+    // 先弹启动框，选了才启动。
     dispatch(cx, handle, ShowAgent);
+    assert!(has(cx, handle, "agent-prep"));
+    assert_eq!(provider.launches().len(), before);
+    start_new_agent(cx, handle);
     assert_eq!(right_panel(cx, &workspace), Some(RightPanel::Agent));
     assert!(has(cx, handle, "agent-panel"));
     let launches = provider.launches()[before..].to_vec();
@@ -119,10 +128,215 @@ fn the_rail_icon_starts_the_agent_and_collapsing_keeps_it_running(cx: &mut TestA
     assert_eq!(right_panel(cx, &workspace), Some(RightPanel::Agent));
     assert_eq!(provider.launches().len(), before + 1);
 
-    // 重新开始：开一个新的。
+    // 重新开始：也先弹启动框；取消什么也不变，选了才开新的。
     dispatch(cx, handle, RestartAgent);
+    assert_eq!(provider.launches().len(), before + 1);
+    in_frame(cx, handle, |window, cx| {
+        window.click("agent-prep-cancel", cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(agent_id(cx, &workspace), Some(first.clone()));
+    dispatch(cx, handle, RestartAgent);
+    start_new_agent(cx, handle);
     assert_eq!(provider.launches().len(), before + 2);
     assert_ne!(agent_id(cx, &workspace), Some(first));
+}
+
+fn label(
+    cx: &mut TestAppContext,
+    handle: WindowHandle<Root>,
+    id: impl Into<ElementId> + 'static,
+) -> Option<String> {
+    in_frame(cx, handle, move |window, _| {
+        window
+            .try_find(id)
+            .and_then(|element| element.label().map(str::to_owned))
+    })
+}
+
+fn stored_folder(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> Option<PathBuf> {
+    cx.update(|cx| {
+        workspace
+            .read(cx)
+            .settings()
+            .read(cx)
+            .settings()
+            .cli
+            .agent_directory
+    })
+}
+
+/// 在 `history` 里给 `folder` 写一个 Claude Code 对话记录：标题 `title`，最后改动在 `minutes` 分钟时。
+fn record(history: &Path, folder: &Path, id: &str, title: &str, minutes: u64) {
+    let project: String = folder
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let dir = history.join("projects").join(project);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(format!("{id}.jsonl"));
+    std::fs::write(
+        &file,
+        format!(r#"{{"type":"custom-title","customTitle":"{title}"}}"#),
+    )
+    .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(minutes * 60))
+        .unwrap();
+}
+
+/// 启动框（2026-11-16 用户定）：文件夹默认主目录，「选择…」换；对话列表第一行「新对话」，下面是
+/// 这个文件夹里 Claude Code 的历史对话，最近的在前、默认选它，启动带 `--resume <ID>`；选「新对话」
+/// 不带。选的文件夹记进设置，下次默认还是它；不在了默认回主目录。
+#[gpui_kit::test]
+fn the_start_dialog_picks_the_folder_and_the_conversation(cx: &mut TestAppContext) {
+    let history = tempfile::tempdir().unwrap();
+    let provider = fake_local_terminals();
+    let services = WorkspaceServices {
+        agent_history: Some(history.path().to_path_buf()),
+        ..services_with_terminals(provider.clone())
+    };
+    let (handle, workspace) = open_workspace_with(cx, settings_store(), services);
+    cx.update(|cx| {
+        let settings = workspace.read(cx).settings().clone();
+        settings.update(cx, |store, cx| {
+            store.update(
+                |settings| {
+                    settings.cli.enabled = true;
+                    settings.cli.agent_command = Some("claude".into());
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    let before = provider.launches().len();
+    let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
+
+    // 主目录没聊过：只有「新对话」，选着它。
+    dispatch(cx, handle, ShowAgent);
+    assert_eq!(
+        label(cx, handle, "agent-prep-folder"),
+        Some(home.clone()),
+        "没选过：主目录"
+    );
+    assert_eq!(
+        label(cx, handle, "agent-prep-new").as_deref(),
+        Some("新对话（已选）")
+    );
+    assert!(!has(cx, handle, ("agent-prep-conversation", 0usize)));
+
+    // 「选择…」：取消不变；选了换上，列出那里的历史对话。
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().join("工作");
+    std::fs::create_dir(&folder).unwrap();
+    record(history.path(), &folder, "older", "修登录页", 10);
+    record(history.path(), &folder, "newest", "加启动框", 30);
+    record(history.path(), &folder, "middle", "SFTP 续传", 20);
+    in_frame(cx, handle, |window, cx| {
+        window.click("agent-prep-folder-choose", cx)
+    });
+    cx.run_until_parked();
+    assert!(cx.did_prompt_for_paths());
+    cx.simulate_path_prompt_response(|_| None);
+    cx.run_until_parked();
+    assert_eq!(label(cx, handle, "agent-prep-folder"), Some(home.clone()));
+    in_frame(cx, handle, |window, cx| {
+        window.click("agent-prep-folder-choose", cx)
+    });
+    cx.run_until_parked();
+    let chosen = folder.clone();
+    cx.simulate_path_prompt_response(move |options| {
+        assert!(options.directories && !options.files && !options.multiple);
+        Some(vec![chosen])
+    });
+    cx.run_until_parked();
+    let full = folder.to_string_lossy().into_owned();
+    assert_eq!(label(cx, handle, "agent-prep-folder"), Some(full.clone()));
+    let titles: Vec<Option<String>> = (0..3usize)
+        .map(|n| label(cx, handle, ("agent-prep-conversation", n)))
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            Some("加启动框（已选）".to_string()),
+            Some("SFTP 续传".to_string()),
+            Some("修登录页".to_string()),
+        ],
+        "最近的在前、默认选它"
+    );
+    assert_eq!(
+        label(cx, handle, "agent-prep-new").as_deref(),
+        Some("新对话")
+    );
+    assert_eq!(stored_folder(cx, &workspace), None, "启动前不记");
+
+    // 挑第三个，启动：接着它。
+    in_frame(cx, handle, |window, cx| {
+        window.click(("agent-prep-conversation", 2usize), cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        label(cx, handle, ("agent-prep-conversation", 2usize)).as_deref(),
+        Some("修登录页（已选）")
+    );
+    in_frame(cx, handle, |window, cx| {
+        window.click("agent-prep-start", cx)
+    });
+    cx.run_until_parked();
+    let launch = provider.launches()[before].clone();
+    assert_eq!(launch.directory.as_deref(), Some(folder.as_path()));
+    assert_eq!(launch.args, ["--resume", "older"]);
+    assert_eq!(
+        stored_folder(cx, &workspace).as_deref(),
+        Some(folder.as_path())
+    );
+    assert_eq!(label(cx, handle, "agent-panel-folder"), Some(full.clone()));
+
+    // 重新开始：默认还是这个文件夹、最近的对话；选「新对话」不带参数。
+    dispatch(cx, handle, RestartAgent);
+    assert_eq!(label(cx, handle, "agent-prep-folder"), Some(full));
+    assert_eq!(
+        label(cx, handle, ("agent-prep-conversation", 0usize)).as_deref(),
+        Some("加启动框（已选）")
+    );
+    start_new_agent(cx, handle);
+    let launch = provider.launches()[before + 1].clone();
+    assert_eq!(launch.directory.as_deref(), Some(folder.as_path()));
+    assert!(launch.args.is_empty());
+
+    // 文件夹没了：默认回主目录，设置里的不动。
+    std::fs::remove_dir_all(&folder).unwrap();
+    dispatch(cx, handle, RestartAgent);
+    assert_eq!(label(cx, handle, "agent-prep-folder"), Some(home));
+    assert_eq!(
+        stored_folder(cx, &workspace).as_deref(),
+        Some(folder.as_path())
+    );
+}
+
+/// Codex 不能接着以前的对话：启动框里只有「新对话」，下面说它只能开新对话。
+#[gpui_kit::test]
+fn an_agent_that_cannot_resume_only_starts_new_conversations(cx: &mut TestAppContext) {
+    let provider = fake_local_terminals();
+    let (handle, _workspace) = open(cx, provider.clone(), true, Some("codex"), None);
+    dispatch(cx, handle, ShowAgent);
+    assert_eq!(
+        label(cx, handle, "agent-prep-conversation-note").as_deref(),
+        Some("Codex 只能开新对话")
+    );
+    assert!(!has(cx, handle, ("agent-prep-conversation", 0usize)));
+    let before = provider.launches().len();
+    in_frame(cx, handle, |window, cx| {
+        window.click("agent-prep-start", cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(provider.launches().len(), before + 1);
+    assert!(provider.launches()[before].args.is_empty());
 }
 
 /// 外部 CLI 没启用：先确认，确认后打开总开关再启动；取消就什么也不做。
@@ -152,9 +366,7 @@ fn a_disabled_cli_is_turned_on_after_asking(cx: &mut TestAppContext) {
     assert_eq!(agent_id(cx, &workspace), None);
 
     dispatch(cx, handle, ShowAgent);
-    in_frame(cx, handle, |window, cx| {
-        window.click("agent-prep-confirm", cx)
-    });
+    start_new_agent(cx, handle);
     wait(cx, handle, |cx| agent_id(cx, &workspace).is_some());
     let enabled = cx.update(|cx| {
         workspace
@@ -189,7 +401,7 @@ fn the_command_and_the_skill_are_installed_before_starting(cx: &mut TestAppConte
             window.find(("agent-prep-step", 1usize)).label(),
             Some("安装 Claude Code 的 Skill")
         );
-        window.click("agent-prep-confirm", cx);
+        window.click("agent-prep-start", cx);
     });
     wait(cx, handle, |cx| agent_id(cx, &workspace).is_some());
     assert!(paths.bin_link.is_file(), "命令装上了");

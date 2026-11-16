@@ -1,10 +1,16 @@
 //! 应用内的 Agent（Agent CLI 工单 07）：右侧图标栏的「Agent」展开、收起 Agent 面板；远程卡片右键
 //! 「交给 Agent」把卡片交给面板里的 Agent；面板的「重新开始」。样子和规则在 `crate::agent`。
 //!
-//! 启动前先看缺什么（外部 CLI、命令、Skill），缺了先弹确认框，补好再启动；找不到 Agent 命令时
-//! 不启动，提示去设置里填——但「交给 Agent」照样把卡片交出去（2026-11-16 用户定），Agent 可以跑在
-//! MicaTerm 外面的终端里，用 `micaterm cards list` 找到它。整个窗口只有一个 Agent：已经在跑时交给它的卡片说明填进它的输入框，
-//! 不按回车（不打断它、不替用户发话）。
+//! 每次开新的 Agent 都先弹启动框（2026-11-16 用户定）：选文件夹（默认设置里记着的，没有或不在了是
+//! 主目录）和对话（「新对话」或这个文件夹里的某个历史对话，默认最近的那个），缺外部 CLI、命令、
+//! Skill 时也列在同一个框里，补好再启动；
+//! 选的文件夹记进设置，下次默认还是它。找不到 Agent 命令时不启动，提示去设置里填——但「交给 Agent」
+//! 照样把卡片交出去（2026-11-16 用户定），Agent 可以跑在 MicaTerm 外面的终端里，用
+//! `micaterm cards list` 找到它。整个窗口只有一个 Agent：已经在跑时交给它的卡片说明填进它的输入框，
+//! 不按回车（不打断它、不替用户发话），不弹启动框（缺东西时只弹补缺的框）。
+
+use std::path::Path;
+use std::sync::Arc;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::notification::Notification;
@@ -13,8 +19,8 @@ use gpui_kit::*;
 use micaterm_terminal::{LocalLaunch, LocalShell, TerminalView};
 
 use crate::agent::{
-    AgentPanel, AgentProgram, Handoff, Prep, agent_program_on, handoff_prompt, open_prep_dialog,
-    prep_steps,
+    AgentPanel, AgentProgram, Handoff, ListConversations, Prep, StartChoice, StartOptions,
+    agent_program_on, claude_conversations, handoff_prompt, open_prep_dialog, prep_steps,
 };
 use crate::app::{RestartAgent, ShowAgent};
 use crate::card::CardId;
@@ -34,7 +40,7 @@ pub(in crate::workspace) fn bind_agent_actions(
 }
 
 impl Workspace {
-    /// 右侧图标栏的「Agent」：展开着就收起（Agent 照常在跑）；Agent 在跑就展开；否则先准备再启动。
+    /// 右侧图标栏的「Agent」：展开着就收起（Agent 照常在跑）；Agent 在跑就展开；否则弹启动框。
     fn on_show_agent(&mut self, _: &ShowAgent, window: &mut Window, cx: &mut Context<Self>) {
         if self.right_panel == Some(RightPanel::Agent) {
             self.right_panel = None;
@@ -56,7 +62,7 @@ impl Workspace {
         self.prepare_agent(None, false, window, cx);
     }
 
-    /// 面板的「重新开始」：结束面板里的 Agent，开一个新的。
+    /// 面板的「重新开始」：弹启动框，选好后结束面板里的 Agent，开一个新的；取消就什么也不变。
     fn on_restart_agent(&mut self, _: &RestartAgent, window: &mut Window, cx: &mut Context<Self>) {
         self.prepare_agent(None, true, window, cx);
     }
@@ -76,8 +82,8 @@ impl Workspace {
         }
     }
 
-    /// 看缺什么：找不到 Agent 命令就提示去设置；缺外部 CLI、命令、Skill 就先确认、补上；
-    /// 都好了启动（`restart` 时先结束面板里的）。
+    /// 找不到 Agent 命令就提示去设置；要开新的 Agent 时弹启动框（文件夹、对话，缺的也列上）；
+    /// 交给已在跑的 Agent 时有缺的才弹框补上，没有就直接交（`restart` 时总是开新的）。
     fn prepare_agent(
         &mut self,
         give: Option<CardId>,
@@ -105,10 +111,35 @@ impl Workspace {
             status.as_ref(),
             program.kind,
         );
-        if steps.is_empty() {
-            self.start_agent(program, give, restart, window, cx);
+        let running = !restart
+            && self
+                .agent
+                .as_ref()
+                .is_some_and(|agent| agent.is_running(cx));
+        if running && steps.is_empty() {
+            let choice = StartChoice {
+                directory: None,
+                resume: None,
+            };
+            self.start_agent(program, give, restart, choice, window, cx);
             return;
         }
+        let start = (!running).then(|| StartOptions {
+            // 记着的文件夹不在了（删了、数据目录拷到了别的电脑）：默认主目录，设置里的不动。
+            directory: settings
+                .cli
+                .agent_directory
+                .filter(|directory| directory.is_dir())
+                .or_else(dirs::home_dir),
+            history: program.can_resume().then(|| -> ListConversations {
+                match self.services.agent_history.clone() {
+                    Some(config) => {
+                        Arc::new(move |folder: &Path| claude_conversations(&config, folder))
+                    }
+                    None => Arc::new(|_: &Path| Vec::new()),
+                }
+            }),
+        });
         let card = give
             .and_then(|card| self.card(card, cx))
             .map(|card| card.read(cx).name());
@@ -116,15 +147,16 @@ impl Workspace {
             name: program.name.clone(),
             card,
             steps,
+            start,
         };
         let this = cx.entity().downgrade();
         open_prep_dialog(
             prep,
             self.settings.clone(),
             self.cli_integration.clone(),
-            Box::new(move |window, cx| {
+            Box::new(move |choice, window, cx| {
                 let _ = this.update(cx, |this, cx| {
-                    this.start_agent(program, give, restart, window, cx)
+                    this.start_agent(program, give, restart, choice, window, cx)
                 });
             }),
             window,
@@ -132,12 +164,14 @@ impl Workspace {
         );
     }
 
-    /// 启动（或交给已在跑的）Agent，展开面板、焦点给它。
+    /// 启动（或交给已在跑的）Agent，展开面板、焦点给它。开新的时在 `choice` 的文件夹里，
+    /// 记进设置下次默认；`resume` 是要接着的那个对话。
     fn start_agent(
         &mut self,
         program: AgentProgram,
         give: Option<CardId>,
         restart: bool,
+        choice: StartChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -160,9 +194,27 @@ impl Workspace {
                 old.terminal
                     .update(cx, |terminal, cx| terminal.shutdown(cx));
             }
+            let directory = choice.directory;
+            let stored = self.settings.read(cx).settings().cli.agent_directory;
+            if let Some(directory) = directory.clone().filter(|d| stored.as_ref() != Some(d)) {
+                self.settings.update(cx, |store, cx| {
+                    store.update(
+                        |settings| settings.cli.agent_directory = Some(directory),
+                        cx,
+                    )
+                });
+            }
+            let mut args: Vec<String> = Vec::new();
+            if let Some(id) = &choice.resume
+                && let Some(resume) = program.resume_args(id)
+            {
+                args.extend(resume);
+            }
+            args.extend(handoff.iter().map(handoff_prompt));
             let mut launch = LocalLaunch {
                 shell: LocalShell::new(&program.command),
-                args: handoff.iter().map(handoff_prompt).collect(),
+                args,
+                directory: directory.clone(),
                 ..LocalLaunch::default()
             };
             if let Some(handoff) = &handoff {
@@ -184,7 +236,8 @@ impl Workspace {
                     cx,
                 )
             });
-            self.agent_screens.forget(crate::workspace::agent_state::AgentSlot::Panel);
+            self.agent_screens
+                .forget(crate::workspace::agent_state::AgentSlot::Panel);
             self.agent = Some(AgentPanel {
                 terminal,
                 name: program.name,
@@ -193,6 +246,7 @@ impl Workspace {
                 kind: program.kind,
                 tracker: Default::default(),
                 turn_seen: true,
+                directory,
             });
         }
         self.show_agent_panel(window, cx);

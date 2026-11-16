@@ -96,6 +96,7 @@ pub fn fake_services() -> WorkspaceServices {
         cli: micaterm::cli::CliService::Off,
         cli_install: None,
         agent_path: Some(Default::default()),
+        agent_history: None,
     }
 }
 
@@ -156,6 +157,23 @@ pub fn in_frame<R>(
 pub fn dispatch(cx: &mut TestAppContext, handle: WindowHandle<Root>, action: impl Action) {
     in_frame(cx, handle, |_, _| {});
     cx.dispatch_action(handle.into(), action);
+    cx.run_until_parked();
+}
+
+/// Agent 的启动框开着时选「新对话」再点「启动」（每次开新的 Agent 都先弹它，2026-11-16）；
+/// 没开着时什么也不做。
+pub fn start_new_agent(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
+    in_frame(cx, handle, |window, cx| {
+        if window.try_find("agent-prep-new").is_some() {
+            window.click("agent-prep-new", cx);
+        }
+    });
+    cx.run_until_parked();
+    in_frame(cx, handle, |window, cx| {
+        if window.try_find("agent-prep-start").is_some() {
+            window.click("agent-prep-start", cx);
+        }
+    });
     cx.run_until_parked();
 }
 
