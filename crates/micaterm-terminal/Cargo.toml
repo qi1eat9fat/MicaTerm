@@ -10,6 +10,8 @@ license = "GPL-3.0-only"
 [dependencies]
 alacritty_terminal = "0.26"
 anyhow = "1"
+# `micaterm exec --card` 每次的随机标记（Agent CLI 工单 06，拷自 shell-rs 的 run.rs）。
+rand = "0.9"
 async-channel = "2"
 # 解析线程等输出时，只等到同步更新的期限。
 async-io = "2"

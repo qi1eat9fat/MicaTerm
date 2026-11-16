@@ -99,12 +99,15 @@ fn collapsing_the_host_sidebar_puts_an_expand_button_at_the_left_of_the_tab_rail
 ) {
     let (handle, workspace) = open_workspace(cx);
 
-    in_frame(cx, handle, |window, _| {
+    in_frame(cx, handle, |window, cx| {
         assert!(window.find("host-sidebar").visible());
         assert!(window.try_find("expand-host-sidebar").is_none());
+        // 主机栏顶部「新建主机」右边是收起按钮（2026-11-16 用户加）；Ctrl+Shift+B 照旧。
+        let collapse = window.find("collapse-host-sidebar");
+        assert_eq!(collapse.label(), Some("收起主机栏"));
+        assert!(collapse.bounds().left() >= window.find("host-sidebar-new-host").bounds().right());
+        window.click("collapse-host-sidebar", cx);
     });
-    // 主机栏里没有收起按钮（26 号），收起用 Ctrl+Shift+B。
-    dispatch(cx, handle, ToggleHostSidebar);
     in_frame(cx, handle, |window, cx| {
         assert!(window.try_find("host-sidebar").is_none());
         let expand = window.find("expand-host-sidebar");

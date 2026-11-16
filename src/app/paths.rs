@@ -14,6 +14,16 @@ pub const DATA_DIR_ENV: &str = "MICATERM_DATA_DIR";
 /// 可执行文件旁的数据目录名。
 pub const DATA_DIR_NAME: &str = "data";
 
+/// Windows 上装进 PATH 的 `micaterm` 命令所在的文件夹：程序目录下的 `bin`（Agent CLI 工单 05）。
+pub const CLI_BIN_DIR: &str = "bin";
+
+/// 程序文件名：`bin` 里的命令副本据此认出上一级就是 MicaTerm 的程序目录。
+pub const PROGRAM_FILE: &str = if cfg!(windows) {
+    "micaterm.exe"
+} else {
+    "micaterm"
+};
+
 /// 设置文件名。
 pub const SETTINGS_FILE: &str = "settings.json";
 
@@ -33,6 +43,8 @@ pub fn data_dir() -> io::Result<PathBuf> {
 ///
 /// - `env` 非空：就用它；
 /// - macOS 的 `X.app/Contents/MacOS/micaterm`：`.app` 旁边的 `data/`；
+/// - 装进 PATH 的命令副本 `<程序目录>/bin/micaterm.exe`（上一级有 MicaTerm 程序）：程序目录下的 `data/`，
+///   这样命令和它拷自的那个 MicaTerm 用同一个数据目录、连同一根管道；
 /// - 其他情况：`exe` 所在目录下的 `data/`。
 pub fn data_dir_of(exe: &Path, env: Option<OsString>) -> PathBuf {
     if let Some(dir) = env.filter(|dir| !dir.is_empty()) {
@@ -41,8 +53,19 @@ pub fn data_dir_of(exe: &Path, env: Option<OsString>) -> PathBuf {
     let folder = exe.parent().unwrap_or(Path::new("."));
     let beside = app_bundle_of(folder)
         .and_then(Path::parent)
+        .or_else(|| program_folder_above(folder))
         .unwrap_or(folder);
     beside.join(DATA_DIR_NAME)
+}
+
+/// `folder` 是程序目录下的 `bin`（上一级有 MicaTerm 程序）时返回程序目录。
+fn program_folder_above(folder: &Path) -> Option<&Path> {
+    let above = folder
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case(CLI_BIN_DIR))
+        .then(|| folder.parent())
+        .flatten()?;
+    above.join(PROGRAM_FILE).is_file().then_some(above)
 }
 
 /// `folder` 是 `X.app/Contents/MacOS` 时返回 `X.app`。
@@ -117,12 +140,63 @@ pub fn download_resume_dir() -> io::Result<PathBuf> {
     Ok(data_dir()?.join("download-resume"))
 }
 
+/// 数据目录在 `dir` 的 MicaTerm 在哪里等 `micaterm` 命令（外部 CLI）：macOS、Linux 上是
+/// 这个目录里的套接字 `cli.sock`，Windows 上是命名管道。命令和应用都按自己的数据目录算，
+/// 所以都跟着 `MICATERM_DATA_DIR` 走；便携版的两份拷贝各有各的。
+// 参考 since2006/shell-rs @ b2a307a: src/app/paths.rs 的 `cli_endpoint`、`pipe_name`
+pub fn cli_endpoint(dir: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(pipe_name(dir))
+    } else {
+        dir.join("cli.sock")
+    }
+}
+
+/// 命名管道的名字是整台机器共用的，所以拿数据目录的路径算一个散列放进去：每个数据目录一根管道。
+/// 路径先转成绝对路径、小写（Windows 的路径不分大小写），8.3 短名由 [`data_dir`] 先换成真实路径。
+fn pipe_name(dir: &Path) -> String {
+    use sha2::{Digest as _, Sha256};
+
+    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let digest = Sha256::digest(dir.to_string_lossy().to_lowercase().as_bytes());
+    let hex: String = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!(r"\\.\pipe\micaterm-cli-{hex}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
 
-    use super::data_dir_of;
+    use super::{data_dir_of, pipe_name};
+
+    #[test]
+    fn the_command_copied_into_bin_uses_the_program_s_data_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let program = root.path().join(super::PROGRAM_FILE);
+        let copy = root.path().join("bin").join(super::PROGRAM_FILE);
+        // 上一级没有 MicaTerm：只是个叫 bin 的文件夹，数据就在它旁边。
+        assert_eq!(
+            data_dir_of(&copy, None),
+            root.path().join("bin").join("data")
+        );
+        std::fs::write(&program, "").unwrap();
+        assert_eq!(data_dir_of(&copy, None), root.path().join("data"));
+        assert_eq!(data_dir_of(&program, None), root.path().join("data"));
+    }
+
+    #[test]
+    fn each_data_folder_has_a_pipe_of_its_own() {
+        let one = pipe_name(Path::new("D:/Tools/MicaTerm/data"));
+        assert!(one.starts_with(r"\\.\pipe\micaterm-cli-"), "{one}");
+        assert_eq!(one.len(), r"\\.\pipe\micaterm-cli-".len() + 16);
+        // 大小写不同还是同一个文件夹。
+        assert_eq!(one, pipe_name(Path::new("d:/tools/micaterm/DATA")));
+        assert_ne!(one, pipe_name(Path::new("E:/MicaTerm/data")));
+    }
 
     #[test]
     fn the_data_folder_is_beside_the_program() {

@@ -1,5 +1,6 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/mod.rs
-// 裁剪：去掉 CLI 同步（`sync.rs`）和终端连接上的 SFTP 通道（`TerminalNotConnected`、`SftpChannelOpener`）。
+// 裁剪：去掉终端连接上的 SFTP 通道（`TerminalNotConnected`、`SftpChannelOpener`）；
+// CLI 同步（`sync.rs`）在 Agent CLI 工单 03 加回。
 //! The SFTP engine: one worker per session lists and changes remote files,
 //! reads and saves them for an editor, and transfers them in batches,
 //! several small files at once, resuming what a lost connection cut off.
@@ -20,6 +21,7 @@ mod model;
 mod operations;
 mod parallel;
 mod speed;
+mod sync;
 mod upload;
 mod worker;
 pub use client::is_network_error;

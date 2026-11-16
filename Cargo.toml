@@ -12,6 +12,12 @@ default-run = "micaterm"
 name = "micaterm"
 path = "src/main.rs"
 
+# `micaterm` 命令（外部 CLI，Agent CLI 工单 01）单独一个控制台程序：Windows 的发布版
+# `micaterm.exe` 是 GUI 程序，没有控制台，shell 既不等它也看不到它的输出。
+[[bin]]
+name = "micaterm-cli"
+path = "src/bin/micaterm-cli.rs"
+
 [lib]
 name = "micaterm"
 path = "src/lib.rs"
@@ -72,6 +78,13 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # SFTP 标签本地一侧：「下载」文件夹在哪（工单 20）；本地删除进回收站（工单 21）。
 dirs = "6"
 trash = "5"
+# 外部 CLI（Agent CLI 工单 01）：`micaterm` 命令的参数；命名管道的名字按数据目录的 SHA-256 取；
+# 主机列表按显示宽度对齐（中文算两格）。三个都是锁文件里已有的版本。
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+unicode-width = "0.2"
+# 外部 CLI 的安装（工单 05）：Windows 上换下正在用的命令副本时，放到一边的旧文件用随机名字。
+uuid = { version = "1", features = ["v4"] }
 
 # Mica 背景只在 Windows 11 22H2 及以上开（工单 26）：读系统 build 号；
 # 窗口的深色模式属性跟着应用外观（Mica 的底色看它），要窗口句柄。
@@ -86,6 +99,21 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 raw-window-handle = "0.6"
+# 外部 CLI 的命名管道：只许当前用户连（DACL）、核对管道的属主（拷自 shell-rs 的 pipe_windows.rs，
+# 它用的就是 windows-sys，锁文件里已有这一版）。
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    # 改了用户的 PATH 之后广播 WM_SETTINGCHANGE（工单 05）。
+    "Win32_UI_WindowsAndMessaging",
+] }
+# 外部 CLI 的安装：把命令所在的文件夹加进用户的 PATH（`HKCU\Environment`），锁文件里已有这一版。
+windows-registry = "0.6"
 
 # Windows 可执行文件里的图标与版本信息（build.rs）。
 [target.'cfg(windows)'.build-dependencies]

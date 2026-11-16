@@ -1,5 +1,6 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/worker.rs
-// 裁剪：`SftpRoute` 换成 `HostLogin`；去掉外部 CLI 的 `sync`（`sync_target`、删除多余文件）。
+// 裁剪：`SftpRoute` 换成 `HostLogin`；去掉外部 CLI 的 `sync`（`sync_target`、删除多余文件），
+// Agent CLI 工单 03 照上游加回到 `prepare` 里。
 //! One SFTP connection's worker: it connects, serves listings, operations
 //! and the editor's files alongside one transfer batch at a time, and
 //! reconnects a batch whose connection dropped.
@@ -15,7 +16,7 @@ use super::{
     journal::{DownloadJournal, Journal},
     meter::TransferMeter,
     model::{scp_local_target, scp_remote_target},
-    operations,
+    operations, sync,
     upload::UploadBatch,
 };
 use crate::{HostLogin, LATENCY_INTERVAL, SshConnectionConfig, SshConnector, SshPrompts};
@@ -593,7 +594,31 @@ impl SftpWorker {
             events
                 .send(EngineEvent::Progress(TransferProgress::default()))
                 .await?;
-            let request = if request.is_scp() {
+            let mut pruned = sync::Pruned::default();
+            let request = if let Some(delete) = request.sync_deletes() {
+                // The local folder itself, through any link to it: what it
+                // holds is what is copied.
+                let source = &request.sources()[0];
+                let local = tokio::fs::canonicalize(source)
+                    .await
+                    .ok()
+                    .filter(|path| path.is_dir())
+                    .map(|path| dunce::simplified(&path).to_path_buf())
+                    .ok_or_else(|| {
+                        anyhow!(SftpError::LocalFolderMissing {
+                            path: source.clone()
+                        })
+                    })?;
+                let target = sync_target(connected, request.destination(), control).await?;
+                if delete {
+                    pruned = sync::prune(connected, &local, &target, control).await?;
+                }
+                // Copied as the folder it goes to, which is there.
+                request
+                    .clone()
+                    .with_source(local)
+                    .resolved(target.parent(), Some(target.file_name().to_string()))
+            } else if request.is_scp() {
                 let destination = request.destination();
                 let is_directory = destination.is_root()
                     || control
@@ -630,7 +655,7 @@ impl SftpWorker {
                     .await?;
                 super::UploadRequest::new(request.sources().to_vec(), target)?
             };
-            let upload = control
+            let mut upload = control
                 .run(UploadBatch::scan(
                     &request,
                     &self.endpoint,
@@ -639,6 +664,7 @@ impl SftpWorker {
                     control,
                 ))
                 .await?;
+            upload.add_pruned(pruned.deleted, pruned.failures);
             *batch = Some(TransferBatch::Upload(upload));
         }
         if let SftpCommand::Download(request) = operation {
@@ -855,6 +881,52 @@ fn no_connection(control: &TransferControl) -> anyhow::Error {
     } else {
         std::io::Error::new(std::io::ErrorKind::NotConnected, SftpError::NoConnection).into()
     }
+}
+
+/// The folder a sync copies into: `destination` when it is a folder, links
+/// to it resolved; made when it is not there, in a folder that is, as scp
+/// would. Never the root: a sync with `--delete` would empty the server.
+async fn sync_target(
+    fs: &SftpClient,
+    destination: &RemotePath,
+    control: &TransferControl,
+) -> Result<RemotePath> {
+    let target = match control.run(fs.stat(destination)).await? {
+        Some(metadata) if metadata.kind() == EntryKind::Directory => {
+            control.run(fs.canonicalize(destination)).await?
+        }
+        Some(_) => anyhow::bail!(SftpError::NotAFolder {
+            path: destination.to_string()
+        }),
+        None => {
+            let parent = destination.parent();
+            let missing = || {
+                anyhow!(SftpError::RemoteFolderMissing {
+                    path: parent.to_string()
+                })
+            };
+            let parent = control
+                .run(fs.canonicalize(&parent))
+                .await
+                .map_err(|_| missing())?;
+            if !control
+                .run(fs.stat(&parent))
+                .await?
+                .is_some_and(|metadata| metadata.kind() == EntryKind::Directory)
+            {
+                return Err(missing());
+            }
+            let target = parent.join(destination.file_name())?;
+            if !target.is_root() {
+                control.run(fs.mkdir(&target)).await?;
+            }
+            target
+        }
+    };
+    if target.is_root() {
+        anyhow::bail!(SftpError::SyncToRoot);
+    }
+    Ok(target)
 }
 
 /// Measure the connection in use every [`LATENCY_INTERVAL`], and a new one

@@ -58,6 +58,10 @@ sftp.worker.local_folder_missing:
   zh-CN: 本地目录 %{path} 不存在
 sftp.worker.remote_folder_missing:
   zh-CN: 远程目录 %{path} 不存在
+sftp.worker.not_a_folder:
+  zh-CN: 远程路径 %{path} 不是目录
+sftp.worker.sync_to_root:
+  zh-CN: 不能同步到根目录 /
 sftp.worker.reconnect_in:
   zh-CN: 将在 %{count} 秒后重连（%{attempt}/3）
 sftp.upload.source_name_not_utf8:

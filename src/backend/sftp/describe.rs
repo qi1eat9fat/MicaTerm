@@ -164,6 +164,8 @@ fn sftp(error: &SftpError, rest: &[Cause<'_>]) -> String {
         SftpError::RemoteFolderMissing { path } => {
             t!("sftp.worker.remote_folder_missing", path = path)
         }
+        SftpError::NotAFolder { path } => t!("sftp.worker.not_a_folder", path = path),
+        SftpError::SyncToRoot => t!("sftp.worker.sync_to_root"),
         SftpError::ReconnectIn { seconds, attempt } => {
             t!(
                 "sftp.worker.reconnect_in",

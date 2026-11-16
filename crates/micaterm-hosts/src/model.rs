@@ -3,6 +3,7 @@
 // `Host.public_id` 和「复制 ID」、右侧栏工具字段、SFTP 书签、同步用的 `edited_ms`；
 // 主机列表平铺，只按 `sort_order` 排。`PublicId` 改名 `SecretId`，只剩凭据在保险库里的条目名用它。
 // `ProxyKind` 和上游一样用 micaterm-ssh 的。
+// Agent CLI 工单 01 起：主机又有了对外的 `PublicId`（外部 CLI 和「复制 ID」用），见下面。
 
 use gpui_shared_string::SharedString;
 use rand::{Rng as _, distr::Alphanumeric};
@@ -14,6 +15,49 @@ use super::CredentialId;
 /// Stable identity of a host. Never reused within a process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct HostId(pub u64);
+
+/// 主机对外的名字：外部 CLI 用它指一台主机，主机栏的「复制 ID」复制它，如 `VmLkf1snMOuPKJ07`。
+///
+/// 不用 [`HostId`]：那是数据库的行号，删掉最后一台主机后下一台新主机会拿到同一个号，
+/// Agent 记着的旧 ID 就会指到另一台机器上。这个是随机的，删了不复用，复制出来的主机拿新的。
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PublicId(SharedString);
+
+impl PublicId {
+    /// 新的 ID：和 [`SecretId`] 一样，62 个字符里取 16 个，约 95 位随机。
+    pub fn generate() -> Self {
+        Self(random_id().into())
+    }
+
+    /// `text` 像不像一个 ID：16 个 ASCII 字母和数字。
+    pub fn has_shape(text: &str) -> bool {
+        SecretId::has_shape(text)
+    }
+
+    /// 从数据库读回来的 ID。
+    pub(crate) fn from_stored(id: String) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for PublicId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+/// [`SecretId`] 和 [`PublicId`] 共用的随机串：16 个字母和数字。
+fn random_id() -> String {
+    rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(SecretId::LEN)
+        .map(char::from)
+        .collect()
+}
 
 /// The random name a credential's secrets go by in the vault, such as
 /// `Jwg5rHvXCxw89paM`. Random letters and digits, not derived from
@@ -29,12 +73,7 @@ impl SecretId {
 
     /// A new id: 16 characters from 62, about 95 random bits.
     pub fn generate() -> Self {
-        let id: String = rand::rng()
-            .sample_iter(&Alphanumeric)
-            .take(Self::LEN)
-            .map(char::from)
-            .collect();
-        Self(id.into())
+        Self(random_id().into())
     }
 
     /// A new id that `in_use` does not already claim. Sixteen random
@@ -304,6 +343,8 @@ fn is_light(color: u32) -> bool {
 #[non_exhaustive]
 pub struct Host {
     pub id: HostId,
+    /// 对外的 ID（外部 CLI、「复制 ID」）。新建和复制时随机生成，编辑主机不变。
+    pub public_id: PublicId,
     pub name: SharedString,
     /// The host name or IP address it is reached at: 「地址」 in the form.
     pub address: SharedString,
@@ -338,6 +379,7 @@ impl Host {
     pub fn new(id: HostId, draft: HostDraft) -> Self {
         Self {
             id,
+            public_id: PublicId::generate(),
             name: draft.name,
             address: draft.address,
             port: draft.port,

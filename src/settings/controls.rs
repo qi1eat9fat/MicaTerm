@@ -25,6 +25,8 @@ use crate::ui::icon_button::TextTooltip;
 
 /// 说明、分组标题这些一行字的行高（26 号 `.stg-row .d`、`.stg-sec`）。
 const LINE_HEIGHT: Pixels = px(18.);
+/// 设置行里标题和说明那一栏至少多宽：再窄控件就换到下一行。
+const TEXT_MIN: Pixels = px(200.);
 /// 下拉框、输入框、切换按钮组的高（26 号 `.stg-dd`、`.stg-in`、`.stg-row .npm-seg span`）。
 pub const CONTROL_HEIGHT: Pixels = px(28.);
 
@@ -89,10 +91,14 @@ pub fn row_with_note(
     control: impl IntoElement,
     tokens: &Tokens,
 ) -> AnyElement {
+    // 窗口窄时控件换到标题和说明下面（用户 2026-11-16）：说明那一栏至少 TEXT_MIN 宽，
+    // 放不下控件就整行折开，不再把说明挤成一个字一行。
     div()
         .flex()
+        .flex_wrap()
         .items_center()
-        .gap(px(24.))
+        .gap_x(px(24.))
+        .gap_y(px(8.))
         .min_h(px(60.))
         .py(px(10.))
         .border_b(size::LINE)
@@ -101,8 +107,10 @@ pub fn row_with_note(
             div()
                 .flex()
                 .flex_col()
-                .flex_1()
-                .min_w_0()
+                .flex_grow(1.)
+                .flex_shrink(1.)
+                .flex_basis(TEXT_MIN)
+                .min_w(TEXT_MIN)
                 .gap(px(2.))
                 .child(
                     div()

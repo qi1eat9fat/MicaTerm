@@ -36,6 +36,9 @@ icon_assets!(
         ShieldX,
         // 设置 › 应用（工单 26）。
         AppWindow,
+        // 应用内的 Agent（Agent CLI 工单 07）：右侧图标栏的「Agent」、启动前确认框里要做的那几行。
+        Sparkles,
+        Circle,
         // 设置标签：改过的设置标题后面的「恢复默认」，导航里的「终端」（UI 重做工单 12，26 号 `undo`、`term`）。
         Undo2,
         SquareTerminal,

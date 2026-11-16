@@ -69,3 +69,11 @@ card.remote.connecting_to:
   zh-CN: 正在连接 %{endpoint}…
 card.remote.connecting_via:
   zh-CN: 正在连接 %{endpoint}（经 %{route}）…
+card.menu.hand_to_agent:
+  zh-CN: 交给 Agent
+card.menu.take_back:
+  zh-CN: 收回
+card.status.agent:
+  zh-CN: Agent
+card.status.agent_running:
+  zh-CN: Agent 执行中

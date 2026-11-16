@@ -29,6 +29,7 @@ use crate::directory::ReportedDirectory;
 use crate::i18n::t;
 use crate::links::{LinkMarker, url_search, visible_links};
 use crate::notices::{NoticeScanner, ProgramNotice, TerminalNotice};
+use crate::run::{BusyReason, RunFailure, RunHandle};
 use crate::search::{MatchMarker, SearchDirection, SearchMark, SearchPosition, TerminalSearch};
 use crate::{
     SharedTerminalTransportFactory, TerminalColors, TerminalInteraction, TerminalLifecycle,
@@ -539,6 +540,59 @@ impl TerminalEngine {
         &self.lifecycle
     }
 
+    /// 接下一次 `micaterm exec --card`（见 [`crate::TerminalRun`]）：先给前台程序一个 ^C，其余等输出来了
+    /// 再做。全屏程序占着屏幕时不接（^C 停不了它，命令行会变成按给它的键），另一个 run 还在跑时
+    /// 也不接（^C 会把它停掉）。
+    // 来自 since2006/shell-rs @ b2a307a: src/terminal/engine.rs 的 `run_command`（没有 ZMODEM）
+    pub fn run_command(&self, run: RunHandle) -> Result<(), RunFailure> {
+        if !self.lifecycle.accepts_input() {
+            return Err(RunFailure::NotConnected);
+        }
+        if self.mode().contains(TermMode::ALT_SCREEN) {
+            return Err(RunFailure::Busy(BusyReason::FullScreen));
+        }
+        {
+            let mut slot = lock_run(&self.runtime.run);
+            if slot.as_ref().is_some_and(RunHandle::is_active) {
+                return Err(RunFailure::Busy(BusyReason::AnotherRun));
+            }
+            if !run.accept(self.runtime.commands.clone()) {
+                return Ok(());
+            }
+            *slot = Some(run);
+        }
+        self.send_user_input(b"\x03".to_vec());
+        Ok(())
+    }
+
+    /// 这条连接上有没有 `exec --card` 在跑。
+    pub fn is_running_command(&self) -> bool {
+        lock_run(&self.runtime.run)
+            .as_ref()
+            .is_some_and(RunHandle::is_active)
+    }
+
+    /// 从缓冲区底部往上读 `lines` 个逻辑行（`cards read`）。只锁一下终端，不动用户的滚动位置、
+    /// 选区和光标；用户往上翻着历史时读到的也一样，因为总是从底部算。
+    pub fn read_tail(&self, lines: usize) -> ScreenRead {
+        let term = self.runtime.term.lock();
+        read_tail(&term, lines)
+    }
+
+    /// 按终端现在的模式（应用光标键等）发一个命名键，重复 `repeat` 次（`cards send-key`）。
+    /// 不经用户输入那条路：不清用户的选区、不把用户翻着的历史拉回底部。
+    pub fn send_named_key(&self, name: &str, repeat: usize) -> Result<(), KeyRefused> {
+        let key = named_key(name).ok_or(KeyRefused::Unknown)?;
+        let bytes = named_key_bytes(&key, self.mode()).ok_or(KeyRefused::Unknown)?;
+        if !self.lifecycle.accepts_input() {
+            return Err(KeyRefused::NotConnected);
+        }
+        for _ in 0..repeat.max(1) {
+            self.runtime.write(bytes.clone());
+        }
+        Ok(())
+    }
+
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
     }
@@ -727,6 +781,8 @@ pub enum TerminalEvent {
 struct TerminalRuntime {
     term: Arc<FairMutex<AlacrittyTerm>>,
     commands: mpsc::Sender<TerminalTransportCommand>,
+    /// 这条连接上正在跑的 `micaterm exec --card`（Agent CLI 工单 06）：解析线程把输出交给它。
+    run: Arc<Mutex<Option<RunHandle>>>,
     size: Arc<Mutex<TerminalSize>>,
     wakeup_pending: Arc<AtomicBool>,
     /// 已经排了一个 `Output` 给 UI 线程、还没处理：这期间的输出不再排。
@@ -761,11 +817,13 @@ impl TerminalRuntime {
         let config = terminal_config(interaction);
         let term = Arc::new(FairMutex::new(AlacrittyTerm::new(config, &size, proxy)));
 
+        let run: Arc<Mutex<Option<RunHandle>>> = Arc::default();
         let mut parser = Parser {
             term: term.clone(),
             processor: Processor::new(),
             notices: NoticeScanner::default(),
             proxy: parser_proxy,
+            run: run.clone(),
         };
         thread::Builder::new()
             .name("micaterm-terminal-parser".into())
@@ -845,6 +903,10 @@ impl TerminalRuntime {
                         }
                     }
                 }
+                // 连接没了：正在跑的命令跑不完了。
+                if let Some(run) = lock_run(&parser.run).take() {
+                    run.disconnected();
+                }
             })
             .expect("terminal parser thread");
 
@@ -862,6 +924,7 @@ impl TerminalRuntime {
         Self {
             term,
             commands,
+            run,
             size: shared_size,
             wakeup_pending,
             output_pending,
@@ -1129,6 +1192,7 @@ struct Parser {
     /// Alacritty drops the notifications programs ask for.
     notices: NoticeScanner,
     proxy: TerminalEventProxy,
+    run: Arc<Mutex<Option<RunHandle>>>,
 }
 
 impl Parser {
@@ -1152,6 +1216,183 @@ impl Parser {
         if let Some(command) = self.notices.take_command() {
             self.proxy.send(TerminalUiEventKind::ShellCommand(command));
         }
+        feed_run(&self.run, bytes);
+    }
+}
+
+/// 把输出交给这条连接上的 run，跑完就放下。
+// 来自 since2006/shell-rs @ b2a307a: src/terminal/engine.rs 的 `feed_run`、`lock_run`
+fn feed_run(run: &Mutex<Option<RunHandle>>, bytes: &[u8]) {
+    let mut slot = lock_run(run);
+    if let Some(handle) = slot.as_ref()
+        && !handle.feed(bytes)
+    {
+        *slot = None;
+    }
+}
+
+fn lock_run(run: &Mutex<Option<RunHandle>>) -> std::sync::MutexGuard<'_, Option<RunHandle>> {
+    run.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+/// `cards read` 读到的东西（Agent CLI 工单 06）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScreenRead {
+    /// 从缓冲区底部往上的若干逻辑行，软换行已经接回，行尾的空白去掉了。
+    pub text: String,
+    pub returned_lines: usize,
+    /// 缓冲区里还留着多少行滚动内容（不算屏幕）。
+    pub history_available: usize,
+    /// 更早的还有，或者超过字节上限截掉了。
+    pub truncated: bool,
+    /// 全屏程序占着：读到的是它的画面，不是 shell 的。
+    pub alternate_screen: bool,
+}
+
+/// 一次最多回这么多字节。
+pub const SCREEN_READ_LIMIT: usize = 1024 * 1024;
+
+/// `cards send-key` 不收的键。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeyRefused {
+    /// 不在白名单里。
+    Unknown,
+    /// 终端这会儿不收输入（没连上）。
+    NotConnected,
+}
+
+/// `cards send-key` 收的一个键。
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum NamedKey {
+    /// 一个可打印字符（退出 `less` 的 `q`、回答 `[y/N]` 的 `y`）：原样送。
+    Char(char),
+    /// gpui 的按键写法，按终端模式编码。
+    Key(&'static str),
+}
+
+const CTRL_KEYS: [&str; 26] = [
+    "ctrl-a", "ctrl-b", "ctrl-c", "ctrl-d", "ctrl-e", "ctrl-f", "ctrl-g", "ctrl-h", "ctrl-i",
+    "ctrl-j", "ctrl-k", "ctrl-l", "ctrl-m", "ctrl-n", "ctrl-o", "ctrl-p", "ctrl-q", "ctrl-r",
+    "ctrl-s", "ctrl-t", "ctrl-u", "ctrl-v", "ctrl-w", "ctrl-x", "ctrl-y", "ctrl-z",
+];
+const F_KEYS: [&str; 12] = [
+    "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+];
+
+/// `cards send-key` 收的键名：`ctrl-a`…`ctrl-z`、`esc`、`enter`、`tab`、`backspace`、方向键、
+/// `home` / `end`、`page-up` / `page-down`、`f1`–`f12`，和一个可打印字符。别的一律不收。
+fn named_key(name: &str) -> Option<NamedKey> {
+    // 先看原样的：一个空格也是可打印字符，修剪了就没了。
+    let mut chars = name.chars();
+    if let (Some(only), None) = (chars.next(), chars.next())
+        && !only.is_control()
+    {
+        return Some(NamedKey::Char(only));
+    }
+    let lower = name.trim().to_ascii_lowercase();
+    // gpui 的 `space` 按键没有字节可编：照字符送。
+    if lower == "space" {
+        return Some(NamedKey::Char(' '));
+    }
+    if let Some(found) = CTRL_KEYS.iter().chain(&F_KEYS).find(|key| **key == lower) {
+        return Some(NamedKey::Key(found));
+    }
+    let key = match lower.as_str() {
+        "esc" | "escape" => "escape",
+        "enter" | "return" => "enter",
+        "tab" => "tab",
+        "backspace" => "backspace",
+        "up" => "up",
+        "down" => "down",
+        "left" => "left",
+        "right" => "right",
+        "home" => "home",
+        "end" => "end",
+        "page-up" | "pageup" => "pageup",
+        "page-down" | "pagedown" => "pagedown",
+        _ => return None,
+    };
+    Some(NamedKey::Key(key))
+}
+
+/// 一个键按终端现在的模式要送出去的字节。
+fn named_key_bytes(key: &NamedKey, mode: TermMode) -> Option<Vec<u8>> {
+    match key {
+        NamedKey::Char(character) => Some(character.to_string().into_bytes()),
+        NamedKey::Key(name) => {
+            let keystroke = gpui_kit::Keystroke::parse(name).ok()?;
+            crate::terminal_view::encode_key(&keystroke, mode)
+        }
+    }
+}
+
+/// [`TerminalEngine::read_tail`]：从最后一行有字的地方往上数逻辑行（软换行接着的算一行）。
+fn read_tail(term: &AlacrittyTerm, lines: usize) -> ScreenRead {
+    let grid = term.grid();
+    let top = -(grid.history_size() as i32);
+    let columns = grid.columns();
+    let last_column = Column(columns.saturating_sub(1));
+    let wraps = |line: i32| {
+        grid[Line(line)][last_column]
+            .flags
+            .contains(Flags::WRAPLINE)
+    };
+    let blank = |line: i32| {
+        (0..columns).all(|column| {
+            let cell = &grid[Line(line)][Column(column)];
+            cell.c == ' ' || cell.c == '\t'
+        })
+    };
+    // 屏幕底下还没写到的空行不算。
+    let mut bottom = grid.screen_lines() as i32 - 1;
+    while bottom > top && blank(bottom) && !wraps(bottom - 1) {
+        bottom -= 1;
+    }
+    let wanted = lines.max(1);
+    let mut start = bottom;
+    let mut counted = 0;
+    let mut row = bottom;
+    while row >= top {
+        // 上一行没软换行过来，这一行就是一个逻辑行的开头。
+        if row == top || !wraps(row - 1) {
+            counted += 1;
+            start = row;
+            if counted == wanted {
+                break;
+            }
+        }
+        row -= 1;
+    }
+    let more_above = start > top;
+    let text = term.bounds_to_string(
+        Point::new(Line(start), Column(0)),
+        Point::new(Line(bottom), last_column),
+    );
+    let mut text: String = text
+        .split('\n')
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut truncated = more_above;
+    if text.len() > SCREEN_READ_LIMIT {
+        // 留后面的：Agent 要的是最近的输出。从字符边界切。
+        let mut cut = text.len() - SCREEN_READ_LIMIT;
+        while !text.is_char_boundary(cut) {
+            cut += 1;
+        }
+        text = text[cut..].to_string();
+        truncated = true;
+    }
+    ScreenRead {
+        returned_lines: if text.is_empty() {
+            0
+        } else {
+            text.split('\n').count()
+        },
+        text,
+        history_available: grid.history_size(),
+        truncated,
+        alternate_screen: term.mode().contains(TermMode::ALT_SCREEN),
     }
 }
 
@@ -2083,5 +2324,125 @@ mod tests {
         assert!(matches!(receive(&receiver, None), Received::Event(2)));
         drop(sender);
         assert!(matches!(receive(&receiver, None), Received::Closed));
+    }
+
+    /// `cards read`（Agent CLI 工单 06）：软换行接回一行，从底部往上数，屏幕下面的空行不算。
+    #[test]
+    fn reading_the_tail_joins_wrapped_lines_and_counts_from_the_bottom() {
+        let mut term = test_term(10, 4);
+        // 第二行 15 个字，在 10 列的终端里软换行成两行。
+        feed(&mut term, b"one\r\nabcdefghijklmno\r\nthree");
+        let all = read_tail(&term, 100);
+        assert_eq!(all.text, "one\nabcdefghijklmno\nthree");
+        assert_eq!(all.returned_lines, 3);
+        assert!(!all.truncated);
+        assert!(!all.alternate_screen);
+
+        let last_two = read_tail(&term, 2);
+        assert_eq!(last_two.text, "abcdefghijklmno\nthree");
+        assert!(last_two.truncated, "上面还有");
+    }
+
+    #[test]
+    fn reading_the_tail_reaches_into_the_scrollback() {
+        let mut term = test_term(20, 3);
+        for line in 1..=10 {
+            feed(&mut term, format!("line {line}\r\n").as_bytes());
+        }
+        let read = read_tail(&term, 5);
+        assert_eq!(read.text, "line 6\nline 7\nline 8\nline 9\nline 10");
+        assert!(read.history_available > 0);
+    }
+
+    /// 用户往上翻着历史时读到的也一样：总是从底部算。
+    #[test]
+    fn reading_the_tail_ignores_where_the_user_scrolled_to() {
+        let mut term = test_term(20, 3);
+        for line in 1..=10 {
+            feed(&mut term, format!("line {line}\r\n").as_bytes());
+        }
+        let before = read_tail(&term, 4);
+        term.scroll_display(alacritty_terminal::grid::Scroll::Delta(5));
+        assert_eq!(term.grid().display_offset(), 5);
+        assert_eq!(read_tail(&term, 4), before);
+        assert_eq!(term.grid().display_offset(), 5, "滚动位置不动");
+    }
+
+    /// 回复不超过 1 MiB：留最后面的输出。
+    #[test]
+    fn reading_the_tail_keeps_the_last_mebibyte() {
+        let mut term = test_term(600, 5);
+        let line = "x".repeat(599);
+        for _ in 0..1900 {
+            feed(&mut term, format!("{line}\r\n").as_bytes());
+        }
+        feed(&mut term, b"end");
+        let read = read_tail(&term, 2000);
+        assert!(read.text.len() <= SCREEN_READ_LIMIT);
+        assert!(read.truncated);
+        assert!(read.text.ends_with("\nend"));
+    }
+
+    #[test]
+    fn a_full_screen_program_is_said_to_have_the_screen() {
+        let mut term = test_term(20, 3);
+        feed(&mut term, b"\x1b[?1049hless");
+        assert!(read_tail(&term, 10).alternate_screen);
+    }
+
+    /// `cards send-key`：只认白名单里的键，方向键跟着终端的模式编码。
+    #[test]
+    fn named_keys_are_a_short_list_and_follow_the_cursor_key_mode() {
+        assert_eq!(named_key("q"), Some(NamedKey::Char('q')));
+        assert_eq!(named_key("Ctrl-C"), Some(NamedKey::Key("ctrl-c")));
+        assert_eq!(named_key("page-down"), Some(NamedKey::Key("pagedown")));
+        assert_eq!(named_key("f12"), Some(NamedKey::Key("f12")));
+        assert_eq!(named_key("f13"), None);
+        // 冒烟时漏掉的：空格两种写法都送一个空格。
+        assert_eq!(named_key(" "), Some(NamedKey::Char(' ')));
+        assert_eq!(named_key("Space"), Some(NamedKey::Char(' ')));
+        assert_eq!(
+            named_key_bytes(&named_key("space").unwrap(), TermMode::empty()).unwrap(),
+            b" "
+        );
+        // 白名单里的每个名字都编得出字节。
+        for name in [
+            "esc",
+            "enter",
+            "tab",
+            "backspace",
+            "up",
+            "down",
+            "left",
+            "right",
+            "home",
+            "end",
+            "page-up",
+            "page-down",
+            "space",
+        ]
+        .into_iter()
+        .chain(CTRL_KEYS)
+        .chain(F_KEYS)
+        {
+            let key = named_key(name).unwrap_or_else(|| panic!("{name}"));
+            assert!(
+                named_key_bytes(&key, TermMode::empty()).is_some_and(|bytes| !bytes.is_empty()),
+                "{name}"
+            );
+        }
+        assert_eq!(named_key("ctrl-alt-delete"), None);
+        assert_eq!(named_key("\u{1b}"), None);
+
+        let ctrl_c = named_key_bytes(&NamedKey::Key("ctrl-c"), TermMode::empty()).unwrap();
+        assert_eq!(ctrl_c, b"\x03");
+        let normal = named_key_bytes(&NamedKey::Key("up"), TermMode::empty()).unwrap();
+        let application = named_key_bytes(&NamedKey::Key("up"), TermMode::APP_CURSOR).unwrap();
+        assert_eq!(normal, b"\x1b[A");
+        assert_eq!(application, b"\x1bOA");
+        assert_eq!(
+            named_key_bytes(&NamedKey::Char('y'), TermMode::empty()).unwrap(),
+            b"y"
+        );
     }
 }

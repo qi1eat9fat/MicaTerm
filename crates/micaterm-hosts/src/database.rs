@@ -4,6 +4,7 @@
 // `host_jumps`、`snippets` 四张表，不建分组、SFTP 书签、端口转发、片段分类、项目终端、同步的表；
 // 主机去掉协议、串口、Telnet、分组、右侧栏工具、`public_id`、`edited_ms` 列；凭据的 `key_path`
 // 换成不算秘密的 `public_key`。读写方法跟着瘦身，树形排序改成 `save_host_order`。
+// v5（Agent CLI 工单 01）又加回主机的 `public_id`：只是一列随机 ID，不沿用上游的补法。
 
 //! The SQLite file behind the host store.
 //!
@@ -18,7 +19,7 @@ use rusqlite::{Connection, params};
 
 use super::{
     AuthKind, Credential, CredentialDraft, CredentialId, CredentialKind, Host, HostDraft, HostId,
-    HostOs, ProxyKind, ProxySettings, Route, SecretId, Snippet, SnippetDraft, SnippetId,
+    HostOs, ProxyKind, ProxySettings, PublicId, Route, SecretId, Snippet, SnippetDraft, SnippetId,
 };
 
 /// SQLite's only integer type is `i64`, so the `u64` ids cross the boundary
@@ -40,7 +41,9 @@ fn from_sql(id: i64) -> u64 {
 ///
 /// - 2（工单 34）：`hosts.probe_os`，登录后探不探测系统。
 /// - 3：`hosts.hostname`，上次探测到的 `uname -n`。
-pub const SCHEMA_VERSION: i64 = 4;
+/// - 4：去掉 `hosts.last_connected_at`。
+/// - 5（Agent CLI 工单 01）：`hosts.public_id`，主机对外的随机 ID。
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// The whole schema, as a new database gets it.
 ///
@@ -65,6 +68,8 @@ pub const SCHEMA_VERSION: i64 = 4;
 ///     host form.
 ///   - `probe_os` 是登录后探不探测系统：主机表单写它，探测把连接弄断时连接也写它。
 ///   - `hostname` 是上次探测到的 `uname -n`，连接写它；关了探测时用来核对远程报告的目录。
+///   - `public_id` 是主机对外的随机 ID（外部 CLI、「复制 ID」），唯一。加列时旧行还没有值，
+///     所以列上不能写 `NOT NULL`；新建、复制主机时 store 总是写一个，迁移给旧主机补上。
 /// - **host_jumps** lists a host's jump hosts in order. A deleted jump
 ///   host leaves its row behind with no `jump_id`, so the host fails to
 ///   connect rather than skip the hop.
@@ -99,6 +104,7 @@ CREATE TABLE hosts (
     os                TEXT,
     probe_os          INTEGER NOT NULL DEFAULT 1 CHECK (probe_os IN (0, 1)),
     hostname          TEXT CHECK (hostname <> ''),
+    public_id         TEXT CHECK (public_id <> ''),
     CHECK ((auth = 'credential') = (credential_id IS NOT NULL)),
     CHECK ((auth = 'credential') = (username IS NULL)),
     CHECK ((route = 'proxy') = (proxy_kind IS NOT NULL)),
@@ -107,6 +113,7 @@ CREATE TABLE hosts (
     CHECK (proxy_kind IS NOT NULL OR proxy_username IS NULL)
 ) STRICT;
 CREATE INDEX hosts_credential_id ON hosts(credential_id);
+CREATE UNIQUE INDEX hosts_public_id ON hosts(public_id);
 CREATE TABLE host_jumps (
     host_id  INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
     position INTEGER NOT NULL CHECK (position >= 0),
@@ -247,7 +254,7 @@ impl HostDatabase {
             .prepare(
                 "SELECT id, sort_order, name, address, port, auth, username, credential_id, \
                  route, proxy_kind, proxy_host, proxy_port, proxy_username, notes, os, \
-                 probe_os, hostname FROM hosts ORDER BY sort_order, id",
+                 probe_os, hostname, public_id FROM hosts ORDER BY sort_order, id",
             )?
             .query_map([], |row| {
                 let id: i64 = row.get(0)?;
@@ -266,6 +273,7 @@ impl HostDatabase {
                 let os: Option<String> = row.get(14)?;
                 let probe_os: bool = row.get(15)?;
                 let hostname: Option<String> = row.get(16)?;
+                let public_id: Option<String> = row.get(17)?;
                 let mut host = Host::new(
                     HostId(from_sql(id)),
                     HostDraft::new(
@@ -297,6 +305,10 @@ impl HostDatabase {
                 };
                 host.os = os.as_deref().and_then(HostOs::from_stored);
                 host.hostname = hostname.map(Into::into);
+                // 迁移和新建都写了它；手改数据库留下的空值就用 `Host::new` 给的新 ID。
+                if let Some(public_id) = public_id {
+                    host.public_id = PublicId::from_stored(public_id);
+                }
                 Ok(host)
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -382,9 +394,9 @@ impl HostDatabase {
             connection.execute(
                 "INSERT INTO hosts (id, sort_order, name, address, port, auth, username, \
                  credential_id, route, proxy_kind, proxy_host, proxy_port, proxy_username, \
-                 notes, os, probe_os, hostname) \
+                 notes, os, probe_os, hostname, public_id) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                 ?17)",
+                 ?17, ?18)",
                 params![
                     to_sql(host.id.0),
                     host.sort_order,
@@ -403,6 +415,7 @@ impl HostDatabase {
                     host.os.map(HostOs::as_str),
                     host.probe_os,
                     host.hostname.as_deref(),
+                    host.public_id.as_str(),
                 ],
             )?;
             write_jumps(connection, host)
@@ -688,6 +701,27 @@ fn migrate(connection: &Connection) -> Result<(), OpenError> {
              COMMIT;",
         )?;
     }
+    if version < 5 {
+        // Agent CLI 工单 01：主机对外的随机 ID。已有的主机各补一个。
+        let transaction = connection.unchecked_transaction()?;
+        transaction.execute_batch(
+            "ALTER TABLE hosts ADD COLUMN public_id TEXT CHECK (public_id <> '');",
+        )?;
+        let ids = transaction
+            .prepare("SELECT id FROM hosts")?
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut update = transaction.prepare("UPDATE hosts SET public_id = ?2 WHERE id = ?1")?;
+        for id in ids {
+            update.execute(params![id, PublicId::generate().as_str()])?;
+        }
+        drop(update);
+        transaction.execute_batch(
+            "CREATE UNIQUE INDEX hosts_public_id ON hosts(public_id);
+             PRAGMA user_version = 5;",
+        )?;
+        transaction.commit()?;
+    }
     Ok(())
 }
 
@@ -721,7 +755,7 @@ mod tests {
     #[test]
     fn a_fresh_database_is_empty_and_at_the_current_schema() {
         let db = HostDatabase::in_memory().unwrap();
-        assert_eq!(SCHEMA_VERSION, 4);
+        assert_eq!(SCHEMA_VERSION, 5);
         assert_eq!(version_of(&db.connection), SCHEMA_VERSION);
         let data = db.load().unwrap();
         assert!(data.hosts.is_empty());
@@ -1226,7 +1260,9 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
         {
             let old = Connection::open(&path).unwrap();
             old.execute_batch(
-                "ALTER TABLE hosts DROP COLUMN hostname;\n\
+                "DROP INDEX hosts_public_id;\n\
+                 ALTER TABLE hosts DROP COLUMN public_id;\n\
+                 ALTER TABLE hosts DROP COLUMN hostname;\n\
                  ALTER TABLE hosts ADD COLUMN last_connected_at INTEGER;\n\
                  INSERT INTO hosts (id, name, address, port, auth, username, probe_os) \
                  VALUES (1, 'web', '10.0.0.1', 22, 'password', 'root', 0);\n\
@@ -1266,7 +1302,9 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
         {
             let old = Connection::open(&path).unwrap();
             old.execute_batch(
-                "ALTER TABLE hosts ADD COLUMN last_connected_at INTEGER;\n\
+                "DROP INDEX hosts_public_id;\n\
+                 ALTER TABLE hosts DROP COLUMN public_id;\n\
+                 ALTER TABLE hosts ADD COLUMN last_connected_at INTEGER;\n\
                  INSERT INTO hosts (id, name, address, port, auth, username, last_connected_at) \
                  VALUES (1, 'web', '10.0.0.1', 22, 'password', 'root', 42);\n\
                  PRAGMA user_version = 3;",
@@ -1290,7 +1328,9 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
         {
             let old = Connection::open(&path).unwrap();
             old.execute_batch(
-                "ALTER TABLE hosts DROP COLUMN hostname;\n\
+                "DROP INDEX hosts_public_id;\n\
+                 ALTER TABLE hosts DROP COLUMN public_id;\n\
+                 ALTER TABLE hosts DROP COLUMN hostname;\n\
                  ALTER TABLE hosts DROP COLUMN probe_os;\n\
                  ALTER TABLE hosts ADD COLUMN last_connected_at INTEGER;\n\
                  INSERT INTO hosts (id, name, address, port, auth, username) \
@@ -1307,6 +1347,61 @@ ALTER TABLE t ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
         assert!(hosts[0].probe_os, "升级前的主机照旧探测");
         let fresh = HostDatabase::in_memory().unwrap();
         assert_eq!(schema_of(&db.connection), schema_of(&fresh.connection));
+    }
+
+    #[test]
+    fn a_schema_four_file_gives_each_host_a_public_id_of_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("micaterm.db");
+        drop(HostDatabase::open(&path).unwrap());
+        // 做出一个 schema 4 的文件：还没有 public_id，有两台主机。
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(
+                "DROP INDEX hosts_public_id;\n\
+                 ALTER TABLE hosts DROP COLUMN public_id;\n\
+                 INSERT INTO hosts (id, name, address, port, auth, username) \
+                 VALUES (1, 'web', '10.0.0.1', 22, 'password', 'root');\n\
+                 INSERT INTO hosts (id, name, address, port, auth, username) \
+                 VALUES (2, 'db', '10.0.0.2', 22, 'password', 'root');\n\
+                 PRAGMA user_version = 4;",
+            )
+            .unwrap();
+        }
+
+        let db = HostDatabase::open(&path).unwrap();
+        assert_eq!(version_of(&db.connection), SCHEMA_VERSION);
+        let hosts = db.load().unwrap().hosts;
+        assert!(
+            hosts
+                .iter()
+                .all(|host| PublicId::has_shape(host.public_id.as_str()))
+        );
+        assert_ne!(hosts[0].public_id, hosts[1].public_id);
+        let fresh = HostDatabase::in_memory().unwrap();
+        assert_eq!(schema_of(&db.connection), schema_of(&fresh.connection));
+        drop(db);
+
+        // 补上的 ID 写进了文件：再打开还是同一个。
+        let again = HostDatabase::open(&path).unwrap().load().unwrap().hosts;
+        assert_eq!(again[0].public_id, hosts[0].public_id);
+    }
+
+    #[test]
+    fn a_host_keeps_its_public_id_across_a_save_and_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("micaterm.db");
+        let web = host(1, "web");
+        {
+            let db = HostDatabase::open(&path).unwrap();
+            db.insert_host(&web).unwrap();
+            let mut renamed = web.clone();
+            renamed.name = "web-01".into();
+            db.update_host(&renamed).unwrap();
+        }
+        let stored = HostDatabase::open(&path).unwrap().load().unwrap().hosts;
+        assert_eq!(stored[0].public_id, web.public_id);
+        assert_eq!(stored[0].name.as_ref(), "web-01");
     }
 
     #[test]

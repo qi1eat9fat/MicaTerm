@@ -1,8 +1,9 @@
 // 来自 since2006/shell-rs @ b2a307a: src/terminal/local_pty.rs
-// 裁剪：去掉保留终端内容（`replay`）；`TERM_PROGRAM` 改为 MicaTerm；加了 Windows 上的测试。
+// 裁剪：去掉保留终端内容（`replay`）；`TERM_PROGRAM` 改为 micaterm；加了 Windows 上的测试；
+// Agent CLI 工单 07 加了卡片自带的环境变量和 `PATH` 前置（`prepended_path`）。
 
 use std::io::{ErrorKind, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
@@ -71,13 +72,30 @@ impl TerminalTransport for LocalPtyTransport {
         commands: mpsc::Receiver<TerminalTransportCommand>,
         events: Sender<TerminalTransportEvent>,
     ) -> Result<()> {
-        let LocalLaunch { shell, directory } = self.launch;
+        let LocalLaunch {
+            shell,
+            directory,
+            env,
+            path_front,
+            args,
+        } = self.launch;
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(to_pty_size(initial_size))
             .context(t!("terminal.pty.open_failed"))?;
 
         let mut command = shell_command(&shell)?;
+        for arg in args {
+            command.arg(arg);
+        }
+        for (name, value) in env {
+            command.env(name, value);
+        }
+        if let Some(directory) = path_front
+            && let Some(path) = prepended_path(&directory, command.get_env("PATH"))
+        {
+            command.env("PATH", path);
+        }
         // A folder gone since leaves the home folder, as with none.
         if let Some(directory) = directory.filter(|directory| directory.is_dir()) {
             command.cwd(directory);
@@ -260,12 +278,55 @@ fn shell_command(shell: &LocalShell) -> Result<CommandBuilder> {
     strip_launcher_vars(&mut command);
     command.env("TERM", TERM_NAME);
     command.env("COLORTERM", "truecolor");
-    command.env("TERM_PROGRAM", "MicaTerm");
+    command.env("TERM_PROGRAM", "micaterm");
     // Windows 上的 PowerShell、cmd 在提示符前报告当前目录（工单 31）：
     // PowerShell 的 `cd` 不改进程的当前目录，下面读 PEB 的办法拿不到。
     #[cfg(windows)]
     crate::shell_integration::report_directory(&mut command);
     Ok(command)
+}
+
+/// `PATH` 的新值：`directory` 挪到最前面，别处等值的去掉；已经在最前面时 `None`。
+/// Windows 上的 shell 从注册表重新拼 `PATH`（portable-pty 这么做），所以拿将要交给 shell 的
+/// 那个值来改，不拿 MicaTerm 自己进程的。
+fn prepended_path(
+    directory: &Path,
+    current: Option<&std::ffi::OsStr>,
+) -> Option<std::ffi::OsString> {
+    let mut entries: Vec<PathBuf> = current
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect();
+    if entries
+        .first()
+        .is_some_and(|first| same_directory(first, directory))
+    {
+        return None;
+    }
+    entries.retain(|entry| !same_directory(entry, directory));
+    entries.insert(0, directory.to_path_buf());
+    // 某一项自带分隔符时拼不回去：那样的 `PATH` 本来就坏了，留着原样。
+    std::env::join_paths(entries).ok()
+}
+
+/// 同一个目录：不管末尾的分隔符；Windows 上不分大小写、`/` 和 `\` 一样。
+fn same_directory(left: &Path, right: &Path) -> bool {
+    fn key(path: &Path) -> String {
+        let text = path.to_string_lossy();
+        let text = if cfg!(windows) {
+            text.replace('/', "\\").to_lowercase()
+        } else {
+            text.into_owned()
+        };
+        let trimmed = text.trim_end_matches(std::path::MAIN_SEPARATOR);
+        if trimmed.is_empty() {
+            text
+        } else {
+            trimmed.to_string()
+        }
+    }
+    key(left) == key(right)
 }
 
 /// The folder process `pid` is in, where the system tells it.
@@ -719,12 +780,92 @@ mod tests {
     }
 }
 
+/// `PATH` 前置（Agent CLI 工单 07）：按值判重，嵌套多少层都只有一份。
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    fn entries(path: &std::ffi::OsStr) -> Vec<PathBuf> {
+        std::env::split_paths(path).collect()
+    }
+
+    #[test]
+    fn the_cli_folder_goes_first_on_the_path_once() {
+        let (cli, other) = if cfg!(windows) {
+            (
+                PathBuf::from(r"C:\MicaTerm\bin"),
+                PathBuf::from(r"C:\Windows"),
+            )
+        } else {
+            (
+                PathBuf::from("/opt/micaterm/bin"),
+                PathBuf::from("/usr/bin"),
+            )
+        };
+        let current = std::env::join_paths([&other, &cli]).unwrap();
+        let once = prepended_path(&cli, Some(&current)).unwrap();
+        assert_eq!(entries(&once), [cli.clone(), other.clone()]);
+        // 本地卡片里再开一层：已经在最前面，不动。
+        assert_eq!(prepended_path(&cli, Some(&once)), None);
+        // 末尾带分隔符的也算同一个。
+        let mut slashed = cli.clone().into_os_string();
+        slashed.push(std::path::MAIN_SEPARATOR_STR);
+        let current = std::env::join_paths([other.as_os_str(), &slashed]).unwrap();
+        let fixed = prepended_path(&cli, Some(&current)).unwrap();
+        assert_eq!(entries(&fixed), [cli.clone(), other.clone()]);
+        // 没有 PATH：只有它自己。
+        assert_eq!(entries(&prepended_path(&cli, None).unwrap()), [cli]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn folders_on_windows_compare_without_case_or_slash_direction() {
+        assert!(same_directory(
+            Path::new(r"C:\MicaTerm\bin\"),
+            Path::new("c:/micaterm/BIN")
+        ));
+    }
+}
+
 /// Windows 上经 ConPTY 跑真实的 `cmd.exe`：输出、退出码、关闭时结束 shell。
 #[cfg(all(test, windows))]
 mod windows_tests {
     use std::time::Instant;
 
     use super::*;
+
+    /// 卡片带的环境变量和 `PATH` 最前面的目录真的到了 shell 里（Agent CLI 工单 07）：
+    /// 在 `PATH` 上找得到那个目录里的程序。
+    #[test]
+    fn the_launch_environment_and_path_reach_the_shell() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join("micaterm-probe.cmd"),
+            "@echo probe-ok\r\n",
+        )
+        .unwrap();
+        let launch = LocalLaunch {
+            env: vec![("MICATERM_SELF_CARD".into(), "Card0123456789ab".into())],
+            path_front: Some(folder.path().to_path_buf()),
+            args: vec!["arg-ok".into()],
+            ..LocalLaunch::new(LocalShell::new(
+                "cmd.exe /d /c echo [%MICATERM_SELF_CARD%]& micaterm-probe& echo",
+            ))
+        };
+        let transport = LocalPtyTransportProvider.factory_for(&launch).create();
+        let (commands, command_receiver) = mpsc::channel();
+        let (events, event_receiver) = async_channel::unbounded();
+        let worker =
+            thread::spawn(move || transport.run(TerminalSize::DEFAULT, command_receiver, events));
+        let (output, code) = drain_until_exit(&event_receiver, &commands);
+        let _ = commands.send(TerminalTransportCommand::Shutdown);
+        worker.join().unwrap().unwrap();
+        assert_eq!(code, Some(0), "{output}");
+        assert!(output.contains("[Card0123456789ab]"), "{output}");
+        assert!(output.contains("probe-ok"), "{output}");
+        // 参数接在命令后面：`echo` 打印它。
+        assert!(output.contains("arg-ok"), "{output}");
+    }
 
     fn cmd_transport(script: &str) -> Box<dyn TerminalTransport> {
         let command = format!("cmd.exe /d /c {script}");

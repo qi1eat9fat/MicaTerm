@@ -8,7 +8,9 @@
 mod app_page;
 mod apply;
 mod backdrop;
+mod cli_page;
 mod controls;
+mod agent_command_editor;
 mod local_shell_editor;
 mod model;
 mod pages;
@@ -21,9 +23,9 @@ mod terminal_themes;
 pub use apply::{apply, apply_terminal, terminal_font};
 pub use backdrop::{WindowBackdrop, mica_supported};
 pub use model::{
-    AppSettings, Appearance, DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME, DEFAULT_TERMINAL_FONT_FAMILY,
-    DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, InterfaceSettings,
-    LocalTerminalSettings, RightClick, SftpSettings, TERMINAL_FONT_SIZE_RANGE,
+    AppSettings, Appearance, CliSettings, DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME,
+    DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT,
+    InterfaceSettings, LocalTerminalSettings, RightClick, SftpSettings, TERMINAL_FONT_SIZE_RANGE,
     TERMINAL_LINE_HEIGHT_RANGE, TerminalCursorStyle, TerminalFontSettings, TerminalInteraction,
     TerminalThemeSettings, WindowSettings,
 };

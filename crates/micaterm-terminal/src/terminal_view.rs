@@ -494,6 +494,31 @@ impl TerminalView {
         self.engine.read(cx).lifecycle().clone()
     }
 
+    /// 接一次 `micaterm exec --card`（见 [`TerminalEngine::run_command`]）。
+    pub fn run_command(&self, run: crate::RunHandle, cx: &App) -> Result<(), crate::RunFailure> {
+        self.engine.read(cx).run_command(run)
+    }
+
+    /// 有没有 `exec --card` 在跑。
+    pub fn is_running_command(&self, cx: &App) -> bool {
+        self.engine.read(cx).is_running_command()
+    }
+
+    /// 从缓冲区底部往上读（`cards read`，见 [`TerminalEngine::read_tail`]）。
+    pub fn read_tail(&self, lines: usize, cx: &App) -> crate::ScreenRead {
+        self.engine.read(cx).read_tail(lines)
+    }
+
+    /// 发一个命名键（`cards send-key`，见 [`TerminalEngine::send_named_key`]）。
+    pub fn send_named_key(
+        &self,
+        name: &str,
+        repeat: usize,
+        cx: &App,
+    ) -> Result<(), crate::KeyRefused> {
+        self.engine.read(cx).send_named_key(name, repeat)
+    }
+
     pub fn title(&self, cx: &App) -> Option<String> {
         self.engine.read(cx).title().map(str::to_owned)
     }

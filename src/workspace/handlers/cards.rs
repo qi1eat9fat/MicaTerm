@@ -45,17 +45,38 @@ impl Workspace {
     /// 新标签和分屏都经这里建卡片。
     pub(in crate::workspace) fn open_local_card(
         &mut self,
-        launch: LocalLaunch,
+        mut launch: LocalLaunch,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<TerminalCard> {
         let id = CardId(self.next_card_id);
         self.next_card_id += 1;
+        let self_id = self.add_identity(&mut launch, cx);
         let provider = self.services.local_terminals.clone();
-        let card = cx.new(|cx| TerminalCard::local(id, launch, provider, window, cx));
+        let card = cx.new(|cx| {
+            let mut card = TerminalCard::local(id, launch, provider, window, cx);
+            card.set_self_id(self_id);
+            card
+        });
         // 终端的通知和响铃（工单 03）。
         self.watch_notices(&card, window, cx);
         card
+    }
+
+    /// 身份环境变量（Agent CLI 工单 07）：每张本地卡片（和 Agent 面板里的 Agent）都带，起一个 CLI 卡片 ID
+    /// 放进 `MICATERM_SELF_CARD` 并交回；调用方自己给的（Agent 的）在后、盖过去。
+    pub(in crate::workspace) fn add_identity(
+        &self,
+        launch: &mut LocalLaunch,
+        cx: &App,
+    ) -> SharedString {
+        let self_id: SharedString = micaterm_hosts::PublicId::generate().to_string().into();
+        let (mut env, path_front) =
+            crate::cli::identity_env(&self_id, self.cli_integration.read(cx).paths());
+        env.append(&mut launch.env);
+        launch.env = env;
+        launch.path_front = launch.path_front.take().or(path_front);
+        self_id
     }
 
     /// 窗口壳对一张卡片的订阅，交给标签跟着卡片走：名称、目录、图块、状态点变了标签重画；
@@ -344,6 +365,7 @@ impl Workspace {
         let launch = LocalLaunch {
             shell,
             directory: source.directory(),
+            ..LocalLaunch::default()
         };
         let card = self.open_local_card(launch, window, cx);
         self.place_beside_focused_card(id, axis, card, window, cx);

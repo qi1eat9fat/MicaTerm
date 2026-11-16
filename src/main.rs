@@ -7,6 +7,12 @@ use gpui_kit::*;
 use micaterm::settings::{SettingsProblem, SettingsStore};
 
 fn main() {
+    // macOS、Linux 上带参数启动就是 `micaterm` 命令（外部 CLI），不开窗口。Windows 上命令是单独的
+    // 控制台程序 `micaterm-cli.exe`：GUI 程序没有控制台可打印。
+    #[cfg(not(windows))]
+    if let Some(args) = micaterm::cli::command_line_arguments() {
+        std::process::exit(micaterm::cli::main(args));
+    }
     let app = gpui_kit::application().with_assets(micaterm::app::AppAssets);
     app.run(|cx| {
         // 先读设置：外观决定窗口用浅色还是深色。

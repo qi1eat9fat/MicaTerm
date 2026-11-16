@@ -14,10 +14,12 @@ use micaterm_terminal::monospace_font_families;
 
 use super::SettingsStore;
 use super::controls::page_title;
+use super::agent_command_editor::AgentCommandEditor;
 use super::local_shell_editor::LocalShellEditor;
 use super::pages;
 use super::sftp::LocalDirectoryEditor;
 use crate::app::CatalogIcon;
+use crate::cli::{CliIntegration, CliStatus};
 use crate::i18n::t;
 use crate::theme::{Tokens, TypeScale, size};
 
@@ -33,7 +35,7 @@ struct Category {
 /// 画一类设置的页面。
 type Page = fn(&SettingsTab, &Tokens, &mut Window, &mut Context<SettingsTab>) -> Vec<AnyElement>;
 
-/// 左栏的分类，按显示的顺序（26 号 `STG_NAV`）：外观、终端、SFTP、安全、应用。
+/// 左栏的分类，按显示的顺序（26 号 `STG_NAV`）：外观、终端、SFTP、安全、Agent（原来叫外部 CLI，2026-11-16 用户改名）、应用。
 const CATEGORIES: &[Category] = &[
     Category {
         title: "settings.category.appearance",
@@ -56,6 +58,11 @@ const CATEGORIES: &[Category] = &[
         page: super::security::security,
     },
     Category {
+        title: "settings.category.cli",
+        icon: CatalogIcon::Bot,
+        page: super::cli_page::cli,
+    },
+    Category {
         title: "settings.category.app",
         icon: CatalogIcon::AppWindow,
         page: super::app_page::app,
@@ -72,6 +79,10 @@ pub struct SettingsPaths {
     pub downloads: PathBuf,
     /// 数据目录（设置 › 应用显示它）；`None` 是这次运行没有数据目录。
     pub data_dir: Option<PathBuf>,
+    /// 外部 CLI 这次运行听起来没有（设置 › Agent 说明）。
+    pub cli: CliStatus,
+    /// 命令和 Skill 装没装（设置 › Agent 的安装行）；`None` 时那几行不出现。
+    pub cli_integration: Option<Entity<CliIntegration>>,
 }
 
 /// 设置标签的内容。
@@ -82,9 +93,14 @@ pub struct SettingsTab {
     /// 可以选的终端字体（本机装了的等宽字体）；后台扫描回来之前是空的。
     pub(super) font_families: &'static [SharedString],
     pub(super) local_shell: Entity<LocalShellEditor>,
+    /// Agent › Agent 命令（Agent CLI 工单 07）。
+    pub(super) agent_command: Entity<AgentCommandEditor>,
     pub(super) local_directory: Entity<LocalDirectoryEditor>,
     /// 数据目录，设置 › 应用显示它。
     pub(super) data_dir: Option<PathBuf>,
+    /// 外部 CLI 的端点怎么样了，设置 › Agent 显示它。
+    pub(super) cli: CliStatus,
+    pub(super) cli_integration: Option<Entity<CliIntegration>>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
     _font_scan: Task<()>,
@@ -100,11 +116,18 @@ impl SettingsTab {
         let SettingsPaths {
             downloads,
             data_dir,
+            cli,
+            cli_integration,
         } = paths;
         let local_shell = cx.new(|cx| LocalShellEditor::new(store.clone(), window, cx));
+        let agent_command = cx.new(|cx| AgentCommandEditor::new(store.clone(), window, cx));
         let local_directory =
             cx.new(|cx| LocalDirectoryEditor::new(store.clone(), downloads, window, cx));
         let mut subscriptions = vec![cx.observe(&store, |_, _, cx| cx.notify())];
+        // 安装、移除做完，设置 › Agent 跟着变（工单 05）。
+        if let Some(integration) = &cli_integration {
+            subscriptions.push(cx.observe(integration, |_, _, cx| cx.notify()));
+        }
         // 设置 › 安全跟着保险库的状态变（工单 13）。
         if let Some(vault) = crate::vault::VaultStore::global(cx) {
             subscriptions.push(cx.observe(&vault, |_, _, cx| cx.notify()));
@@ -126,8 +149,11 @@ impl SettingsTab {
             category: 0,
             font_families: &[],
             local_shell,
+            agent_command,
             local_directory,
             data_dir,
+            cli,
+            cli_integration,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
             _font_scan: font_scan,
@@ -147,6 +173,16 @@ impl SettingsTab {
     /// 标签到前面来时焦点给谁。
     pub fn focus_target(&self) -> FocusHandle {
         self.focus_handle.clone()
+    }
+
+    /// 切到 Agent 那一页（启动 Agent 时找不到命令，「打开设置」跳到这里，Agent CLI 工单 07）。
+    pub fn show_cli(&mut self, cx: &mut Context<Self>) {
+        if let Some(index) = CATEGORIES
+            .iter()
+            .position(|category| category.title == "settings.category.cli")
+        {
+            self.show_category(index, cx);
+        }
     }
 
     fn show_category(&mut self, category: usize, cx: &mut Context<Self>) {

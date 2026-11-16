@@ -41,6 +41,18 @@ pub struct AppSettings {
     pub sftp: SftpSettings,
     /// 应用 → 窗口（工单 26）。
     pub window: WindowSettings,
+    /// 外部 CLI（Agent CLI 工单 01）。
+    pub cli: CliSettings,
+}
+
+/// 外部 CLI：`micaterm` 命令给 AI Agent 用。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CliSettings {
+    /// 启用外部 Agent（默认关）。关着时照样在听，请求一律回「没启用」，Agent 才知道让用户来开它。
+    pub enabled: bool,
+    /// 应用内启动 Agent 时运行的命令（Agent CLI 工单 07）；`None` 是自动检测（先找 claude，再找 codex）。
+    pub agent_command: Option<String>,
 }
 
 /// 应用 → 窗口。
@@ -295,6 +307,7 @@ mod tests {
         assert!(!settings.sftp.show_hidden.local && !settings.sftp.show_hidden.remote);
         assert!(!settings.interface.mica);
         assert!(settings.window.remember);
+        assert!(!settings.cli.enabled);
     }
 
     #[test]

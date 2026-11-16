@@ -235,3 +235,25 @@ ssh.test.unresolved:
   zh-CN: 无法解析主机 %{host}
 ssh.unknown_host.lead:
   zh-CN: 第一次连接这台主机，请核对它的主机密钥：
+ssh.exec.runtime_failed:
+  zh-CN: 无法启动连接：%{error}
+ssh.exec.command_failed:
+  zh-CN: 无法执行命令：%{error}
+ssh.exec.aborted:
+  zh-CN: 输出已无人接收，命令已放弃
+ssh.exec.disconnected:
+  zh-CN: 连接在命令结束前断开
+ssh.exec.host_key_changed:
+  zh-CN: "%{endpoint} 的主机密钥与已保存的不一致，已拒绝连接。请先核实服务器身份"
+ssh.exec.host_key_unknown:
+  zh-CN: 尚未信任 %{endpoint} 的主机密钥：请先在 MicaTerm 里连接一次这台主机
+ssh.exec.no_saved_password:
+  zh-CN: 这台主机没有保存密码：请先在 MicaTerm 里连接一次这台主机并保存密码
+ssh.exec.saved_password_rejected:
+  zh-CN: 保存的密码被服务器拒绝：请在 MicaTerm 里连接一次这台主机并保存正确的密码
+ssh.exec.no_saved_passphrase:
+  zh-CN: 私钥已加密，但没有保存口令：请先在 MicaTerm 里连接一次这台主机并保存口令
+ssh.exec.saved_passphrase_rejected:
+  zh-CN: 保存的私钥口令不正确：请在 MicaTerm 里连接一次这台主机并保存正确的口令
+ssh.exec.keyboard_interactive:
+  zh-CN: 服务器在键盘交互式认证中提出了密码以外的问题（如验证码），外部 CLI 无法回答

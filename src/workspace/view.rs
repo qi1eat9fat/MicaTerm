@@ -27,6 +27,7 @@ use crate::backend::{
     SharedConnectionTester, SharedRemoteTerminals, SshConnectionTester, SshRemoteTerminals,
 };
 use crate::card::{CardId, StatusDot, TerminalCard};
+use crate::cli::{CliIntegration, CliService, IntegrationPaths, SshCliBackend};
 use crate::credential::CredentialPanel;
 use crate::host::{HostData, HostList, HostStore, HostStoreEvent};
 use crate::i18n::t;
@@ -75,12 +76,22 @@ pub struct WorkspaceServices {
     /// 生产是 `crate::app::data_dir()`，取不到时 `None`（不记窗口、设置里说没有数据目录）；
     /// 测试默认 `None`，要测记住窗口时给一个临时目录。
     pub data_dir: Option<std::path::PathBuf>,
+    /// 外部 CLI（Agent CLI 工单 01）：生产在数据目录对应的端点上听（同一个数据目录已有 MicaTerm
+    /// 在听时让给它）；测试默认 `CliService::Off`，要测时在临时端点上听。
+    pub cli: CliService,
+    /// 命令装进 PATH、Skill 装给 Agent 的位置（工单 05）：生产是用户目录和程序旁边；
+    /// 测试默认 `None`（不碰真的用户目录），要测时给临时目录。
+    pub cli_install: Option<IntegrationPaths>,
+    /// 自动检测 Agent 命令时找的 `PATH`（Agent CLI 工单 07）：生产是 `None`（这个进程的）；
+    /// 测试给空的，结果不看跑测试的机器装没装 claude。
+    pub agent_path: Option<std::ffi::OsString>,
 }
 
 impl WorkspaceServices {
     /// 真实的服务。
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        let data_dir = crate::app::data_dir().ok();
         let (hosts, hosts_problem) = match crate::host::load_hosts() {
             Ok(hosts) => (hosts, None),
             Err(problem) => (HostData::empty(), Some(problem)),
@@ -99,6 +110,16 @@ impl WorkspaceServices {
             crate::app::upload_resume_dir(),
             crate::app::download_resume_dir(),
         );
+        // 外部 CLI 的 `exec` 和传输也经同一份 known_hosts 和保险库登录（Agent CLI 工单 02、03），
+        // 传输和 SFTP 标签用同一个引擎、同一处续传记录。
+        let sftp: SharedSftpTransportProvider = std::sync::Arc::new(sftp);
+        let cli = CliService::start(
+            data_dir.as_deref(),
+            std::sync::Arc::new(SshCliBackend::new(
+                micaterm_ssh::SshConnector::new(known_hosts.clone(), source.clone()),
+                sftp.clone(),
+            )),
+        );
         Self {
             local_terminals: std::sync::Arc::new(LocalPtyTransportProvider),
             hosts,
@@ -111,10 +132,13 @@ impl WorkspaceServices {
             secrets,
             vault,
             vault_problem,
-            sftp: std::sync::Arc::new(sftp),
+            sftp,
             local_files: std::sync::Arc::new(SystemLocalDirectoryProvider),
             sftp_problem,
-            data_dir: crate::app::data_dir().ok(),
+            cli,
+            cli_install: IntegrationPaths::system(),
+            agent_path: None,
+            data_dir,
         }
     }
 }
@@ -187,6 +211,8 @@ pub struct Workspace {
     pub(super) host_list: Entity<HostList>,
     /// 右侧栏展开的面板。
     pub(super) right_panel: Option<RightPanel>,
+    /// 右侧 Agent 面板里跑着的 Agent（Agent CLI 工单 07）：收起面板时还在。
+    pub(super) agent: Option<crate::agent::AgentPanel>,
     /// 命令片段面板（工单 19）。
     pub(super) snippet_panel: SnippetPanel,
     /// 连接表的问题，一次问一个（工单 12）。
@@ -198,6 +224,8 @@ pub struct Workspace {
     pub(super) vault: Entity<VaultStore>,
     /// 凭据面板（工单 14）。
     pub(super) credential_panel: Entity<CredentialPanel>,
+    /// 外部 CLI 的命令和 Skill 装没装（工单 05），设置 › Agent 显示它。
+    pub(super) cli_integration: Entity<CliIntegration>,
     /// 一直收连接表的事件（工单 12）。
     _remote_events: Task<()>,
     /// 等窗口停稳再写 `window.json` 的那一次（工单 26）；窗口又动了就换一个新的。
@@ -292,6 +320,15 @@ impl Workspace {
             let (hosts, target) = (hosts.clone(), focus_handle.clone());
             cx.new(|cx| CredentialPanel::new(hosts, target, cx))
         };
+        // 命令和 Skill：启动时把旧版本留下的副本更新掉，再看一遍装没装（工单 05）。
+        let cli_integration = {
+            let paths = services.cli_install.clone();
+            cx.new(|cx| {
+                let mut integration = CliIntegration::new(paths);
+                integration.update_outdated(cx);
+                integration
+            })
+        };
         let window_state_path = services
             .data_dir
             .as_ref()
@@ -314,15 +351,20 @@ impl Workspace {
             hosts,
             host_list,
             right_panel: None,
+            agent: None,
             snippet_panel,
             prompts: PromptQueue::default(),
             vault_unlock_asked: false,
             vault,
             credential_panel,
+            cli_integration,
             _remote_events: remote_events,
             window_state_save: None,
             subscriptions,
         };
+        // 外部 CLI 跟着设置的开关、主机和保险库走（Agent CLI 工单 01）。
+        let cli = this.watch_cli(&this.hosts.clone(), &this.vault.clone(), window, cx);
+        this.subscriptions.extend(cli);
         // 记住窗口大小和位置（工单 26）：没有数据目录就不记。
         if let Some(path) = window_state_path {
             this.remember_window(path, window, cx);
@@ -588,6 +630,10 @@ impl Render for Workspace {
                     .children(self.right_panel.map(|panel| match panel {
                         RightPanel::Snippets => self.render_snippet_panel(&tokens, window, cx),
                         RightPanel::Credentials => self.credential_panel.clone().into_any_element(),
+                        RightPanel::Agent => match &self.agent {
+                            Some(agent) => agent.render(&target, &tokens),
+                            None => div().into_any_element(),
+                        },
                     }))
                     .child(render_right_sidebar(
                         self.right_panel,
@@ -643,6 +689,7 @@ impl Workspace {
             .map(|root| handlers::bind_credentials_actions(root, cx))
             .map(|root| handlers::bind_sftp_actions(root, cx))
             .map(|root| handlers::bind_editor_actions(root, cx))
+            .map(|root| handlers::bind_agent_actions(root, cx))
             .size_full()
             .child(surface)
             .into_any_element()

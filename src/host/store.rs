@@ -1,6 +1,6 @@
 // 来自 since2006/shell-rs @ b2a307a: src/host/store.rs
 // 裁剪：去掉分组、临时连接、外部连接、端口转发、书签、项目终端、片段分类、同步、`keys/` 目录、
-// 给外部 CLI 用的 `capture_failures`；钥匙串换成保险库（`SecretStore`）。
+// 给外部 CLI 用的 `capture_failures`（Agent CLI 工单 04 加回）；钥匙串换成保险库（`SecretStore`）。
 
 //! 主机数据的 GPUI 外壳：窗口壳建一个，主机栏和各个对话框都观察它。[`HostData`] 持有数据、
 //! 写穿数据库；这里把每次改动的结果说出来（通知观察者，写不进去的发 [`HostStoreEvent`]），
@@ -26,6 +26,8 @@ use crate::i18n::t;
 /// 所以绕不过 `settle`；新加写方法要加进下面的 `settled!` 列表。
 pub struct HostStore {
     data: HostData,
+    /// [`Self::capture_failures`] 期间，写不进去的话也收在这里。
+    captured: Option<Vec<SharedString>>,
 }
 
 /// 除了普通的变更通知以外，主机数据要告诉窗口壳的事。
@@ -66,7 +68,22 @@ macro_rules! settled {
 
 impl HostStore {
     pub fn new(data: HostData) -> Self {
-        Self { data }
+        Self {
+            data,
+            captured: None,
+        }
+    }
+
+    /// 跑 `change`，顺带收下这期间写不进数据库的话（照样发 `PersistFailed`）：外部 CLI 要把它们
+    /// 告诉 Agent。
+    pub fn capture_failures<R>(
+        &mut self,
+        cx: &mut Context<Self>,
+        change: impl FnOnce(&mut Self, &mut Context<Self>) -> R,
+    ) -> (R, Vec<SharedString>) {
+        self.captured = Some(Vec::new());
+        let result = change(self, cx);
+        (result, self.captured.take().unwrap_or_default())
     }
 
     /// 把数据做了什么说出来：写不进去的发 `PersistFailed`，有改动就通知一次；
@@ -79,7 +96,11 @@ impl HostStore {
         for event in self.data.take_events() {
             match event {
                 HostEvent::Failed(failure) => {
-                    cx.emit(HostStoreEvent::PersistFailed(failure.message()));
+                    let message = failure.message();
+                    if let Some(captured) = &mut self.captured {
+                        captured.push(message.clone());
+                    }
+                    cx.emit(HostStoreEvent::PersistFailed(message));
                 }
                 HostEvent::Changed => changed = true,
             }

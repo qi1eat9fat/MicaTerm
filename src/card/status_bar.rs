@@ -39,6 +39,8 @@ pub(super) struct StatusBar {
     pub state: StatusState,
     /// 远程主机的系统；本地卡片和还没探测出时是 `None`。
     pub os: Option<SharedString>,
+    /// 交给 Agent 了（Agent CLI 工单 06）：`Some(正在执行命令)`；没交出去是 `None`。
+    pub agent: Option<bool>,
     pub columns: usize,
     pub rows: usize,
 }
@@ -146,8 +148,20 @@ impl StatusBar {
 
     /// 无障碍名称：状态栏上能显示的每一段（不管现在窄不窄），用「 · 」隔开：
     /// 连接状态、路径、系统、尺寸。测试靠它断言。
+    /// 状态栏左边「Agent」的小标记。
+    fn agent_text(&self) -> Option<SharedString> {
+        self.agent.map(|running| {
+            if running {
+                t!("card.status.agent_running")
+            } else {
+                t!("card.status.agent")
+            }
+        })
+    }
+
     fn label(&self) -> String {
         let mut parts = Vec::new();
+        parts.extend(self.agent_text().map(|text| text.to_string()));
         if let Some(state) = self.state_text() {
             parts.push(match self.state_detail() {
                 Some(detail) => format!("{state} {detail}"),
@@ -256,6 +270,19 @@ pub(super) fn render_status_bar(
                 }
             }
         })
+        .children(status.agent_text().map(|text| {
+            div()
+                .id(id.element("card-status-agent"))
+                .test_support()
+                .aria_label(text.clone())
+                .flex_none()
+                .mr(px(GROUP_GAP))
+                .px(px(5.))
+                .rounded(px(3.))
+                .bg(tokens.sel)
+                .text_color(colored(tokens.text))
+                .child(text)
+        }))
         .child(
             div()
                 .id(id.element("card-status-state"))
@@ -310,6 +337,7 @@ mod tests {
             directory: "~/app".into(),
             state,
             os: Some("Ubuntu".into()),
+            agent: None,
             columns: 96,
             rows: 18,
         }
@@ -334,6 +362,29 @@ mod tests {
             ..bar(StatusState::Local)
         };
         assert_eq!(local.label(), "~ · 96×18");
+    }
+
+    /// 交给 Agent 的卡片（Agent CLI 工单 06）：标记在最左边，执行命令时写「执行中」。
+    #[test]
+    fn a_card_handed_to_the_agent_says_so_first() {
+        let handed = StatusBar {
+            agent: Some(false),
+            ..bar(StatusState::Connected { latency: None })
+        };
+        assert!(
+            handed.label().starts_with("Agent · 已连接"),
+            "{}",
+            handed.label()
+        );
+        let running = StatusBar {
+            agent: Some(true),
+            ..bar(StatusState::Connected { latency: None })
+        };
+        assert!(
+            running.label().starts_with("Agent 执行中 · "),
+            "{}",
+            running.label()
+        );
     }
 
     const WIDTHS: Widths = Widths {

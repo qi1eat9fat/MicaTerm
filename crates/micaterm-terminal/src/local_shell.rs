@@ -84,6 +84,13 @@ impl LocalShell {
 pub struct LocalLaunch {
     pub shell: LocalShell,
     pub directory: Option<PathBuf>,
+    /// 额外的环境变量（Agent CLI 工单 07 的身份变量），放在终端自己的那几个之后，同名的盖过去。
+    pub env: Vec<(String, String)>,
+    /// 放到 `PATH` 最前面的目录（`micaterm` 命令所在的）。按值判重：本地卡片里再开 MicaTerm、
+    /// 再开 shell，`PATH` 里也只有一份。
+    pub path_front: Option<PathBuf>,
+    /// 接在命令后面的参数，原样作为单独的参数，不经引号拆分（Agent 的初始提示，Agent CLI 工单 07）。
+    pub args: Vec<String>,
 }
 
 impl LocalLaunch {

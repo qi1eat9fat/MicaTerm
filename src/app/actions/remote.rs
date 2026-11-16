@@ -23,6 +23,17 @@ pub struct DisconnectCard(pub CardId);
 #[action(namespace = micaterm, no_json)]
 pub struct OpenCardSftp(pub CardId);
 
+/// 把这张远程卡片交给 Agent（右键菜单「交给 Agent」，Agent CLI 工单 06）：`micaterm cards list` 列出它，
+/// `micaterm exec --card`、`cards read`、`cards send-key` 只认交出去的卡片。
+#[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
+#[action(namespace = micaterm, no_json)]
+pub struct HandCardToAgent(pub CardId);
+
+/// 收回交给 Agent 的卡片（右键菜单「收回」）：它的 CLI 卡片 ID 随即失效。
+#[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
+#[action(namespace = micaterm, no_json)]
+pub struct TakeCardBack(pub CardId);
+
 /// 把远程卡片主机的地址放进剪贴板（右键菜单「复制 IP」，地址是域名时叫「复制主机名」）。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
 #[action(namespace = micaterm, no_json)]

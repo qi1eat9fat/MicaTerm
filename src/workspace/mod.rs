@@ -13,6 +13,9 @@
 //!
 //! 功能模块不依赖窗口壳；窗口壳持有它们、转发 action。
 
+mod cli;
+mod cli_cards;
+mod cli_changes;
 mod frame;
 mod handlers;
 mod host_sidebar;

@@ -14,10 +14,12 @@
 //! - `vault`：保险库的锁定、解锁、主密码、重置（13）；
 //! - `credentials`：凭据面板、凭据对话框、删除凭据（14）；
 //! - `sftp`：打开 SFTP 标签的三个入口、发给 SFTP 标签的命令（20）；
-//! - `editor`：编辑器标签的打开、保存、重新加载（23）。
+//! - `editor`：编辑器标签的打开、保存、重新加载（23）；
+//! - `agent`：右侧 Agent 面板、远程卡片交给 Agent（Agent CLI 工单 07）。
 //!
 //! 处理器里改了状态要 `cx.notify()`；在焦点监听器里改状态要 `defer_in`。
 
+mod agent;
 mod cards;
 mod credentials;
 mod editor;
@@ -31,6 +33,7 @@ mod terminal;
 mod vault;
 mod window;
 
+pub(super) use agent::bind_agent_actions;
 pub(super) use cards::bind_cards_actions;
 pub(super) use credentials::bind_credentials_actions;
 pub(super) use editor::bind_editor_actions;

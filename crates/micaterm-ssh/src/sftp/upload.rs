@@ -1,5 +1,5 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/upload.rs
-// 裁剪：去掉外部 CLI 的 `sync`（跳过没变的文件、`add_pruned`）。
+// 裁剪：去掉外部 CLI 的 `sync`（跳过没变的文件、`add_pruned`）；Agent CLI 工单 03 照上游加回。
 
 use super::{
     ConflictFacts, EntryKind, FileFacts, FileMetadata, RESUME_THRESHOLD, Reason, RemotePath,
@@ -54,6 +54,9 @@ pub(crate) struct UploadBatch {
     /// A new remote file takes the local file's permission bits, as scp
     /// gives them; otherwise the server's defaults apply.
     preserve_mode: bool,
+    /// The external CLI's sync: what is already there as it is here is
+    /// left alone, folders included, and counted as skipped.
+    sync: bool,
 }
 impl UploadBatch {
     pub async fn scan(
@@ -157,8 +160,19 @@ impl UploadBatch {
             blocked_directories: Vec::new(),
             made_directories: HashSet::new(),
             written: HashMap::new(),
-            preserve_mode: request.is_scp(),
+            preserve_mode: request.is_scp() || request.sync_deletes().is_some(),
+            sync: request.sync_deletes().is_some(),
         })
+    }
+
+    /// Count what a sync deleted before the batch was scanned, and what it
+    /// failed to delete among the items that failed.
+    pub fn add_pruned(&mut self, deleted: usize, failures: Vec<TransferDetail>) {
+        let progress = &mut self.meter.progress;
+        progress.deleted += deleted;
+        progress.total += failures.len();
+        progress.failed += failures.len();
+        progress.details.extend(failures);
     }
 
     pub fn verify_host(&self, fingerprint: &str) -> Result<()> {
@@ -181,6 +195,7 @@ impl UploadBatch {
                 host_key: &self.host_key,
                 journal: &self.journal,
                 preserve_mode: self.preserve_mode,
+                sync: self.sync,
                 items: RefCell::new(&mut self.items),
                 meter: RefCell::new(&mut self.meter),
                 all_conflicts: RefCell::new(&mut self.all_conflicts),
@@ -233,6 +248,7 @@ struct Upload<'a, R> {
     host_key: &'a str,
     journal: &'a Journal,
     preserve_mode: bool,
+    sync: bool,
     items: RefCell<&'a mut Vec<UploadItem>>,
     meter: RefCell<&'a mut TransferMeter>,
     all_conflicts: RefCell<&'a mut Option<TransferChoice>>,
@@ -476,7 +492,7 @@ impl<R: RemoteFs> Upload<'_, R> {
             .contains(&item.target.parent())
         {
             match control.run(fs.metadata(&item.target)).await? {
-                Some(metadata) if metadata.kind() == EntryKind::Directory => return Ok(true),
+                Some(metadata) if metadata.kind() == EntryKind::Directory => return Ok(!self.sync),
                 Some(_) => bail!(UploadError::TargetNotFolder),
                 None => {}
             }
@@ -512,20 +528,29 @@ impl<R: RemoteFs> Upload<'_, R> {
         let (handle, made) = if let Some(made) = again {
             (control.run(fs.open_replace(target)).await?, made)
         } else {
-            let existing = match control.run(fs.open(target, true)).await {
-                Ok(handle) => {
-                    self.written.borrow_mut().insert(target.clone(), true);
-                    let done = self.write_small(item, &handle, true, file).await?;
-                    return Ok(Small::Settled(done));
+            let existing = if self.sync {
+                // A sync looks first, to leave what is the same alone.
+                let existing = control.run(fs.metadata(target)).await?;
+                if self.unchanged(item, existing.as_ref()).await? {
+                    return Ok(Small::Settled(false));
                 }
-                Err(error) if is_network_error(&error) || error.is::<Cancelled>() => {
-                    return Err(error);
+                existing
+            } else {
+                match control.run(fs.open(target, true)).await {
+                    Ok(handle) => {
+                        self.written.borrow_mut().insert(target.clone(), true);
+                        let done = self.write_small(item, &handle, true, file).await?;
+                        return Ok(Small::Settled(done));
+                    }
+                    Err(error) if is_network_error(&error) || error.is::<Cancelled>() => {
+                        return Err(error);
+                    }
+                    // There already, or refused: look to tell which.
+                    Err(error) => match control.run(fs.metadata(target)).await? {
+                        Some(existing) => Some(existing),
+                        None => return Err(error),
+                    },
                 }
-                // There already, or refused: look to tell which.
-                Err(error) => match control.run(fs.metadata(target)).await? {
-                    Some(existing) => Some(existing),
-                    None => return Err(error),
-                },
             };
             match &existing {
                 None => (control.run(fs.open(target, true)).await?, true),
@@ -678,6 +703,9 @@ impl<R: RemoteFs> Upload<'_, R> {
             } else {
                 control.run(fs.metadata(&item.target)).await?
             };
+            if self.sync && self.unchanged(item, original.as_ref()).await? {
+                return Ok(false);
+            }
             let incoming = FileFacts::from(&item.metadata);
             if !approved
                 && !self
@@ -783,6 +811,29 @@ impl<R: RemoteFs> Upload<'_, R> {
             return Ok(false);
         }
         self.publish(&mut record, false).await
+    }
+    /// For a sync: whether `remote`, what is at the item's target, is
+    /// already what the item is. A file of the same size and modification
+    /// time (an upload gives the copy the local file's), a link to the same
+    /// place. A side that does not say when it was modified has changed.
+    async fn unchanged(&self, item: &UploadItem, remote: Option<&FileMetadata>) -> Result<bool> {
+        let Some(remote) = remote else {
+            return Ok(false);
+        };
+        let local = &item.metadata;
+        Ok(match (local.kind(), remote.kind()) {
+            (EntryKind::File, EntryKind::File) => {
+                local.size() == remote.size()
+                    && local.modified().is_some()
+                    && local.modified() == remote.modified()
+            }
+            (EntryKind::Symlink, EntryKind::Symlink) => {
+                let here = tokio::fs::read_link(&item.source).await?;
+                let there = self.control.run(self.fs.readlink(&item.target)).await?;
+                here.to_str() == Some(there.as_str())
+            }
+            _ => false,
+        })
     }
     /// Write the file into the temporary, from where the partial one there
     /// ends. `partial` is what is there, when looked at already.

@@ -30,6 +30,7 @@ mod model;
 mod mouse;
 mod notices;
 pub mod rendering;
+mod run;
 mod scrollbar;
 mod search;
 mod shell_info;
@@ -42,7 +43,13 @@ mod transport;
 
 pub use activity::{ShellActivity, ShellCommand, TitleSays, command_name, read_title, shell_words};
 pub use directory::{HostMatch, ReportedDirectory};
-pub use engine::{TerminalCell, TerminalEngine, TerminalEvent, TerminalSnapshot};
+pub use engine::{
+    KeyRefused, SCREEN_READ_LIMIT, ScreenRead, TerminalCell, TerminalEngine, TerminalEvent,
+    TerminalSnapshot,
+};
+pub use run::{
+    BusyReason, RunContext, RunEvent, RunFailure, RunHandle, RunProgress, RunTiming, TerminalRun,
+};
 pub use font::{
     BUNDLED_FONT_FAMILY, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT,
     FONT_SIZE_RANGE, LINE_HEIGHT_RANGE, TerminalFont, TerminalFontPreview, is_font_installed,

@@ -13,6 +13,10 @@ gpui_kit::actions!(
         ShowSnippets,
         /// 展开或收起右侧栏的「凭据」面板（工单 14）。
         ShowCredentials,
+        /// 展开或收起右侧栏的 Agent 面板（Agent CLI 工单 07）：第一次先过启动前的确认，再启动 Agent。
+        ShowAgent,
+        /// Agent 面板的「重新开始」：结束面板里的 Agent，开一个新的。
+        RestartAgent,
         /// 退出（macOS 的 ⌘Q；Windows 和 Linux 用系统自带的 Alt+F4）。
         Quit,
     ]

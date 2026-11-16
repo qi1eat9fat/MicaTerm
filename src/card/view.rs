@@ -28,8 +28,8 @@ use super::status_bar::{StatusBar, StatusState, render_status_bar};
 use super::status_dot::{ACTIVE_FOR, StatusDot};
 use super::title_row::{CardPlace, Paint, TitleRow, render_title_row};
 use crate::app::{
-    CloseCard, CloseFocusedCard, CopyCardAddress, DisconnectCard, MoveCardToNewTab, OpenCardSftp,
-    ReconnectCard, ToggleZoomCard, ZoomCard,
+    CloseCard, CloseFocusedCard, CopyCardAddress, DisconnectCard, HandCardToAgent,
+    MoveCardToNewTab, OpenCardSftp, ReconnectCard, TakeCardBack, ToggleZoomCard, ZoomCard,
 };
 use crate::backend::{ConnectionId, RemoteTarget};
 use crate::i18n::t;
@@ -96,6 +96,15 @@ pub struct TerminalCard {
     _quiet_task: Option<Task<()>>,
     quiet_scheduled: bool,
     _info_task: Option<Task<()>>,
+    /// 交给 Agent 了（Agent CLI 工单 06）：CLI 认的卡片 ID，每次交出去新起一个，收回就作废。
+    agent: Option<SharedString>,
+    /// 本地卡片自己的 CLI 卡片 ID（Agent CLI 工单 07）：开卡片时起好，放进它的 `MICATERM_SELF_CARD`。
+    /// 远程卡片没有。
+    self_id: Option<SharedString>,
+    /// 同一件事给右键菜单看（菜单打开时才建，读不到卡片）：交出去了就显示「收回」。
+    agent_flag: Rc<Cell<bool>>,
+    /// Agent 正在这张卡片里执行命令：状态栏的标记写「执行中」。窗口壳定时看。
+    agent_running: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -159,6 +168,8 @@ impl TerminalCard {
             factory,
         } = launch;
         let name = host.name.clone();
+        let agent_flag = Rc::new(Cell::new(false));
+        let menu_flag = agent_flag.clone();
         let terminal = cx.new(|cx| {
             let mut view = TerminalView::new(
                 id.element("terminal"),
@@ -168,12 +179,13 @@ impl TerminalCard {
                 cx,
             );
             view.set_ended_actions(ReconnectCard(id), CloseCard(id), cx);
-            view.set_menu_items(remote_menu_items(id, &host));
+            view.set_menu_items(remote_menu_items(id, &host, menu_flag));
             view
         });
         let kind = CardKind::Remote(Box::new(RemoteCard::new(host, remote)));
         let mut card = Self::with_terminal(id, kind, terminal, window, cx);
         card.shown_state = card.remote_state(cx);
+        card.agent_flag = agent_flag;
         card
     }
 
@@ -252,7 +264,56 @@ impl TerminalCard {
             _quiet_task: None,
             quiet_scheduled: false,
             _info_task: None,
+            agent: None,
+            self_id: None,
+            agent_flag: Rc::default(),
+            agent_running: false,
             _subscriptions: subscriptions,
+        }
+    }
+
+    /// 交给 Agent（只有远程卡片）：起一个新的 CLI 卡片 ID 交回去。已经交出去的照旧用原来的。
+    pub fn hand_to_agent(&mut self, cx: &mut Context<Self>) -> Option<SharedString> {
+        if !matches!(self.kind, CardKind::Remote(_)) {
+            return None;
+        }
+        let id = self
+            .agent
+            .get_or_insert_with(|| micaterm_hosts::PublicId::generate().to_string().into())
+            .clone();
+        self.agent_flag.set(true);
+        cx.notify();
+        Some(id)
+    }
+
+    /// 收回：CLI 卡片 ID 作废，之后的 `exec --card` 回 `no_terminal`。
+    pub fn take_back(&mut self, cx: &mut Context<Self>) {
+        self.agent = None;
+        self.agent_flag.set(false);
+        self.agent_running = false;
+        cx.notify();
+    }
+
+    /// 本地卡片自己的 CLI 卡片 ID（窗口壳开卡片时定，见 [`Self::set_self_id`]）。
+    pub fn self_id(&self) -> Option<&SharedString> {
+        self.self_id.as_ref()
+    }
+
+    /// 开本地卡片时记下它的 CLI 卡片 ID：和放进它 shell 环境里的 `MICATERM_SELF_CARD` 是同一个。
+    pub fn set_self_id(&mut self, id: SharedString) {
+        self.self_id = Some(id);
+    }
+
+    /// 交出去时 CLI 认的卡片 ID；没交出去是 `None`。
+    pub fn agent_id(&self) -> Option<&SharedString> {
+        self.agent.as_ref()
+    }
+
+    /// Agent 在不在这里执行命令（窗口壳定时问终端、告诉卡片）。
+    pub fn set_agent_running(&mut self, running: bool, cx: &mut Context<Self>) {
+        if self.agent_running != running {
+            self.agent_running = running;
+            cx.notify();
         }
     }
 
@@ -713,6 +774,7 @@ impl TerminalCard {
                 directory: self.directory_label().into(),
                 state: StatusState::Local,
                 os: None,
+                agent: None,
                 columns,
                 rows,
             },
@@ -732,6 +794,7 @@ impl TerminalCard {
                     RemoteState::Disconnected(reason) => StatusState::Disconnected { reason },
                 },
                 os: remote.os().map(|os| os.label().into()),
+                agent: self.agent.as_ref().map(|_| self.agent_running),
                 columns,
                 rows,
             },
@@ -789,7 +852,7 @@ fn ended_notice(reason: &str, time: &str) -> String {
 
 /// 远程终端右键菜单里卡片加的项：「复制」下面的复制 IP（域名时叫复制主机名），最后的重新连接、
 /// 断开连接（已经断开时不能点），和它们前面的打开 SFTP（工单 20）。
-fn remote_menu_items(id: CardId, host: &Host) -> TerminalMenuItems {
+fn remote_menu_items(id: CardId, host: &Host, agent: Rc<Cell<bool>>) -> TerminalMenuItems {
     let copy_label = if host.address_is_ip() {
         t!("card.menu.copy_ip")
     } else {
@@ -798,6 +861,12 @@ fn remote_menu_items(id: CardId, host: &Host) -> TerminalMenuItems {
     TerminalMenuItems {
         copy: Rc::new(move |menu, _| menu.menu(copy_label.clone(), Box::new(CopyCardAddress(id)))),
         commands: Rc::new(move |menu, lifecycle| {
+            // 交给 Agent / 收回（Agent CLI 工单 06）。
+            let menu = if agent.get() {
+                menu.menu(t!("card.menu.take_back"), Box::new(TakeCardBack(id)))
+            } else {
+                menu.menu(t!("card.menu.hand_to_agent"), Box::new(HandCardToAgent(id)))
+            };
             menu.menu(t!("card.menu.open_sftp"), Box::new(OpenCardSftp(id)))
                 .menu(t!("card.menu.reconnect"), Box::new(ReconnectCard(id)))
                 // 断开连接是红字（26 号 `.mi.danger`）。

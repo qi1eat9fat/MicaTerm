@@ -48,10 +48,24 @@ impl Workspace {
         let paths = SettingsPaths {
             downloads: self.services.local_files.downloads(),
             data_dir: self.services.data_dir.clone(),
+            cli: self.services.cli.status(),
+            cli_integration: Some(self.cli_integration.clone()),
         };
         let store = self.settings.clone();
         let settings = cx.new(|cx| SettingsTab::new(store, paths, window, cx));
         self.open_tab(Tab::Settings(settings), window, cx);
+    }
+
+    /// 打开设置，切到 Agent 那一页（启动 Agent 时找不到命令，Agent CLI 工单 07）。
+    pub(in crate::workspace) fn open_cli_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.on_open_settings(&OpenSettings, window, cx);
+        if let Some(tab) = self.settings_tab() {
+            tab.update(cx, |tab, cx| tab.show_cli(cx));
+        }
     }
 
     /// 开着的设置标签，测试用。

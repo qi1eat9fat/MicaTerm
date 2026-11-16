@@ -49,7 +49,8 @@ jobs:
       - uses: ilammy/setup-nasm@v1
 
       - name: 构建
-        run: cargo build --release --locked --bin micaterm
+        # micaterm-cli.exe 是外部 CLI 的命令（设置 › 外部 CLI 的「安装」把它拷进 PATH）。
+        run: cargo build --release --locked --bin micaterm --bin micaterm-cli
 
       # C 运行库靠 .cargo/config.toml 的 +crt-static 静态链接进程序；
       # 要是哪天失效了，LTSC 版和没装 VC++ 运行库的系统就启动不了，这里拦下来。
@@ -60,14 +61,16 @@ jobs:
           $dumpbin = & $vswhere -latest -products * -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" |
             Select-Object -First 1
           if (-not $dumpbin) { Write-Error "找不到 dumpbin.exe"; exit 1 }
-          $dlls = @(& $dumpbin /nologo /dependents target\release\micaterm.exe |
-            ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' })
-          if ($LASTEXITCODE -ne 0 -or $dlls.Count -eq 0) { Write-Error "dumpbin 读不了 micaterm.exe"; exit 1 }
-          Write-Host "依赖的 DLL：$($dlls -join ', ')"
-          $runtime = @($dlls | Where-Object { $_ -match '^(vcruntime|msvcp|concrt|vccorlib|ucrtbased)' })
-          if ($runtime.Count -gt 0) {
-            Write-Error "micaterm.exe 依赖 $($runtime -join ', ')，Windows 不自带"
-            exit 1
+          foreach ($exe in @("micaterm.exe", "micaterm-cli.exe")) {
+            $dlls = @(& $dumpbin /nologo /dependents "target\release\$exe" |
+              ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' })
+            if ($LASTEXITCODE -ne 0 -or $dlls.Count -eq 0) { Write-Error "dumpbin 读不了 $exe"; exit 1 }
+            Write-Host "$exe 依赖的 DLL：$($dlls -join ', ')"
+            $runtime = @($dlls | Where-Object { $_ -match '^(vcruntime|msvcp|concrt|vccorlib|ucrtbased)' })
+            if ($runtime.Count -gt 0) {
+              Write-Error "$exe 依赖 $($runtime -join ', ')，Windows 不自带"
+              exit 1
+            }
           }
 
       # 便携版：程序和一个空的 data/ 放在压缩包根目录，数据目录就在程序旁边（ADR 0003）。
@@ -80,12 +83,13 @@ jobs:
           $folder = Join-Path $env:RUNNER_TEMP "portable"
           New-Item -ItemType Directory -Force -Path (Join-Path $folder "data") | Out-Null
           Copy-Item "target\release\micaterm.exe" $folder
+          Copy-Item "target\release\micaterm-cli.exe" $folder
           Copy-Item "LICENSE" (Join-Path $folder "LICENSE.txt")
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $name = "MicaTerm-$env:VERSION-windows-x86_64-portable.zip"
           $zip = Join-Path $env:GITHUB_WORKSPACE "dist\$name"
           Push-Location $folder
-          7z a -tzip -mx=9 $zip micaterm.exe LICENSE.txt data
+          7z a -tzip -mx=9 $zip micaterm.exe micaterm-cli.exe LICENSE.txt data
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()

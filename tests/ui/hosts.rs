@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use gpui_kit::point;
-use micaterm::app::{CopyHostAddress, DeleteHost, DuplicateHost};
+use micaterm::app::{CopyHostAddress, CopyHostId, DeleteHost, DuplicateHost};
 
 use crate::support::*;
 
@@ -313,7 +313,15 @@ fn the_host_menu_edits_copies_and_deletes(cx: &mut TestAppContext) {
 
     assert_eq!(
         menu_labels(cx, handle, 1),
-        ["连接", "打开 SFTP", "编辑…", "创建副本", "复制 IP", "删除"]
+        [
+            "连接",
+            "打开 SFTP",
+            "编辑…",
+            "创建副本",
+            "复制 IP",
+            "复制 ID",
+            "删除"
+        ]
     );
     // 右键不改选中（被右键的那一行只描细边，26 号「主机右键」）。
     assert_eq!(selected(cx, &workspace), None);
@@ -326,6 +334,7 @@ fn the_host_menu_edits_copies_and_deletes(cx: &mut TestAppContext) {
             "编辑…",
             "创建副本",
             "复制主机名",
+            "复制 ID",
             "删除"
         ]
     );
@@ -362,6 +371,17 @@ fn copy_ip_puts_the_address_on_the_clipboard(cx: &mut TestAppContext) {
 
     let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
     assert_eq!(copied.as_deref(), Some("10.0.9.20"));
+}
+
+#[gpui_kit::test]
+fn copy_id_puts_the_host_s_public_id_on_the_clipboard(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_with_seed(cx);
+    let id = saved_host(cx, &workspace, 4).unwrap().public_id.to_string();
+
+    dispatch(cx, handle, CopyHostId(HostId(4)));
+
+    let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert_eq!(copied, Some(id));
 }
 
 #[gpui_kit::test]

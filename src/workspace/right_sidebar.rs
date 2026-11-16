@@ -5,10 +5,11 @@
 //! 「文件」打开或切换到 SFTP 标签（工单 20），不展开面板；在 SFTP 标签里显示成按下的样子（当前所在），
 //! 没有远程文件可开时变灰，悬停说为什么。
 //! 另外两个点一下在右边展开宽 280 的面板，再点一下收起，展开时图标显示成按下的样子。
+//! 凭据下面隔一条细线是「Agent」（Agent CLI 工单 07）：展开宽 440 的 Agent 面板，收起时 Agent 照常在跑。
 
 use gpui_kit::*;
 
-use crate::app::{CatalogIcon, OpenSftp, ShowCredentials, ShowSnippets};
+use crate::app::{CatalogIcon, OpenSftp, ShowAgent, ShowCredentials, ShowSnippets};
 use crate::i18n::t;
 use crate::theme::{Tokens, size};
 use crate::ui::icon_button::IconButton;
@@ -23,6 +24,8 @@ pub enum RightPanel {
     Snippets,
     /// 凭据（工单 14）。
     Credentials,
+    /// 应用内的 Agent（Agent CLI 工单 07）。
+    Agent,
 }
 
 /// 右侧栏「文件」现在是什么样。
@@ -88,5 +91,16 @@ pub(super) fn render_right_sidebar(
             )
             .pressed(open == Some(RightPanel::Credentials))
             .dispatch(Box::new(ShowCredentials), target, tokens),
+        )
+        // 26 号 `.rail .rsep`：和上面三个隔开。
+        .child(div().w(px(16.)).h(size::LINE).my(px(2.)).bg(tokens.line))
+        .child(
+            button(
+                "right-sidebar-agent",
+                CatalogIcon::Sparkles,
+                t!("workspace.right_sidebar.agent"),
+            )
+            .pressed(open == Some(RightPanel::Agent))
+            .dispatch(Box::new(ShowAgent), target, tokens),
         )
 }

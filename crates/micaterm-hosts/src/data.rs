@@ -344,11 +344,14 @@ impl HostData {
         // The form owns none of these, so rebuilding from the draft must not
         // drop them.
         let (os, sort_order) = (host.os, host.sort_order);
+        // 对外的 ID 跟着主机走，编辑不换：Agent 记着的 ID 还指这台。
+        let public_id = host.public_id.clone();
         // 探测到的 `uname -n` 只在还连到同一处时留着：地址、端口、路线变了可能就是另一台机器。
         let same_place =
             host.address == draft.address && host.port == draft.port && host.route == draft.route;
         let hostname = host.hostname.take().filter(|_| same_place);
         *host = Host::new(id, draft);
+        host.public_id = public_id;
         host.os = os;
         host.sort_order = sort_order;
         host.hostname = hostname;
@@ -1097,6 +1100,21 @@ mod tests {
         let copy = store.duplicate_unnotified(web, "copy".into()).unwrap();
         assert_eq!(store.host(copy).unwrap().credential, Some(credential));
         assert_eq!(store.hosts_using(credential).count(), 2);
+    }
+
+    #[test]
+    fn a_host_keeps_its_public_id_when_edited_and_a_copy_gets_its_own() {
+        let mut store = HostData::empty();
+        let web = store.insert_unnotified(draft("web"));
+        let db = store.insert_unnotified(draft("db"));
+        let id = store.host(web).unwrap().public_id.clone();
+        assert_ne!(store.host(db).unwrap().public_id, id);
+
+        store.update_unnotified(web, draft("web-01"));
+        assert_eq!(store.host(web).unwrap().public_id, id);
+
+        let copy = store.duplicate_unnotified(web, "copy".into()).unwrap();
+        assert_ne!(store.host(copy).unwrap().public_id, id);
     }
 
     #[test]

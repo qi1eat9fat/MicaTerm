@@ -78,6 +78,8 @@ host.menu.duplicate:
   zh-CN: 创建副本
 host.menu.copy_ip:
   zh-CN: 复制 IP
+host.menu.copy_id:
+  zh-CN: 复制 ID
 host.menu.copy_host_name:
   zh-CN: 复制主机名
 host.menu.delete:

@@ -1,5 +1,5 @@
 // 来自 since2006/shell-rs @ b2a307a: crates/shellrs-ssh/src/sftp/error.rs
-// 裁剪：去掉只给 CLI 同步用的 `NotAFolder`、`SyncToRoot`。
+// 裁剪：去掉只给 CLI 同步用的 `NotAFolder`、`SyncToRoot`（Agent CLI 工单 03 加回）。
 //! Why browsing or a transfer failed, and what a transfer asks or notes:
 //! values the app turns into its own words. The `Display` texts here are
 //! English for logs, never shown as they are.
@@ -106,6 +106,12 @@ pub enum SftpError {
     },
     /// Over the error a sync's delete failed with.
     DeleteFailed,
+    /// 外部 CLI 的 `sync`：远程路径在，但不是文件夹。
+    NotAFolder {
+        path: String,
+    },
+    /// 外部 CLI 的 `sync` 不往根目录里同步：带 `--delete` 会清空服务器。
+    SyncToRoot,
     /// 丢弃续传进度时连不上：远程的半截文件和续传记录还在。
     DiscardOffline,
 }
@@ -138,6 +144,8 @@ impl fmt::Display for SftpError {
                 write!(f, "reconnecting in {seconds} s ({attempt}/3)")
             }
             Self::DeleteFailed => f.write_str("couldn't delete"),
+            Self::NotAFolder { path } => write!(f, "remote path {path} isn't a folder"),
+            Self::SyncToRoot => f.write_str("can't sync to the root folder"),
             Self::DiscardOffline => f.write_str("couldn't reach the host to discard the progress"),
         }
     }

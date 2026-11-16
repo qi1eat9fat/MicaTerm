@@ -1,5 +1,5 @@
 // 来自 since2006/shell-rs @ b2a307a: src/ssh/describe.rs
-// 裁剪：去掉外部 CLI 的 `exec` 错误、英文文案和运行时切换语言；
+// 裁剪：去掉英文文案和运行时切换语言（外部 CLI 的 `exec` 错误在 Agent CLI 工单 02 加回）；
 // 改造：私钥进保险库，口令和读不出的私钥按 `PrivateKeySource` 说是哪一把（保险库里的，还是默认私钥文件），
 // 加上私钥不在保险库里（`AuthError::KeyMissing`）。
 
@@ -11,9 +11,9 @@ use std::error::Error;
 
 use micaterm_ssh::{
     AgentProblem, AgentUnreachable, AuthError, AuthenticationPrompt, AuthenticationRequest,
-    ChannelError, ConnectError, ConnectionPromptField, ForwardProblem, HostKeyChangedPrompt,
-    KnownHostsError, Latency, MissingCredential, PasswordWanted, PrivateKeySource, ProxyError,
-    RouteFailure, UnknownHostPrompt, link_as,
+    ChannelError, ConnectError, ConnectionPromptField, ExecError, ExecErrorKind, ExecFailure,
+    ForwardProblem, HostKeyChangedPrompt, KnownHostsError, Latency, MissingCredential,
+    PasswordWanted, PrivateKeySource, ProxyError, RouteFailure, UnknownHostPrompt, link_as,
 };
 
 use crate::i18n::t;
@@ -49,6 +49,49 @@ pub fn describe_missing_credential(need: MissingCredential) -> String {
         MissingCredential::KeyboardInteractive => t!("ssh.missing.keyboard_interactive"),
     }
     .into()
+}
+
+/// 外部 CLI 的命令为什么没跑完（Agent CLI 工单 02）。没人可问，所以缺凭据时说去 MicaTerm 里连一次。
+pub fn describe_exec_error(error: &ExecError) -> String {
+    let causes: Vec<Cause<'_>> = error.error.chain().collect();
+    if let Some(failure) = link_as::<ExecFailure>(causes[0]) {
+        let under = || chain_text(&causes[1..]);
+        return match failure {
+            ExecFailure::RuntimeFailed => t!("ssh.exec.runtime_failed", error = under()),
+            ExecFailure::CommandFailed => t!("ssh.exec.command_failed", error = under()),
+            ExecFailure::Aborted => t!("ssh.exec.aborted"),
+            ExecFailure::Refused => t!("ssh.exec.refused"),
+            ExecFailure::Disconnected => t!("ssh.exec.disconnected"),
+            ExecFailure::HostKeyChanged { endpoint } => {
+                t!("ssh.exec.host_key_changed", endpoint = endpoint)
+            }
+            ExecFailure::HostKeyUnknown { endpoint } => {
+                t!("ssh.exec.host_key_unknown", endpoint = endpoint)
+            }
+        }
+        .into();
+    }
+    if error.kind == ExecErrorKind::MissingCredential
+        && let Some(need) = causes
+            .iter()
+            .find_map(|cause| link_as::<MissingCredential>(*cause))
+    {
+        return match need {
+            MissingCredential::Password { rejected: false } => t!("ssh.exec.no_saved_password"),
+            MissingCredential::Password { rejected: true } => {
+                t!("ssh.exec.saved_password_rejected")
+            }
+            MissingCredential::Passphrase { rejected: false } => {
+                t!("ssh.exec.no_saved_passphrase")
+            }
+            MissingCredential::Passphrase { rejected: true } => {
+                t!("ssh.exec.saved_passphrase_rejected")
+            }
+            MissingCredential::KeyboardInteractive => t!("ssh.exec.keyboard_interactive"),
+        }
+        .into();
+    }
+    login_reason(&causes)
 }
 
 /// 状态栏上的延迟：整毫秒。

@@ -1,5 +1,5 @@
 //! 设置 › 应用与 Mica（工单 26）：记住窗口大小和位置、数据目录、关于；外观里的 Mica 背景开关。
-//! 最后核对五类设置都在左栏里（spec 第 9 节）。
+//! 最后核对六类设置都在左栏里（spec 第 9 节，Agent CLI 工单 01 加了「外部 CLI」，2026-11-16 改名「Agent」）。
 
 use std::path::Path;
 use std::time::Duration;
@@ -11,7 +11,7 @@ use micaterm::workspace::{WindowState, default_window_size, window_options};
 use crate::support::*;
 
 /// 设置里「应用」在左栏的位置。
-const APP_CATEGORY: usize = 4;
+const APP_CATEGORY: usize = 5;
 
 fn open_with_data_dir(
     cx: &mut TestAppContext,
@@ -36,11 +36,11 @@ fn stored(cx: &mut TestAppContext, workspace: &Entity<Workspace>) -> AppSettings
 }
 
 #[gpui_kit::test]
-fn the_settings_have_all_five_categories_in_order(cx: &mut TestAppContext) {
+fn the_settings_have_all_six_categories_in_order(cx: &mut TestAppContext) {
     let (handle, _) = open_workspace(cx);
     dispatch(cx, handle, OpenSettings);
     in_frame(cx, handle, |window, _| {
-        let names: Vec<String> = (0..5_usize)
+        let names: Vec<String> = (0..6_usize)
             .map(|index| {
                 window
                     .find(("settings-category", index))
@@ -49,8 +49,8 @@ fn the_settings_have_all_five_categories_in_order(cx: &mut TestAppContext) {
                     .to_string()
             })
             .collect();
-        assert_eq!(names, ["外观", "终端", "SFTP", "安全", "应用"]);
-        assert!(window.try_find(("settings-category", 5_usize)).is_none());
+        assert_eq!(names, ["外观", "终端", "SFTP", "安全", "Agent", "应用"]);
+        assert!(window.try_find(("settings-category", 6_usize)).is_none());
     });
 }
 

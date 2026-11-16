@@ -7,8 +7,8 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::*;
 
 use crate::app::{
-    ConnectHost, CopyHostAddress, DeleteHost, DuplicateHost, EditHost, FocusHostSearch, MoveHost,
-    NewHost,
+    ConnectHost, CopyHostAddress, CopyHostId, DeleteHost, DuplicateHost, EditHost, FocusHostSearch,
+    MoveHost, NewHost,
 };
 use crate::host::{HostDialog, HostFormEvent, HostId, open_delete_host_dialog};
 use crate::tabs::Tab;
@@ -22,6 +22,7 @@ pub(in crate::workspace) fn bind_hosts_actions(
         .on_action(cx.listener(Workspace::on_edit_host))
         .on_action(cx.listener(Workspace::on_duplicate_host))
         .on_action(cx.listener(Workspace::on_copy_host_address))
+        .on_action(cx.listener(Workspace::on_copy_host_id))
         .on_action(cx.listener(Workspace::on_delete_host))
         .on_action(cx.listener(Workspace::on_move_host))
         .on_action(cx.listener(Workspace::on_focus_host_search))
@@ -114,6 +115,18 @@ impl Workspace {
     ) {
         if let Some(host) = self.hosts.read(cx).host(id) {
             cx.write_to_clipboard(ClipboardItem::new_string(host.address.to_string()));
+        }
+    }
+
+    /// 复制 ID：把主机对外的 ID 放进剪贴板，交给 Agent 用（外部 CLI）。
+    fn on_copy_host_id(
+        &mut self,
+        &CopyHostId(id): &CopyHostId,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(host) = self.hosts.read(cx).host(id) {
+            cx.write_to_clipboard(ClipboardItem::new_string(host.public_id.to_string()));
         }
     }
 

@@ -31,6 +31,11 @@ pub struct DuplicateHost(pub HostId);
 #[action(namespace = micaterm, no_json)]
 pub struct CopyHostAddress(pub HostId);
 
+/// 把这台主机对外的 ID 放进剪贴板（右键菜单「复制 ID」）：交给 Agent 用 `micaterm` 命令指这台主机。
+#[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
+#[action(namespace = micaterm, no_json)]
+pub struct CopyHostId(pub HostId);
+
 /// 删除这台主机，先确认（右键菜单「删除」）。已经打开的卡片不受影响。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
 #[action(namespace = micaterm, no_json)]

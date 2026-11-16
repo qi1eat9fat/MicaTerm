@@ -109,6 +109,68 @@ settings.appearance.mica:
   zh-CN: Mica 背景
 settings.appearance.mica_description:
   zh-CN: 只在 Windows 11 22H2 及以上可用；关闭时侧栏用不透明底色
+settings.category.cli:
+  zh-CN: Agent
+settings.cli.section:
+  zh-CN: 给 AI Agent 用
+settings.cli.enabled:
+  zh-CN: 启用外部 Agent
+settings.cli.enabled_description:
+  zh-CN: 让 Claude Code、Codex 等 AI Agent 用 micaterm 命令查看这里保存的主机；Agent 看不到密码和私钥
+settings.cli.command:
+  zh-CN: 下面装好命令行工具后，在终端里运行 micaterm hosts list 试试
+settings.cli.tools:
+  zh-CN: 命令行工具
+settings.cli.binary:
+  zh-CN: micaterm 命令
+settings.cli.binary_installed:
+  zh-CN: 已安装：%{path}。新开的终端和 Agent 才能找到它
+settings.cli.binary_missing:
+  zh-CN: 未安装。装好后，新开的终端和 Agent 都能直接运行 micaterm
+settings.cli.binary_outdated:
+  zh-CN: 装的是另一个版本的 MicaTerm 的命令，更新后才能用
+settings.cli.binary_not_on_path:
+  zh-CN: 命令在，但它所在的文件夹不在 PATH 里
+settings.cli.binary_stale:
+  zh-CN: 现在的 micaterm 指向另一份 MicaTerm：%{target}
+settings.cli.binary_occupied:
+  zh-CN: "%{path} 已被别的程序占用，MicaTerm 不会改动它"
+settings.cli.binary_unavailable:
+  zh-CN: 程序旁边没有 micaterm-cli，装不了
+settings.cli.skills:
+  zh-CN: Agent Skills
+settings.cli.skill_installed:
+  zh-CN: 已安装
+settings.cli.skill_missing:
+  zh-CN: 未安装
+settings.cli.skill_outdated:
+  zh-CN: 装的是旧版本
+settings.cli.note_with:
+  zh-CN: "%{note}。%{more}"
+settings.cli.install_off:
+  zh-CN: 这次运行不能安装
+settings.cli.checking:
+  zh-CN: 正在检查…
+settings.cli.install:
+  zh-CN: 安装
+settings.cli.update:
+  zh-CN: 更新
+settings.cli.remove:
+  zh-CN: 移除
+settings.cli.install_failed:
+  zh-CN: 安装或移除没有成功：%{error}
+settings.cli.copy_skill:
+  zh-CN: 复制 Skill
+settings.cli.copy_skill_description:
+  zh-CN: 别的 Agent：把 Skill 全文复制下来，放到它读 Skill 的地方
+settings.cli.copy:
+  zh-CN: 复制
+settings.cli.skill_copied:
+  zh-CN: 已复制 Skill
+settings.cli.elsewhere:
+  zh-CN: 同一个数据目录的另一个 MicaTerm 已经在接收外部 CLI 的请求，命令会交给它
+settings.cli.off:
+  zh-CN: 这次运行没有数据目录，外部 CLI 不可用
 settings.category.app:
   zh-CN: 应用
 settings.app.window:
@@ -135,3 +197,13 @@ settings.app.about_description:
   zh-CN: GPL-3.0 · 部分代码来自 shell-rs（MIT）
 settings.app.license:
   zh-CN: 许可证
+settings.cli.agent_command:
+  zh-CN: Agent 命令
+settings.cli.agent_command_description:
+  zh-CN: 右侧 Agent 面板里运行的命令。留空时自动检测，先找 claude，再找 codex
+settings.cli.agent_command_detecting:
+  zh-CN: 自动检测
+settings.cli.agent_command_found:
+  zh-CN: 自动检测（%{command}）
+settings.cli.agent_command_none:
+  zh-CN: 自动检测（没找到 claude 或 codex）

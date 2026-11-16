@@ -1,15 +1,18 @@
 //! 主机栏（26 号 `.side`，宽 232，可以收起）：
 //!
-//! - 顶部一行高 32，和标签栏对齐：标志、MicaTerm、新建主机按钮；这一行的空白处能拖动窗口。
+//! - 顶部一行高 32，和标签栏对齐：标志、MicaTerm、新建主机按钮、收起主机栏按钮（2026-11-16 用户加）；
+//!   这一行的空白处能拖动窗口。
 //! - 下面是常驻的搜索框和平铺主机列表，是 `crate::host::HostList`（工单 11），一直到窗口底。
 //!   保险库的锁和设置按钮都在标题栏右侧。
 //!
-//! 文字一律 400（用户定：侧栏不加粗）。收起主机栏用 Ctrl+Shift+B，收起后标签栏最左边出现「展开主机栏」。
+//! 文字一律 400（用户定：侧栏不加粗）。收起主机栏用顶部的按钮或 Ctrl+Shift+B，收起后标签栏最左边出现「展开主机栏」。
 
 use gpui_kit::component::Icon;
 use gpui_kit::*;
 
-use crate::app::{MARK_ICON, NewHost, PRODUCT_NAME, SERVER_PLUS_ICON};
+use crate::app::{
+    CatalogIcon, MARK_ICON, NewHost, PRODUCT_NAME, SERVER_PLUS_ICON, ToggleHostSidebar,
+};
 use crate::host::HostList;
 use crate::i18n::t;
 use crate::theme::{Tokens, TypeScale, size};
@@ -69,11 +72,21 @@ pub(super) fn render_host_sidebar(
                         Icon::default().path(SERVER_PLUS_ICON),
                         t!("workspace.host_sidebar.new_host"),
                     )
+                    // 不再常亮底色（2026-11-16 用户：旁边加了收起按钮后像一直选中着）：和收起按钮一样，悬停才有底色。
                     .size(size::BAR_BUTTON, size::BAR_ICON)
-                    .radius(size::RADIUS_LG)
-                    .primary(true)
                     .tooltip(t!("workspace.host_sidebar.new_host"))
                     .dispatch(Box::new(NewHost), target, tokens),
+                )
+                // 收起主机栏：和标签栏最左边的「展开主机栏」是一对。
+                .child(
+                    IconButton::new(
+                        "collapse-host-sidebar",
+                        CatalogIcon::PanelLeftClose,
+                        t!("workspace.host_sidebar.collapse"),
+                    )
+                    .size(size::BAR_BUTTON, size::BAR_ICON)
+                    .tooltip(t!("workspace.host_sidebar.collapse"))
+                    .dispatch(Box::new(ToggleHostSidebar), target, tokens),
                 ),
         )
         .child(list)

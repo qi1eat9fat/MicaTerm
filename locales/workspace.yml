@@ -1,4 +1,6 @@
 _version: 2
+workspace.cli.vault_wanted:
+  zh-CN: Agent 要用保险库里的密码或私钥登录主机，但保险库已锁定。点这里解锁
 workspace.window.minimize:
   zh-CN: 最小化
 workspace.window.maximize:
@@ -19,6 +21,8 @@ workspace.host_sidebar.title:
   zh-CN: 主机
 workspace.host_sidebar.expand:
   zh-CN: 展开主机栏
+workspace.host_sidebar.collapse:
+  zh-CN: 收起主机栏
 workspace.host_sidebar.new_host:
   zh-CN: 新建主机
 workspace.host_sidebar.empty:
@@ -43,3 +47,5 @@ workspace.new_tab.new_host:
   zh-CN: 新建主机
 workspace.new_tab.local_terminal:
   zh-CN: 本地终端
+workspace.right_sidebar.agent:
+  zh-CN: Agent

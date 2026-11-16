@@ -1,9 +1,10 @@
-//! 远程卡片的处理器（工单 12）：原地重连（断开后按 Enter、右键「重新连接」）、断开连接、复制 IP。
+//! 远程卡片的处理器（工单 12）：原地重连（断开后按 Enter、右键「重新连接」）、断开连接、复制 IP，
+//! 交给 Agent / 收回（Agent CLI 工单 06，做法在 `workspace/cli_cards.rs`）。
 //! 建卡片、连接、问答在 `workspace/remote/`；在新标签里连接主机（`ConnectHost`）在 `hosts`。
 
 use gpui_kit::*;
 
-use crate::app::{CopyCardAddress, DisconnectCard, ReconnectCard};
+use crate::app::{CopyCardAddress, DisconnectCard, HandCardToAgent, ReconnectCard, TakeCardBack};
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) fn bind_remote_actions(
@@ -13,9 +14,30 @@ pub(in crate::workspace) fn bind_remote_actions(
     root.on_action(cx.listener(Workspace::on_reconnect_card))
         .on_action(cx.listener(Workspace::on_disconnect_card))
         .on_action(cx.listener(Workspace::on_copy_card_address))
+        .on_action(cx.listener(Workspace::on_hand_card_to_agent))
+        .on_action(cx.listener(Workspace::on_take_card_back))
 }
 
 impl Workspace {
+    fn on_hand_card_to_agent(
+        &mut self,
+        &HandCardToAgent(card): &HandCardToAgent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 交给右侧面板里的 Agent（工单 07）：先看缺什么，准备好了才交出去。
+        self.give_card_to_agent(card, window, cx);
+    }
+
+    fn on_take_card_back(
+        &mut self,
+        &TakeCardBack(card): &TakeCardBack,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.take_card_back(card, cx);
+    }
+
     fn on_reconnect_card(
         &mut self,
         &ReconnectCard(card): &ReconnectCard,

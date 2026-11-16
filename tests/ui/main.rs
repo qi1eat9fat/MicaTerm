@@ -31,9 +31,12 @@
 //! - `vault_waiting`：等待解锁保险库（33）
 //! - `probe`：系统探测可关、失败后自动停用（34）
 //! - `vault_prompt_focus`：解锁后不抢问答框的焦点（32）
+//! - `agent_cards`：交给 Agent 的卡片（Agent CLI 工单 06）
 
 mod support;
 
+mod agent_cards;
+mod agent_panel;
 mod credentials;
 mod dialogs;
 mod editor;
@@ -47,6 +50,8 @@ mod remote_card;
 mod route;
 mod settings;
 mod settings_app;
+mod settings_cli;
+mod cli_changes;
 mod settings_sftp;
 mod sftp_files;
 mod sftp_tab;
