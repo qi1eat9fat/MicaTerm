@@ -200,11 +200,13 @@ settings.app.license:
 settings.cli.agent_command:
   zh-CN: Agent 命令
 settings.cli.agent_command_description:
-  zh-CN: 右侧 Agent 面板里运行的命令。留空时自动检测，先找 claude，再找 codex
+  zh-CN: 右侧 Agent 面板里运行的命令。留空时自动检测，先找 claude（含 Claude 桌面版自带的），再找 codex
 settings.cli.agent_command_detecting:
   zh-CN: 自动检测
 settings.cli.agent_command_found:
   zh-CN: 自动检测（%{command}）
+settings.cli.agent_command_found_desktop:
+  zh-CN: 自动检测（Claude 桌面版自带的 claude）
 settings.cli.agent_command_none:
   zh-CN: 自动检测（没找到 claude 或 codex）
 settings.cli.hooks:

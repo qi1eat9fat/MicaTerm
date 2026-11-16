@@ -1,5 +1,5 @@
 //! Agent › Agent 命令（Agent CLI 工单 07）：应用内启动 Agent 时运行的命令。留空是自动检测
-//! （先找 claude，再找 codex），占位字写检测到的那个。每次改动立刻写进设置。
+//! （先找 claude，含 Claude 桌面版自带的，再找 codex），占位字写检测到的那个。每次改动立刻写进设置。
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::*;
@@ -56,6 +56,10 @@ impl AgentCommandEditor {
             let found = cx.background_spawn(async { agent_program(None) }).await;
             this.update_in(cx, |this, window, cx| {
                 let placeholder = match found {
+                    // 桌面版自带的路径带版本号，又长又会变，不显示路径。
+                    Some(program) if program.bundled => {
+                        t!("settings.cli.agent_command_found_desktop")
+                    }
                     Some(program) => t!(
                         "settings.cli.agent_command_found",
                         command = program.command
