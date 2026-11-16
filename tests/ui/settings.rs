@@ -250,8 +250,8 @@ fn the_terminal_font_size_and_line_height_change_at_once_and_are_stored(cx: &mut
     });
     in_frame(cx, handle, |window, cx| {
         let mut menu = window.within("popup-menu");
-        assert_eq!(menu.find(0_usize).label(), Some("10"));
-        assert_eq!(menu.find(18_usize).label(), Some("28"));
+        assert_eq!(menu.find(("menu-option", 0_usize)).label(), Some("10"));
+        assert_eq!(menu.find(("menu-option", 18_usize)).label(), Some("28"));
         menu.click(4_usize, cx);
     });
     assert_eq!(stored(cx, &workspace).terminal_font.size, 14.);
@@ -262,8 +262,8 @@ fn the_terminal_font_size_and_line_height_change_at_once_and_are_stored(cx: &mut
     });
     in_frame(cx, handle, |window, cx| {
         let mut menu = window.within("popup-menu");
-        assert_eq!(menu.find(0_usize).label(), Some("1.0"));
-        assert_eq!(menu.find(10_usize).label(), Some("2.0"));
+        assert_eq!(menu.find(("menu-option", 0_usize)).label(), Some("1.0"));
+        assert_eq!(menu.find(("menu-option", 10_usize)).label(), Some("2.0"));
         menu.click(2_usize, cx);
     });
     assert_eq!(stored(cx, &workspace).terminal_font.line_height, 1.2);
@@ -309,13 +309,16 @@ fn copy_on_select_and_the_right_click_action_change_at_once_and_are_stored(
     });
     in_frame(cx, handle, |window, cx| {
         let mut menu = window.within("popup-menu");
-        assert_eq!(menu.find(0_usize).label(), Some("显示菜单"));
-        assert_eq!(menu.find(1_usize).label(), Some("粘贴"));
         assert_eq!(
-            menu.find(2_usize).label(),
+            menu.find(("menu-option", 0_usize)).label(),
+            Some("显示菜单")
+        );
+        assert_eq!(menu.find(("menu-option", 1_usize)).label(), Some("粘贴"));
+        assert_eq!(
+            menu.find(("menu-option", 2_usize)).label(),
             Some("有选中文字就复制，否则粘贴")
         );
-        assert_eq!(menu.find(3_usize).label(), Some("无动作"));
+        assert_eq!(menu.find(("menu-option", 3_usize)).label(), Some("无动作"));
         menu.click(2_usize, cx);
     });
     assert_eq!(

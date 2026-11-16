@@ -182,9 +182,9 @@ fn the_parallel_transfer_count_offers_one_to_ten_and_is_stored(cx: &mut TestAppC
     });
     in_frame(cx, fixture.handle, |window, cx| {
         let mut menu = window.within("popup-menu");
-        assert_eq!(menu.find(0_usize).label(), Some("1"));
-        assert_eq!(menu.find(9_usize).label(), Some("10"));
-        assert!(menu.try_find(10_usize).is_none());
+        assert_eq!(menu.find(("menu-option", 0_usize)).label(), Some("1"));
+        assert_eq!(menu.find(("menu-option", 9_usize)).label(), Some("10"));
+        assert!(menu.try_find(("menu-option", 10_usize)).is_none());
         menu.click(4_usize, cx);
     });
 

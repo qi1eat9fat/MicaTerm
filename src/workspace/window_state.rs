@@ -22,6 +22,12 @@ pub fn default_window_size() -> Size<Pixels> {
     size(px(1280.), px(800.))
 }
 
+/// 主窗口最小多大（`window_options` 的 `window_min_size`）。比它还小的记录是坏的，不用。
+pub const MIN_WINDOW_SIZE: Size<Pixels> = Size {
+    width: px(720.),
+    height: px(480.),
+};
+
 /// 窗口至少要有这么多在屏幕上，才放回原处：够抓住标题栏拖回来。
 const VISIBLE_WIDTH: f32 = 120.;
 const VISIBLE_HEIGHT: f32 = 40.;
@@ -67,11 +73,22 @@ impl WindowState {
             WindowBounds::Maximized(bounds) => (bounds, true),
             WindowBounds::Fullscreen(bounds) => (bounds, false),
         };
-        Some(Self {
+        let state = Self {
             display,
             bounds,
             maximized,
-        })
+        };
+        state.sane().then_some(state)
+    }
+
+    /// 大小像个真窗口。Windows 上关窗口时窗口句柄已经销毁，GPUI 读 `GetWindowPlacement` 失败，
+    /// 拿到的是全零的框，减掉边框后宽高是负的（-14.7 × -7.3）；这时还会报一次移动。
+    /// 记下它，下次启动窗口就开成最小的那么大，看着像「记住窗口大小和位置」没生效。
+    /// 留 1 的余量：缩放比例换算会差零点几。
+    fn sane(&self) -> bool {
+        let size = self.bounds.size;
+        size.width >= MIN_WINDOW_SIZE.width - px(1.)
+            && size.height >= MIN_WINDOW_SIZE.height - px(1.)
     }
 
     /// 存的大小和位置。
@@ -85,8 +102,10 @@ impl WindowState {
     }
 
     /// 读 `path` 上存的样子；没有或读不了就是 `None`，窗口照新窗口的样子开。
+    /// 以前记下的坏记录（宽高是负的，见 [`Self::sane`]）也当没有。
     pub fn load(path: &Path) -> Option<Self> {
-        serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+        let state: Self = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+        state.sane().then_some(state)
     }
 
     /// 整个写进 `path`，和设置一样先写临时文件再改名。
@@ -434,6 +453,25 @@ mod tests {
         state.save(&path).unwrap();
         assert_eq!(WindowState::load(&path), Some(state));
         std::fs::write(&path, "{\"bounds\": 7}").unwrap();
+        assert_eq!(WindowState::load(&path), None);
+    }
+
+    /// Windows 上关窗口时报的全零框（减掉边框后宽高是负的）不记；已经记在文件里的也不用。
+    #[test]
+    fn a_window_place_with_no_real_size_is_neither_kept_nor_used() {
+        let broken = rect(7.333_333_5, 3.333_333_3, -14.666_667, -7.333_333_5);
+        assert_eq!(
+            WindowState::observe(
+                Some("monitor".into()),
+                WindowBounds::Windowed(broken),
+                false,
+                false
+            ),
+            None
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("window.json");
+        saved("monitor", broken, false).save(&path).unwrap();
         assert_eq!(WindowState::load(&path), None);
     }
 }

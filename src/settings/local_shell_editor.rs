@@ -6,14 +6,14 @@ use gpui_kit::component::{
     Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
-    menu::{DropdownMenu as _, PopupMenuItem},
+    menu::DropdownMenu as _,
 };
 use gpui_kit::*;
 
 use micaterm_terminal::{default_shell_name, installed_shells};
 
 use super::SettingsStore;
-use super::controls::field_input;
+use super::controls::{field_input, menu_option};
 use super::pages::WIDE_WIDTH;
 use crate::i18n::t;
 use crate::theme::Tokens;
@@ -117,7 +117,7 @@ fn stored(store: &Entity<SettingsStore>, cx: &App) -> Option<String> {
 }
 
 impl Render for LocalShellEditor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current = stored(&self.store, cx);
         let automatic = self.automatic_label();
         let installed = self
@@ -137,23 +137,25 @@ impl Render for LocalShellEditor {
             )
             .tooltip(t!("settings.local_terminal.installed"))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-                let item = |label: SharedString, shell: Option<String>| {
+                let item = |index: usize, label: SharedString, shell: Option<String>| {
                     let editor = editor.clone();
-                    PopupMenuItem::new(label)
-                        .checked(current == shell)
-                        .on_click(move |_, window, cx| {
-                            editor
-                                .update(cx, |editor, cx| editor.choose(shell.clone(), window, cx))
-                                .ok();
-                        })
+                    let checked = current == shell;
+                    menu_option(index, label, checked, move |window, cx| {
+                        editor
+                            .update(cx, |editor, cx| editor.choose(shell.clone(), window, cx))
+                            .ok();
+                    })
                 };
-                let mut menu = menu.item(item(automatic.clone(), None));
+                let mut menu = menu.item(item(0, automatic.clone(), None));
                 if !installed.is_empty() {
                     menu = menu.separator();
                 }
-                installed.iter().fold(menu, |menu, shell| {
-                    menu.item(item(shell.clone().into(), Some(shell.clone())))
-                })
+                installed
+                    .iter()
+                    .enumerate()
+                    .fold(menu, |menu, (index, shell)| {
+                        menu.item(item(index + 1, shell.clone().into(), Some(shell.clone())))
+                    })
             });
         // 26 号 `.stg-in`：界面字体（等宽字体会把中文的占位字拉开）。
         div().w(WIDE_WIDTH).child(field_input(
@@ -161,6 +163,7 @@ impl Render for LocalShellEditor {
                 .id("local-shell")
                 .aria_label(t!("settings.local_terminal.shell"))
                 .suffix(menu),
+            self.input.read(cx).focus_handle(cx).is_focused(window),
             &tokens,
         ))
     }

@@ -250,6 +250,7 @@ impl Render for LocalDirectoryEditor {
                             "settings.sftp.local_directory_label",
                             path = self.downloads.as_ref()
                         )),
+                    self.input.read(cx).focus_handle(cx).is_focused(window),
                     &tokens,
                 )),
             )

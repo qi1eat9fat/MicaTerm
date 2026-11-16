@@ -245,14 +245,41 @@ pub fn field_box<E: Styled>(element: E, tokens: &Tokens) -> E {
 /// 单行输入框照 26 号 `.stg-in` 的样子：高 28、左右 8、圆角 6、细边、输入框底，字是界面字号。
 /// `.small()` 只为左右 8；它的高（1.5rem）和字号（0.875rem）都不对，另外设。`Input::h` 只管多行，
 /// 单行的高要经 `Styled`。
-pub fn field_input(input: Input, tokens: &Tokens) -> Input {
+/// 聚焦时和编辑连接的输入框一样（`modal_input`）：还是一条细边，只是颜色深一档；
+/// 不要 gpui-component 自己的焦点环（细边外再套一圈，看着是双线）。
+pub fn field_input(input: Input, focused: bool, tokens: &Tokens) -> Input {
     let input = input
         .small()
+        .focus_bordered(false)
         .text_size(ui_text())
         .rounded(size::RADIUS)
         .bg(tokens.input)
-        .border_color(tokens.line);
+        .border_color(if focused { tokens.icon } else { tokens.line });
     Styled::h(input, CONTROL_HEIGHT)
+}
+
+/// 设置里下拉菜单每一项的元素 id 是 `(MENU_OPTION, 第几项)`，无障碍名是它的文字（测试靠它）。
+pub const MENU_OPTION: &str = "menu-option";
+
+/// 设置里下拉菜单的一项：字是界面字号。gpui-component 的菜单项写死了 `text_sm`（0.875rem，
+/// Windows 上约 10.5），比设置里的字小一圈，所以自己画文字；`checked` 的勾照旧由菜单画。
+/// `index` 是它在选项里排第几（不算分隔线），给元素 id 用。
+pub fn menu_option(
+    index: usize,
+    label: SharedString,
+    checked: bool,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> PopupMenuItem {
+    PopupMenuItem::element(move |_, _| {
+        div()
+            .id((MENU_OPTION, index))
+            .test_support()
+            .aria_label(label.clone())
+            .text_size(ui_text())
+            .child(label.clone())
+    })
+    .checked(checked)
+    .on_click(move |_, window, cx| on_click(window, cx))
 }
 
 /// 一项开关设置（26 号 `.stg-tg`：28×16 胶囊，开着是正文色底）：拨动时用 `set` 把新值写进设置。
@@ -413,11 +440,12 @@ pub fn dropdown(
             .enumerate()
             .fold(menu, |menu, (index, label)| {
                 let on_choose = on_choose.clone();
-                menu.item(
-                    PopupMenuItem::new(label.clone())
-                        .checked(selected == Some(index))
-                        .on_click(move |_, window, cx| on_choose(index, window, cx)),
-                )
+                menu.item(menu_option(
+                    index,
+                    label.clone(),
+                    selected == Some(index),
+                    move |window, cx| on_choose(index, window, cx),
+                ))
             });
         menu.scrollable(true).max_h(px(320.))
     })

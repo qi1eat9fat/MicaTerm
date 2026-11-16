@@ -83,12 +83,14 @@ fn stored(store: &Entity<SettingsStore>, cx: &App) -> Option<String> {
 }
 
 impl Render for AgentCommandEditor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
+        let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
         div().w(WIDE_WIDTH).child(field_input(
             Input::new(&self.input)
                 .id("agent-command")
                 .aria_label(t!("settings.cli.agent_command")),
+            focused,
             &tokens,
         ))
     }

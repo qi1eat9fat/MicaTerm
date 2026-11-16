@@ -720,7 +720,7 @@ pub fn window_options(
         }),
         window_bounds: Some(window_bounds),
         display_id,
-        window_min_size: Some(size(px(720.), px(480.))),
+        window_min_size: Some(super::window_state::MIN_WINDOW_SIZE),
         window_background: WindowBackgroundAppearance::Opaque,
         app_id: Some(crate::app::APP_IDENTITY.into()),
         ..Default::default()
