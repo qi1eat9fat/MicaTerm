@@ -1,15 +1,17 @@
 //! 设置 › Agent：启用外部 Agent 的开关和这次运行的端点（Agent CLI 工单 01），命令行工具和
-//! Agent Skills 的安装行（工单 05）。装、换、删都在后台跑（`cli::CliIntegration`），失败弹通知。
+//! Agent Skills 的安装行（工单 05），状态 hook 的开关（工单 09）。装、换、删都在后台跑（`cli::CliIntegration`），失败弹通知。
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::notification::Notification;
+use gpui_kit::component::{Disableable as _, Sizable as _, switch::Switch};
 use gpui_kit::*;
 
 use super::AppSettings;
 use super::controls::{page_note, reset_if, row, section, setting_switch};
 use super::tab::SettingsTab;
 use crate::cli::{
-    AgentKind, BinaryStatus, CliIntegration, CliStatus, IntegrationChange, SKILL, SkillStatus,
+    AgentKind, BinaryStatus, CliIntegration, CliStatus, HOOK_AGENTS, HookStatus, IntegrationChange,
+    SKILL, SkillStatus, hook_file,
 };
 use crate::i18n::t;
 use crate::theme::Tokens;
@@ -272,5 +274,84 @@ fn install_rows(
         ),
         tokens,
     ));
+    let paths = integration.read(cx).paths().cloned();
+    rows.extend(hook_rows(
+        integration,
+        paths.as_ref(),
+        status.as_ref(),
+        installable,
+        busy,
+        tokens,
+    ));
+    rows
+}
+
+/// 「Agent 状态」一组（工单 09，26 号设置 › Agent 页）：每个 Agent 一行开关，开着就是装了状态 hook。
+/// 开关跟着配置文件里实际装没装走；装不上、读不懂时弹通知，那一行写原因。
+fn hook_rows(
+    integration: &Entity<CliIntegration>,
+    paths: Option<&crate::cli::IntegrationPaths>,
+    status: Option<&crate::cli::IntegrationStatus>,
+    installable: bool,
+    busy: bool,
+    tokens: &Tokens,
+) -> Vec<AnyElement> {
+    let mut rows = vec![section(
+        t!("settings.cli.hooks"),
+        Some(t!("settings.cli.hooks_description")),
+        false,
+        tokens,
+    )];
+    for agent in HOOK_AGENTS {
+        let hooks = status.map(|status| status.hooks(agent));
+        let file = paths
+            .and_then(|paths| hook_file(paths, agent))
+            .map(|file| file.display().to_string())
+            .unwrap_or_default();
+        let note = match &hooks {
+            Some(HookStatus::Blocked(reason)) => reason.clone().into(),
+            _ if agent == AgentKind::ClaudeCode => {
+                t!("settings.cli.hooks_claude", file = file.as_str())
+            }
+            _ => t!("settings.cli.hooks_codex", file = file.as_str()),
+        };
+        let checked = hooks == Some(HookStatus::Installed);
+        let integration = integration.clone();
+        let switch = Switch::new(SharedString::from(format!("cli-hooks-{}", agent.key())))
+            .small()
+            .checked(checked)
+            .disabled(!installable || busy || hooks.is_none())
+            .accessibility_label(agent.label())
+            .on_click(move |checked: &bool, window, cx| {
+                let change = if *checked {
+                    IntegrationChange::InstallHooks(agent)
+                } else {
+                    IntegrationChange::RemoveHooks(agent)
+                };
+                let task = integration.update(cx, |integration, cx| integration.apply(change, cx));
+                window
+                    .spawn(cx, async move |cx| {
+                        if let Err(error) = task.await {
+                            let message = t!("settings.cli.hooks_failed", error = error);
+                            cx.update(|window, cx| {
+                                window.push_notification(Notification::error(message), cx)
+                            })
+                            .ok();
+                        }
+                    })
+                    .detach();
+            });
+        rows.push(
+            div()
+                .id(SharedString::from(format!(
+                    "cli-hooks-{}-status",
+                    agent.key()
+                )))
+                .test_support()
+                .aria_label(note.clone())
+                .child(row(agent.label(), Some(note), None, switch, tokens))
+                .into_any_element(),
+        );
+    }
     rows
 }

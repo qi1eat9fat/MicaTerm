@@ -14,9 +14,11 @@
 //!   （`SKILL.md` 是 Skill 的正文）。
 
 mod agent_env;
+mod agent_hooks;
 mod backend;
 mod client;
 mod env;
+mod hook;
 mod hosts;
 mod install;
 #[cfg(any(windows, test))]
@@ -44,6 +46,7 @@ pub use agent_env::{
     CARD_ENV, CLI_ENV, HOST_ENV, SELF_CARD_ENV, TERM_PROGRAM, TERM_PROGRAM_ENV,
     TERM_PROGRAM_VERSION_ENV, cli_callable, identity as identity_env,
 };
+pub use agent_hooks::{HOOK_AGENTS, HookStatus, hook_file};
 pub use backend::SshCliBackend;
 pub use client::{Console, FAILURE_EXIT, PARTIAL_EXIT, run as send_request};
 pub use hosts::{CliTarget, credentials, targets};
@@ -115,6 +118,16 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Called by an agent's status hook: report what it is doing to
+    /// MicaTerm. Installed from Settings → Agent; always exits 0.
+    #[command(hide = true)]
+    Hook {
+        /// `claude` or `codex`.
+        source: String,
+        /// Codex passes the event as JSON here; Claude Code writes it to
+        /// stdin.
+        payload: Option<String>,
+    },
     /// Say where you are and what you can do: this card's ID, the card the
     /// user handed you, whether MicaTerm and its external CLI are on, and
     /// every command with an example. Run it first when unsure.
@@ -358,6 +371,11 @@ pub fn main(args: Vec<OsString>) -> i32 {
             return error.exit_code();
         }
     };
+    // 状态 hook：不打印、不看结果，总是 0（工单 09）。
+    let command = match cli.command {
+        Command::Hook { source, payload } => return hook::run(&source, payload),
+        command => command,
+    };
     let (stdout, stderr) = (io::stdout(), io::stderr());
     let json = !stdout.is_terminal();
     let stderr_is_terminal = stderr.is_terminal();
@@ -371,7 +389,7 @@ pub fn main(args: Vec<OsString>) -> i32 {
         stderr_is_terminal,
     };
     // `env` 不发请求、不看退出码：MicaTerm 没开也照样说清楚。
-    if let Command::Env { json } = cli.command {
+    if let Command::Env { json } = command {
         console.json |= json;
         let endpoint = crate::app::data_dir().map(|dir| crate::app::cli_endpoint(&dir));
         let code = env::run(endpoint.as_deref(), &mut console);
@@ -379,7 +397,7 @@ pub fn main(args: Vec<OsString>) -> i32 {
         let _ = stderr.finish();
         return code;
     }
-    let code = match (request(cli.command, &mut console), crate::app::data_dir()) {
+    let code = match (request(command, &mut console), crate::app::data_dir()) {
         (Err(code), _) => code,
         (Ok(request), Ok(dir)) => {
             client::run(&crate::app::cli_endpoint(&dir), request, &mut console)
@@ -398,6 +416,7 @@ pub fn main(args: Vec<OsString>) -> i32 {
 fn request(command: Command, console: &mut Console) -> Result<Request, i32> {
     Ok(match command {
         Command::Env { .. } => unreachable!("`env` is answered in `main`"),
+        Command::Hook { .. } => unreachable!("`hook` is answered in `main`"),
         Command::Hosts { command } => match command {
             HostsCommand::List { query, json } => {
                 console.json |= json;

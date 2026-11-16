@@ -37,6 +37,7 @@ mod support;
 
 mod agent_cards;
 mod agent_panel;
+mod agent_state;
 mod credentials;
 mod dialogs;
 mod editor;

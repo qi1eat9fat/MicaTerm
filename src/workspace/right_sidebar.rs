@@ -28,6 +28,22 @@ pub enum RightPanel {
     Agent,
 }
 
+/// 图标栏 Agent 图标右上角的点（工单 09，26 号 `.rail .rdot`）：和标签状态点同一套颜色。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RailDot {
+    /// 橙点：等你确认，或没看过的回合结束。
+    Attention,
+    /// 绿点：运行中。
+    Busy,
+}
+
+/// 图标栏 Agent 图标现在什么样：点，和悬停提示（「Agent · 等你确认」）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentRail {
+    pub dot: Option<RailDot>,
+    pub tooltip: SharedString,
+}
+
 /// 右侧栏「文件」现在是什么样。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FilesButton {
@@ -42,6 +58,7 @@ pub enum FilesButton {
 pub(super) fn render_right_sidebar(
     open: Option<RightPanel>,
     files: FilesButton,
+    agent: AgentRail,
     target: &FocusHandle,
     tokens: &Tokens,
 ) -> impl IntoElement {
@@ -95,12 +112,34 @@ pub(super) fn render_right_sidebar(
         // 26 号 `.rail .rsep`：和上面三个隔开。
         .child(div().w(px(16.)).h(size::LINE).my(px(2.)).bg(tokens.line))
         .child(
-            button(
-                "right-sidebar-agent",
-                CatalogIcon::Sparkles,
-                t!("workspace.right_sidebar.agent"),
-            )
-            .pressed(open == Some(RightPanel::Agent))
-            .dispatch(Box::new(ShowAgent), target, tokens),
+            div()
+                .relative()
+                .child(
+                    button(
+                        "right-sidebar-agent",
+                        CatalogIcon::Sparkles,
+                        t!("workspace.right_sidebar.agent"),
+                    )
+                    .pressed(open == Some(RightPanel::Agent))
+                    .tooltip(agent.tooltip.clone())
+                    .dispatch(Box::new(ShowAgent), target, tokens),
+                )
+                .children(agent.dot.map(|dot| {
+                    div()
+                        .id("right-sidebar-agent-dot")
+                        .test_support()
+                        .aria_label(agent.tooltip.clone())
+                        .absolute()
+                        .top(px(1.))
+                        .right(px(1.))
+                        .size(px(9.))
+                        .rounded_full()
+                        .border(px(2.))
+                        .border_color(tokens.tabbar)
+                        .bg(match dot {
+                            RailDot::Attention => tokens.warn,
+                            RailDot::Busy => tokens.ok,
+                        })
+                })),
         )
 }

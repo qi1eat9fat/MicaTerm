@@ -207,3 +207,23 @@ settings.cli.agent_command_found:
   zh-CN: 自动检测（%{command}）
 settings.cli.agent_command_none:
   zh-CN: 自动检测（没找到 claude 或 codex）
+settings.cli.hooks:
+  zh-CN: Agent 状态
+settings.cli.hooks_description:
+  zh-CN: 让 Agent 面板和标签知道它在运行、等你确认还是回合结束
+settings.cli.hooks_claude:
+  zh-CN: 在 %{file} 里加三个 hook，改之前先备份。不开也能认出大部分「等你确认」，只是慢一点
+settings.cli.hooks_codex:
+  zh-CN: 在 %{file} 里加 notify，改之前先备份
+settings.cli.hooks_failed:
+  zh-CN: 状态 hook 没有改成：%{error}
+settings.cli.hooks_not_object:
+  zh-CN: settings.json 的 hooks 不是对象，MicaTerm 不会改动它
+settings.cli.hooks_not_array:
+  zh-CN: settings.json 的 hooks.%{event} 不是数组，MicaTerm 不会改动它
+settings.cli.hooks_bad_json:
+  zh-CN: settings.json 不是合法的 JSON，MicaTerm 不会改动它：%{error}
+settings.cli.hooks_not_json_object:
+  zh-CN: settings.json 最外层不是对象，MicaTerm 不会改动它
+settings.cli.hooks_foreign_notify:
+  zh-CN: config.toml 里已经有别的 notify（%{line}），MicaTerm 不会改动它

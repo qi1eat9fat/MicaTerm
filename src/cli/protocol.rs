@@ -209,6 +209,15 @@ pub enum Request {
         #[serde(default)]
         repeat: Option<usize>,
     },
+    /// An agent's status hook (`micaterm hook`, Agent CLI 工单 09): what the
+    /// agent in local card `card` (its `MICATERM_SELF_CARD`) is doing. The
+    /// caller does not wait for the reply.
+    Hook {
+        card: String,
+        event: crate::agent::HookEvent,
+        #[serde(default)]
+        message: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +251,8 @@ pub enum Reply {
         key: String,
         repeat: usize,
     },
+    /// A status hook was taken.
+    Accepted,
     Error {
         code: ErrorCode,
         message: String,

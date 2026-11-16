@@ -87,6 +87,10 @@ impl Workspace {
         }
         self.take_cli_runs(cx);
         self.sync_cli_cards(cx);
+        // Agent 的状态 hook（工单 09）。
+        while let Some((card, event, message)) = server.take_hook() {
+            self.apply_hook(&card, event, message, window, cx);
+        }
         let (change, reply) = server.take_change()?;
         Some((self.apply_cli_change(change, window, cx), reply))
     }

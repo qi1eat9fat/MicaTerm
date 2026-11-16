@@ -13,6 +13,7 @@
 //!
 //! 功能模块不依赖窗口壳；窗口壳持有它们、转发 action。
 
+mod agent_state;
 mod cli;
 mod cli_cards;
 mod cli_changes;

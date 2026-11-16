@@ -161,6 +161,9 @@ impl Workspace {
                     window.activate_window();
                     if let Some(card) = card_of_tag(&response.tag) {
                         this.show_card(card, window, cx);
+                    } else if response.tag.as_ref() == super::agent_state::AGENT_PANEL_TAG {
+                        // 面板里的 Agent 等你确认（工单 09）：展开面板。
+                        this.show_agent_panel(window, cx);
                     }
                 });
             });
@@ -174,7 +177,7 @@ impl Workspace {
     }
 
     /// 用户看不看得到这张卡片：窗口在前，卡片也看得见。
-    fn card_seen(&self, card: CardId, cx: &App) -> bool {
+    pub(super) fn card_seen(&self, card: CardId, cx: &App) -> bool {
         self.window_active && self.card_in_sight(card, cx)
     }
 
@@ -213,7 +216,7 @@ impl Workspace {
 
     /// 把卡片所在的标签放到前面，焦点给这张卡片；它被放大的别的卡片藏着时先还原放大，
     /// 焦点卡片、画出来的卡片和橙点才说的是同一件事。
-    fn show_card(&mut self, card: CardId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn show_card(&mut self, card: CardId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self
             .tabs
             .find(|tab| tab.as_terminal().is_some_and(|tab| tab.contains(card, cx)))

@@ -53,7 +53,10 @@ dunce = "1"
 # 文案翻译表：gpui-kit 自己的文案也用它。
 rust-i18n = "4.2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order：改用户的 ~/.claude/settings.json 时键的顺序不动（Agent CLI 工单 09）。
+serde_json = { version = "1", features = ["preserve_order"] }
+# Agent 的屏幕规则（Agent CLI 工单 09，`agent::screen`）。
+regex = "1"
 # 从保险库读出来的密码用完清零（工单 11）。
 zeroize = "1"
 # 终端引擎、视图和本地 PTY（拷自 shell-rs，见 crates/micaterm-terminal）。

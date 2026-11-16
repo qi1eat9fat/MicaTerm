@@ -32,6 +32,7 @@ use super::protocol::{
     Request, TerminalContext, TransferCounters, TransferSummary, VersionOnly, parse_json,
     read_frame, write_frame, write_json,
 };
+use crate::agent::HookEvent;
 use crate::i18n::t;
 use micaterm_ssh::ExecStream;
 use micaterm_terminal::{
@@ -102,7 +103,12 @@ struct Shared {
     /// `exec --card` runs, oldest first, until the app takes them up: only
     /// the UI thread can reach a card.
     runs: Mutex<VecDeque<PendingRun>>,
+    /// 状态 hook 报来的事（工单 09），等 UI 线程取走：哪张卡片、什么事、带来的那句话。
+    hooks: Mutex<VecDeque<(String, HookEvent, Option<String>)>>,
 }
+
+/// 排着没取走的状态 hook 最多留多少件。
+const MAX_HOOKS: usize = 256;
 
 /// An `exec --card` run waiting for the app to find the card.
 struct PendingRun {
@@ -174,6 +180,7 @@ impl CliServer {
             next_change: AtomicU64::new(0),
             cards: RwLock::new(Vec::new()),
             runs: Mutex::new(VecDeque::new()),
+            hooks: Mutex::new(VecDeque::new()),
         });
         let listener = listen(endpoint, shared.clone())?;
         Ok(Self {
@@ -219,7 +226,21 @@ impl CliServer {
             for pending in runs {
                 pending.run.fail(RunFailure::NotConnected);
             }
+            self.shared
+                .hooks
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clear();
         }
+    }
+
+    /// 最早一件没取走的状态 hook（工单 09）：哪张卡片、什么事、带来的那句话。
+    pub fn take_hook(&self) -> Option<(String, HookEvent, Option<String>)> {
+        self.shared
+            .hooks
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .pop_front()
     }
 
     /// 交给 Agent 的卡片，窗口壳定时交进来。
@@ -624,6 +645,22 @@ fn respond(
         Request::ReadCard { card, lines } => change(shared, CliChange::ReadCard { card, lines }),
         Request::SendKey { card, key, repeat } => {
             change(shared, CliChange::SendKey { card, key, repeat })
+        }
+        Request::Hook {
+            card,
+            event,
+            message,
+        } => {
+            let mut hooks = shared
+                .hooks
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            // 应用一直没取（卡住了）时不无限堆：留最近的。
+            if hooks.len() >= MAX_HOOKS {
+                hooks.pop_front();
+            }
+            hooks.push_back((card, event, message));
+            Ok(Reply::Accepted)
         }
         Request::Exec { host, command } => {
             let (target, backend) = connectable(shared, &host)?;

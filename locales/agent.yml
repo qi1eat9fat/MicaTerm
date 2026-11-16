@@ -45,3 +45,19 @@ agent.handoff.no_agent:
   zh-CN: 已把 %{card} 交出去。没找到 Agent 命令，Agent 面板没有打开；在任意终端里用 micaterm cards list 能看到这张卡片
 agent.handoff.no_agent_cli_off:
   zh-CN: 已把 %{card} 交出去，但「启用外部 Agent」没开，Agent 还用不了它（设置 › Agent）
+agent.state.idle:
+  zh-CN: 空闲
+agent.state.running:
+  zh-CN: 运行中
+agent.state.waiting:
+  zh-CN: 等你确认
+agent.state.turn_ended:
+  zh-CN: 回合结束
+agent.state.notice_title:
+  zh-CN: "%{agent} 等你确认"
+agent.state.card_notice_title:
+  zh-CN: "%{card} · %{agent} 等你确认"
+agent.state.notice_body:
+  zh-CN: 要你确认才能继续
+agent.rail.state:
+  zh-CN: Agent · %{state}

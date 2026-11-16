@@ -129,6 +129,20 @@ pub fn query(endpoint: &Path, request: Request) -> Result<Reply, CliError> {
     }
 }
 
+/// 只把请求交出去，不等回话（`micaterm hook`：不能卡住 Agent）。
+pub fn send(endpoint: &Path, request: Request) -> io::Result<()> {
+    let stream = connect(endpoint).map_err(|_| io::Error::from(io::ErrorKind::NotConnected))?;
+    let mut writer = &stream;
+    write_json(
+        &mut writer,
+        &Envelope {
+            version: PROTOCOL_VERSION,
+            request,
+        },
+    )?;
+    writer.flush()
+}
+
 /// 发请求，读到第一条 JSON 回复为止。
 fn ask<S>(stream: S, request: Request) -> Result<Result<Reply, CliError>, Failure>
 where
@@ -301,6 +315,7 @@ where
                         output(print_key_sent(&key, repeat, console))?;
                         0
                     }
+                    Reply::Accepted => 0,
                     Reply::TransferDone(summary) => output(print_summary(&summary, sync, console))?,
                     Reply::Hosts { hosts } => {
                         output(print_hosts(&hosts, console))?;

@@ -3,6 +3,7 @@
 
 use gpui_kit::*;
 
+use super::agent_hooks::{HOOK_AGENTS, HookStatus, hook_status, install_hooks, remove_hooks};
 use super::install::{
     AgentKind, BinaryStatus, IntegrationPaths, SkillStatus, binary_status, install_binary,
     install_skill, remove_binary, remove_skill, skill_status, update_outdated_binary,
@@ -28,6 +29,8 @@ pub struct CliIntegration {
 pub struct IntegrationStatus {
     pub binary: BinaryStatus,
     skills: Vec<(AgentKind, SkillStatus)>,
+    /// 状态 hook 装没装（工单 09）：只有 Claude Code、Codex。
+    hooks: Vec<(AgentKind, HookStatus)>,
 }
 
 impl IntegrationStatus {
@@ -46,7 +49,19 @@ impl IntegrationStatus {
                 .iter()
                 .map(|agent| (*agent, skill_status(paths, *agent)))
                 .collect(),
+            hooks: HOOK_AGENTS
+                .iter()
+                .map(|agent| (*agent, hook_status(paths, *agent)))
+                .collect(),
         }
+    }
+
+    /// `agent` 的状态 hook 装没装。
+    pub fn hooks(&self, agent: AgentKind) -> HookStatus {
+        self.hooks
+            .iter()
+            .find(|(kind, _)| *kind == agent)
+            .map_or(HookStatus::Missing, |(_, status)| status.clone())
     }
 }
 
@@ -57,6 +72,9 @@ pub enum IntegrationChange {
     RemoveBinary,
     InstallSkill(AgentKind),
     RemoveSkill(AgentKind),
+    /// 装上、删掉状态 hook（工单 09）。
+    InstallHooks(AgentKind),
+    RemoveHooks(AgentKind),
 }
 
 impl CliIntegration {
@@ -136,6 +154,8 @@ impl CliIntegration {
                         IntegrationChange::RemoveBinary => remove_binary(&paths),
                         IntegrationChange::InstallSkill(agent) => install_skill(&paths, agent),
                         IntegrationChange::RemoveSkill(agent) => remove_skill(&paths, agent),
+                        IntegrationChange::InstallHooks(agent) => install_hooks(&paths, agent),
+                        IntegrationChange::RemoveHooks(agent) => remove_hooks(&paths, agent),
                     };
                     (result, IntegrationStatus::read(&paths))
                 })

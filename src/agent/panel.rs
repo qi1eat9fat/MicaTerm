@@ -8,7 +8,9 @@ use gpui_kit::*;
 
 use micaterm_terminal::{TerminalLifecycle, TerminalView};
 
+use super::state::{AgentState, AgentTracker, state_label};
 use crate::app::{CatalogIcon, RestartAgent};
+use crate::cli::AgentKind;
 use crate::i18n::t;
 use crate::theme::{Tokens, size};
 use crate::ui::icon_button::IconButton;
@@ -25,6 +27,12 @@ pub struct AgentPanel {
     pub self_id: SharedString,
     /// 交给它的卡片说明填在了输入框里时，标题下面那一行。
     pub note: Option<SharedString>,
+    /// 认得出的 Agent（屏幕规则按它挑；认不出的程序不判状态）。
+    pub kind: Option<AgentKind>,
+    /// 它在干什么（工单 09）。
+    pub tracker: AgentTracker,
+    /// 回合结束以后面板看见过没有：看见过图标栏就不再亮点。
+    pub turn_seen: bool,
 }
 
 impl AgentPanel {
@@ -33,6 +41,32 @@ impl AgentPanel {
         matches!(
             self.terminal.read(cx).lifecycle(cx),
             TerminalLifecycle::Starting | TerminalLifecycle::Running
+        )
+    }
+
+    /// 标题行程序名后面的状态（26 号 `.ag-st`）：点 + 字，等你确认是橙色字；空闲不写。
+    fn state_chip(&self, tokens: &Tokens) -> Option<impl IntoElement> {
+        let state = self.tracker.state();
+        let (dot, text) = match state {
+            AgentState::Idle => return None,
+            AgentState::Running => (tokens.ok, tokens.st_dim),
+            AgentState::Waiting => (tokens.warn, tokens.warn),
+            AgentState::TurnEnded => (tokens.st_dim, tokens.st_dim),
+        };
+        let label = state_label(state);
+        Some(
+            div()
+                .id("agent-panel-state")
+                .test_support()
+                .aria_label(label.clone())
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(5.))
+                .ml(px(8.))
+                .text_color(text)
+                .child(div().size(px(6.)).rounded_full().bg(dot))
+                .child(label),
         )
     }
 
@@ -61,6 +95,7 @@ impl AgentPanel {
                     .text_color(tokens.st_dim)
                     .child(self.name.clone()),
             )
+            .children(self.state_chip(tokens))
             .child(div().flex_1())
             .child(
                 IconButton::new(

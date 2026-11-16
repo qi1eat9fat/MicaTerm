@@ -103,6 +103,8 @@ pub struct TerminalCard {
     self_id: Option<SharedString>,
     /// 同一件事给右键菜单看（菜单打开时才建，读不到卡片）：交出去了就显示「收回」。
     agent_flag: Rc<Cell<bool>>,
+    /// 前台是 claude、codex 时它在干什么（Agent CLI 工单 09）。
+    agent_tracker: crate::agent::AgentTracker,
     /// Agent 正在这张卡片里执行命令：状态栏的标记写「执行中」。窗口壳定时看。
     agent_running: bool,
     _subscriptions: Vec<Subscription>,
@@ -268,6 +270,7 @@ impl TerminalCard {
             self_id: None,
             agent_flag: Rc::default(),
             agent_running: false,
+            agent_tracker: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -307,6 +310,41 @@ impl TerminalCard {
     /// 交出去时 CLI 认的卡片 ID；没交出去是 `None`。
     pub fn agent_id(&self) -> Option<&SharedString> {
         self.agent.as_ref()
+    }
+
+    /// 本地卡片的前台程序是 Claude Code、Codex 时是哪个（工单 09）；远程卡片和别的程序 `None`。
+    pub fn agent_kind(&self) -> Option<crate::cli::AgentKind> {
+        if !matches!(self.kind, CardKind::Local { .. }) {
+            return None;
+        }
+        let program = self.program.as_deref()?;
+        let name = std::path::Path::new(program)
+            .file_stem()?
+            .to_string_lossy()
+            .to_lowercase();
+        match name.as_str() {
+            "claude" => Some(crate::cli::AgentKind::ClaudeCode),
+            "codex" => Some(crate::cli::AgentKind::Codex),
+            _ => None,
+        }
+    }
+
+    pub fn agent_tracker(&self) -> &crate::agent::AgentTracker {
+        &self.agent_tracker
+    }
+
+    /// 改 Agent 的状态；变了就重画、告诉窗口壳，交回 `true`。
+    pub fn update_agent(
+        &mut self,
+        cx: &mut Context<Self>,
+        change: impl FnOnce(&mut crate::agent::AgentTracker) -> bool,
+    ) -> bool {
+        let changed = change(&mut self.agent_tracker);
+        if changed {
+            cx.emit(CardEvent::Changed);
+            cx.notify();
+        }
+        changed
     }
 
     /// Agent 在不在这里执行命令（窗口壳定时问终端、告诉卡片）。

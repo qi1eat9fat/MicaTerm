@@ -184,11 +184,15 @@ impl Workspace {
                     cx,
                 )
             });
+            self.agent_screens.forget(crate::workspace::agent_state::AgentSlot::Panel);
             self.agent = Some(AgentPanel {
                 terminal,
                 name: program.name,
                 self_id,
                 note: None,
+                kind: program.kind,
+                tracker: Default::default(),
+                turn_seen: true,
             });
         }
         self.show_agent_panel(window, cx);
@@ -234,8 +238,16 @@ impl Workspace {
         window.push_notification(notice, cx);
     }
 
-    fn show_agent_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn show_agent_panel(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.right_panel = Some(RightPanel::Agent);
+        // 看见了：回合结束的点熄掉（工单 09）。
+        if let Some(agent) = &mut self.agent {
+            agent.turn_seen = true;
+        }
         if let Some(agent) = &self.agent {
             let focus = agent.terminal.read(cx).focus_handle();
             window.focus(&focus, cx);

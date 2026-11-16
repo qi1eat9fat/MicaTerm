@@ -213,6 +213,8 @@ pub struct Workspace {
     pub(super) right_panel: Option<RightPanel>,
     /// 右侧 Agent 面板里跑着的 Agent（Agent CLI 工单 07）：收起面板时还在。
     pub(super) agent: Option<crate::agent::AgentPanel>,
+    /// Agent 们最后看到的屏幕（工单 09，屏幕规则等它停下来才判）。
+    pub(super) agent_screens: super::agent_state::AgentScreens,
     /// 命令片段面板（工单 19）。
     pub(super) snippet_panel: SnippetPanel,
     /// 连接表的问题，一次问一个（工单 12）。
@@ -288,6 +290,7 @@ impl Workspace {
             cx.observe_window_activation(window, |this, window, cx| {
                 this.window_active = window.is_window_active();
                 this.see_cards(cx);
+                this.see_agent_panel();
                 cx.notify();
             }),
             // 切标签、放大还原、关卡片……窗口壳一变，就看看哪些卡片又看得见了。
@@ -352,6 +355,7 @@ impl Workspace {
             host_list,
             right_panel: None,
             agent: None,
+            agent_screens: Default::default(),
             snippet_panel,
             prompts: PromptQueue::default(),
             vault_unlock_asked: false,
@@ -365,6 +369,8 @@ impl Workspace {
         // 外部 CLI 跟着设置的开关、主机和保险库走（Agent CLI 工单 01）。
         let cli = this.watch_cli(&this.hosts.clone(), &this.vault.clone(), window, cx);
         this.subscriptions.extend(cli);
+        // Agent 的状态：看面板和本地卡片里 Agent 的屏幕（工单 09）。
+        this.watch_agents(window, cx);
         // 记住窗口大小和位置（工单 26）：没有数据目录就不记。
         if let Some(path) = window_state_path {
             this.remember_window(path, window, cx);
@@ -638,6 +644,7 @@ impl Render for Workspace {
                     .child(render_right_sidebar(
                         self.right_panel,
                         self.files_button(cx),
+                        self.agent_rail(),
                         &target,
                         &tokens,
                     )),

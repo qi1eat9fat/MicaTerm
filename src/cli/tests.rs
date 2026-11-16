@@ -875,3 +875,39 @@ fn env_says_whether_micaterm_is_there_and_the_card_still_handed() {
     let taken_back = report(vars, asked(&endpoint));
     assert_eq!(taken_back.card.as_ref().unwrap().handed, Some(false));
 }
+
+// ---- 状态 hook（工单 09） ----
+
+/// `micaterm hook` 报来的事排着等应用取；外部 Agent 没启用时不收。
+#[test]
+fn status_hooks_wait_for_the_app_and_are_dropped_while_disabled() {
+    use crate::agent::HookEvent;
+    let (_dir, endpoint, server, _data) = started();
+    let hook = |event| Request::Hook {
+        card: "SelfSelfSelfSelf".into(),
+        event,
+        message: Some("Claude needs your permission".into()),
+    };
+
+    let (code, _, stderr) = run(&endpoint, hook(HookEvent::NeedsAttention), false);
+    assert_eq!(code, FAILURE_EXIT, "没启用：{stderr}");
+    assert_eq!(server.take_hook(), None);
+
+    server.set_enabled(true);
+    let (code, stdout, _) = run(&endpoint, hook(HookEvent::NeedsAttention), false);
+    assert_eq!((code, stdout.as_str()), (0, ""));
+    assert_eq!(
+        server.take_hook(),
+        Some((
+            "SelfSelfSelfSelf".to_string(),
+            HookEvent::NeedsAttention,
+            Some("Claude needs your permission".to_string())
+        ))
+    );
+    assert_eq!(server.take_hook(), None);
+
+    // 关掉时排着的丢掉。
+    run(&endpoint, hook(HookEvent::TurnDone), false);
+    server.set_enabled(false);
+    assert_eq!(server.take_hook(), None);
+}
