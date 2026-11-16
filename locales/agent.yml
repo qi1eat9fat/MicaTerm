@@ -41,3 +41,7 @@ agent.no_command.cancel:
   zh-CN: 取消
 agent.no_command.settings:
   zh-CN: 打开设置
+agent.handoff.no_agent:
+  zh-CN: 已把 %{card} 交出去。没找到 Agent 命令，Agent 面板没有打开；在任意终端里用 micaterm cards list 能看到这张卡片
+agent.handoff.no_agent_cli_off:
+  zh-CN: 已把 %{card} 交出去，但「启用外部 Agent」没开，Agent 还用不了它（设置 › Agent）

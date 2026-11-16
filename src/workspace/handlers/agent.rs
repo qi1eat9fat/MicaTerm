@@ -2,9 +2,12 @@
 //! 「交给 Agent」把卡片交给面板里的 Agent；面板的「重新开始」。样子和规则在 `crate::agent`。
 //!
 //! 启动前先看缺什么（外部 CLI、命令、Skill），缺了先弹确认框，补好再启动；找不到 Agent 命令时
-//! 不启动，提示去设置里填。整个窗口只有一个 Agent：已经在跑时交给它的卡片说明填进它的输入框，
+//! 不启动，提示去设置里填——但「交给 Agent」照样把卡片交出去（2026-11-16 用户定），Agent 可以跑在
+//! MicaTerm 外面的终端里，用 `micaterm cards list` 找到它。整个窗口只有一个 Agent：已经在跑时交给它的卡片说明填进它的输入框，
 //! 不按回车（不打断它、不替用户发话）。
 
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::notification::Notification;
 use gpui_kit::*;
 
 use micaterm_terminal::{LocalLaunch, LocalShell, TerminalView};
@@ -88,7 +91,10 @@ impl Workspace {
             self.services.agent_path.as_deref(),
         );
         let Some(program) = program else {
-            self.tell_no_agent_command(window, cx);
+            match give {
+                Some(card) => self.hand_over_without_agent(card, window, cx),
+                None => self.tell_no_agent_command(window, cx),
+            }
             return;
         };
         let paths = self.cli_integration.read(cx).paths().cloned();
@@ -200,6 +206,32 @@ impl Workspace {
             card_name: card.name(),
             host: host.public_id.to_string().into(),
         })
+    }
+
+    /// 找不到 Agent 命令时的「交给 Agent」：照样交出去，不开面板；弹一条通知说外面的 Agent 怎么找到它，
+    /// 「启用外部 Agent」没开时说它还用不了。
+    fn hand_over_without_agent(
+        &mut self,
+        card: CardId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(handoff) = self.hand_over(card, cx) else {
+            return;
+        };
+        self.sync_cli_cards(cx);
+        let notice = if self.settings.read(cx).settings().cli.enabled {
+            Notification::info(t!(
+                "agent.handoff.no_agent",
+                card = handoff.card_name.clone()
+            ))
+        } else {
+            Notification::warning(t!(
+                "agent.handoff.no_agent_cli_off",
+                card = handoff.card_name.clone()
+            ))
+        };
+        window.push_notification(notice, cx);
     }
 
     fn show_agent_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -466,3 +466,38 @@ fn handing_a_card_starts_the_agent_with_a_prompt_or_fills_in_its_input(cx: &mut 
     let note = cx.update(|cx| workspace.read(cx).agent_panel().unwrap().note.clone());
     assert!(note.is_some_and(|note| note.contains("web-01")));
 }
+
+/// 找不到 Agent 命令时「交给 Agent」照样交出去（2026-11-16 用户定）：不开面板、不启动什么，
+/// 外面的 Agent 用 `cards list` 找得到它。
+#[gpui_kit::test]
+fn without_an_agent_command_the_card_is_still_handed_over(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let endpoint = endpoint(&dir, "no-agent");
+    let local = Arc::new(FakeTerminalFactory::default());
+    let (handle, workspace, _remote, provider) =
+        open_with_local(cx, &endpoint, FakeTerminalFactory::default(), local);
+    cx.update(|cx| {
+        let settings = workspace.read(cx).settings().clone();
+        settings.update(cx, |store, cx| {
+            store.update(|settings| settings.cli.agent_command = None, cx)
+        })
+    });
+    cx.run_until_parked();
+    let before = provider.launches().len();
+
+    dispatch(cx, handle, HandCardToAgent(CardId(1)));
+    let listed = cards(cx, &endpoint);
+    assert_eq!(listed.len(), 1, "交出去了");
+    assert_eq!(provider.launches().len(), before, "没有启动 Agent");
+    cx.update(|cx| {
+        let workspace = workspace.read(cx);
+        assert!(workspace.agent_panel().is_none());
+        assert_eq!(workspace.right_panel(), None);
+    });
+    in_frame(cx, handle, |window, _| {
+        assert!(
+            window.try_find("agent-no-command").is_none(),
+            "不弹找不到命令的框"
+        );
+    });
+}

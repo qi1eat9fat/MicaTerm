@@ -49,11 +49,33 @@
 
 - 所有主机共用的命令文本，单击输入或直接执行，发往焦点卡片
 
+## 给 AI Agent 用
+
+Claude Code、Codex 这类 Agent 可以用 `micaterm` 命令操作你保存的主机：列出和查看主机、在主机上执行命令、上传 / 下载 / 同步文件、增删改主机和凭据。命令经正在运行的 MicaTerm 登录，密码和私钥一直留在保险库里，Agent 拿不到；保险库锁着时它会请你解锁。
+
+- **打开**：设置 › Agent › 打开「启用外部 Agent」。同一页可以把命令行工具装到 PATH（便携版装在程序旁的 `bin\` 并加进用户 PATH），给 Claude Code、Codex 装 Skill（教 Agent 怎么用这个命令）。
+- **Agent 面板**：右侧图标栏最下面的「Agent」在 MicaTerm 里直接运行 Claude Code 或 Codex（设置里的「Agent 命令」，留空自动检测）。第一次点会列出还缺什么（总开关、命令行工具、Skill），确认后补上再启动。
+- **交给 Agent**：远程卡片右键「交给 Agent」，把你正在用的终端交给面板里的 Agent。它用 `exec --card` 在这张卡片里执行命令（只许登录一次的堡垒机也能用），用 `cards read` 看屏幕；「收回」后它就碰不到了。Agent 跑在 MicaTerm 外面的终端里也行：没设 Agent 命令时卡片照样交出去，它用 `micaterm cards list` 找到这张卡片。
+- **我在哪**：MicaTerm 里的本地终端都带着 `TERM_PROGRAM=micaterm`、`MICATERM_SELF_CARD`、`MICATERM_CLI`，Agent 跑 `micaterm env` 就知道自己在哪、能做什么。
+
+```bash
+micaterm env
+micaterm hosts list
+micaterm exec <主机 ID> "df -h /"
+micaterm upload <主机 ID> ./dist /tmp/dist
+micaterm cards list
+micaterm exec --card <卡片 ID> "uptime"
+micaterm cards read <卡片 ID> --lines 50
+```
+
+主机 ID 在主机右键菜单的「复制 ID」里，卡片 ID 在 `micaterm cards list` 里。每条命令的用法看 `micaterm <命令> --help`；输出给程序读时（管道或 `--json`）是 JSON。Windows 上命令是压缩包里的 `micaterm-cli.exe`，装进 PATH 后叫 `micaterm`。
+
 ## 下载与使用
 
 到 [Releases](../../releases) 下载 `MicaTerm-<版本>-windows-x86_64-portable.zip`，解压到任意**有写入权限**的文件夹，运行 `micaterm.exe`。
 
 - 压缩包里有一个空的 `data/` 文件夹，所有配置都写在这里。整个文件夹拷到别的电脑就能继续用。
+- `micaterm-cli.exe` 是给 AI Agent 用的命令行（见上一节），不用 Agent 的话可以不管它。
 - 不要放进 `C:\Program Files` 这类普通权限写不进去的位置。
 - 程序静态链接了 C 运行库，不需要另装 VC++ 运行库（LTSC 版 Windows 也能直接运行）。
 - 程序暂未签名，首次运行时 SmartScreen 可能提示「未知发布者」，点「更多信息 → 仍要运行」即可。
@@ -113,8 +135,8 @@ cargo test --workspace
 推送 `v<版本号>` 标签即触发 [GitHub Actions 发布流程](.github/workflows/release.yml)：
 
 1. 核对标签和 `Cargo.toml` 的版本号一致
-2. 在 Windows 上构建 release 版，检查程序不依赖 VC++ 运行库
-3. 打包便携版 zip（`micaterm.exe` + 空 `data/` 文件夹）并生成 SHA-256 校验文件
+2. 在 Windows 上构建 release 版，检查两个程序都不依赖 VC++ 运行库
+3. 打包便携版 zip（`micaterm.exe` + `micaterm-cli.exe` + 空 `data/` 文件夹）并生成 SHA-256 校验文件
 4. 创建 GitHub Release 并上传；版本号带 `-`（如 `0.2.0-beta.1`）的标为预发布
 
 ```bash
