@@ -5,7 +5,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    Icon, Sizable as _,
+    FocusableExt as _, Icon, Sizable as _,
     input::Input,
     menu::{DropdownMenu, PopupMenuItem},
     switch::Switch,
@@ -261,6 +261,10 @@ pub fn field_input(input: Input, focused: bool, tokens: &Tokens) -> Input {
 /// 设置里下拉菜单每一项的元素 id 是 `(MENU_OPTION, 第几项)`，无障碍名是它的文字（测试靠它）。
 pub const MENU_OPTION: &str = "menu-option";
 
+/// 设置里下拉菜单一项的高（用户 2026-11-16 嫌 12 号字配菜单默认的 1.625rem 太挤）：
+/// 24，项之间菜单自己再空 2。
+const MENU_OPTION_HEIGHT: Pixels = px(24.);
+
 /// 设置里下拉菜单的一项：字是界面字号。gpui-component 的菜单项写死了 `text_sm`（0.875rem，
 /// Windows 上约 10.5），比设置里的字小一圈，所以自己画文字；`checked` 的勾照旧由菜单画。
 /// `index` 是它在选项里排第几（不算分隔线），给元素 id 用。
@@ -275,6 +279,9 @@ pub fn menu_option(
             .id((MENU_OPTION, index))
             .test_support()
             .aria_label(label.clone())
+            .flex()
+            .items_center()
+            .h(MENU_OPTION_HEIGHT)
             .text_size(ui_text())
             .child(label.clone())
     })
@@ -283,7 +290,8 @@ pub fn menu_option(
 }
 
 /// 一项开关设置（26 号 `.stg-tg`：28×16 胶囊，开着是正文色底）：拨动时用 `set` 把新值写进设置。
-/// `label` 是无障碍名，测试也靠它。
+/// `label` 是无障碍名，测试也靠它。点过之后开关拿着焦点，gpui-component 会在胶囊外再套一圈焦点框；
+/// 设置里的控件都不要这圈框（和输入框一样），所以关掉。
 pub fn setting_switch(
     id: impl Into<ElementId>,
     label: SharedString,
@@ -294,6 +302,7 @@ pub fn setting_switch(
     let store = store.clone();
     Switch::new(id)
         .small()
+        .focus_ring(false)
         .checked(checked)
         .accessibility_label(label)
         .on_click(move |checked: &bool, _, cx| {

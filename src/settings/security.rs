@@ -5,7 +5,7 @@
 //! 按钮派发保险库的 action（由窗口壳交给 `crate::vault`）；「在本机记住」开关直接改保险库。
 
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{Disableable as _, Sizable as _};
+use gpui_kit::component::{Disableable as _, FocusableExt as _, Sizable as _};
 use gpui_kit::*;
 
 use super::controls::{page_note, row, section};
@@ -99,6 +99,7 @@ pub(super) fn security(
                 let vault = vault.clone();
                 Switch::new("security-remember")
                     .small()
+                    .focus_ring(false)
                     .checked(remembered)
                     // 锁着时不知道数据密钥，存不进钥匙串：先解锁。
                     .disabled(busy || locked)

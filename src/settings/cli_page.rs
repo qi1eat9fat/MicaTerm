@@ -3,7 +3,7 @@
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, Sizable as _, switch::Switch};
+use gpui_kit::component::{Disableable as _, FocusableExt as _, Sizable as _, switch::Switch};
 use gpui_kit::*;
 
 use super::AppSettings;
@@ -319,6 +319,7 @@ fn hook_rows(
         let integration = integration.clone();
         let switch = Switch::new(SharedString::from(format!("cli-hooks-{}", agent.key())))
             .small()
+            .focus_ring(false)
             .checked(checked)
             .disabled(!installable || busy || hooks.is_none())
             .accessibility_label(agent.label())

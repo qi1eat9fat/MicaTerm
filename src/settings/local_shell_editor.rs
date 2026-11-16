@@ -3,7 +3,7 @@
 // 来自 since2006/shell-rs @ b2a307a: src/settings/local_shell_editor.rs（裁剪：去掉「选择文件…」和切换语言）
 
 use gpui_kit::component::{
-    Icon, IconName, Sizable as _,
+    FocusableExt as _, Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
     menu::DropdownMenu as _,
@@ -130,6 +130,8 @@ impl Render for LocalShellEditor {
         let menu = Button::new("local-shell-menu")
             .ghost()
             .xsmall()
+            // 和输入框一样不要焦点框：它在输入框里面，套一圈框就成了双线。
+            .focus_ring(false)
             .icon(
                 Icon::new(IconName::ChevronDown)
                     .size(px(12.))

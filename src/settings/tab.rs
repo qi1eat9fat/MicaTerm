@@ -242,8 +242,14 @@ impl Render for SettingsTab {
     }
 }
 
-/// 左栏（26 号 `.stg-nav`）：宽 200、标签栏底色、右边一条线；条目和主机栏同一套行（高 28、圆角 8、
-/// 选中 `--sel`）；底部一行淡字「改动立即生效」，和主机栏左下角保险库那一行同高、同样贴底。
+/// 左栏一个条目的高。
+const NAV_ITEM_HEIGHT: Pixels = px(32.);
+/// 左栏条目之间的空。
+const NAV_ITEM_GAP: Pixels = px(2.);
+
+/// 左栏（26 号 `.stg-nav`）：宽 200、标签栏底色、右边一条线；条目高 32、圆角 8、选中 `--sel`，
+/// 条目之间空 2（用户 2026-11-16 嫌原来和主机栏一样的 28 高、不留空太挤；和新标签页列表同高）；
+/// 底部一行淡字「改动立即生效」，和主机栏左下角保险库那一行同高、同样贴底。
 fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsTab>) -> impl IntoElement {
     let hover = tokens.hover;
     div()
@@ -254,6 +260,7 @@ fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsTab>) -
         .flex_none()
         .w(size::SETTINGS_NAV_WIDTH)
         .h_full()
+        .gap(NAV_ITEM_GAP)
         .pt(px(10.))
         .px(px(8.))
         .bg(tokens.tabbar)
@@ -272,7 +279,7 @@ fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsTab>) -
                 .flex_none()
                 .items_center()
                 .gap(px(10.))
-                .h(px(28.))
+                .h(NAV_ITEM_HEIGHT)
                 .px(px(8.))
                 .rounded(size::RADIUS_LG)
                 .cursor_pointer()
@@ -291,7 +298,7 @@ fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsTab>) -
                         .flex_none()
                         .text_color(tokens.icon),
                 )
-                .child(div().line_height(px(28.)).child(title))
+                .child(div().line_height(NAV_ITEM_HEIGHT).child(title))
         }))
         .child(
             div()
