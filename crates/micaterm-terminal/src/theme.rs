@@ -177,51 +177,52 @@ impl TerminalColors {
     }
 }
 
-// MicaTerm 只内置 4 对主题（spec 第 5 节）：MicaTerm Light / Dark（默认）、
-// Tokyo Day / Night、Catppuccin Latte / Mocha、Rosé Pine Dawn / Moon。key 写进 `settings.json`，发布后不能改：
-// 所以 Rosé Pine Moon 的 key 仍是 `rose-pine`。
+// 内置 4 对主题：Ayu Light / Dark（默认）、Tokyo Day / Night、Catppuccin Latte / Mocha、
+// Rosé Pine Dawn / Moon。key 写进 `settings.json`，发布后不能改：所以 Rosé Pine Moon 的 key 仍是 `rose-pine`。
+// 默认这一对原来的 key 是 `micaterm-light` / `micaterm-dark`，换成 `ayu-light` / `ayu-dark` 后，
+// 旧设置里存着旧 key 会落回默认，也就是新的 Ayu。
 // 背景平时被界面的内容底盖掉（`TerminalColors::on_background`），这里的背景只在没设时用，
-// 也是程序用 OSC 11 问背景色时的回答。
+// 也是程序用 OSC 11 问背景色时的回答，所以和界面的内容底一致。
 
-/// MicaTerm Light：前景、淡色（亮黑）、绿、蓝、黄、红取 26 号原型 `.win.light.tp-qi`，背景是 `--content`，
-/// 选中底是 `--sel`；其余（黑、紫、青、白和其余亮色）取 GitHub Primer 浅色的终端色。
-const MICATERM_LIGHT: TerminalTheme = TerminalTheme {
-    key: "micaterm-light",
-    name: "MicaTerm Light",
+/// Ayu Light：取自 Ayu 的终端调色板（ayu-theme；与 iTerm2-Color-Schemes 的 Ayu Light 同源），
+/// 背景和选中底跟随界面。红、绿、黄、青按 Ayu 原值在浅底上只有 1.9–2.9:1，压暗到 3:1 以上，色相不变；
+/// 蓝、紫保持原值。
+const AYU_LIGHT: TerminalTheme = TerminalTheme {
+    key: "ayu-light",
+    name: "Ayu Light",
     mode: ThemeMode::Light,
-    foreground: 0x23252a,
-    background: 0xfafafb,
-    cursor: 0x23252a,
-    selection: 0xdcdee2,
+    foreground: 0x5c6166,
+    background: 0xfcfcfc,
+    cursor: 0xf29718,
+    selection: 0xdcdfe3,
     ansi: [
-        0x24292f, 0xc03a2b, 0x1d7d48, 0x8a6100, 0x2a68b4, 0x8250df, 0x1b7c83, 0x6e7781, 0x878b93,
-        0xa40e26, 0x116329, 0x7d4e00, 0x0550ae, 0x6639ba, 0x136061, 0x8c959f,
+        0x000000, 0xd45555, 0x6b8a00, 0xa06800, 0x2a80c0, 0x9e75c7, 0x27876a, 0xbababa, 0x686868,
+        0xc44444, 0x5b7a00, 0x9c6400, 0x2d8fd5, 0xa37acc, 0x208a6c, 0xd1d1d1,
     ],
 };
 
-/// MicaTerm Dark：前景、淡色（亮黑）、绿、蓝、黄、红取 26 号原型 `.win.dark.tp-qi`，背景是 `--content`，
-/// 选中底是 `--sel` 叠在内容底上的颜色；其余取 GitHub Primer 深色的终端色。
-const MICATERM_DARK: TerminalTheme = TerminalTheme {
-    key: "micaterm-dark",
-    name: "MicaTerm Dark",
+/// Ayu Dark：取自 Ayu 的终端调色板（ayu-theme），全部原值；背景和选中底跟随界面。
+const AYU_DARK: TerminalTheme = TerminalTheme {
+    key: "ayu-dark",
+    name: "Ayu Dark",
     mode: ThemeMode::Dark,
-    foreground: 0xd0d3d8,
-    background: 0x18191b,
-    cursor: 0xd0d3d8,
-    selection: 0x2a2b2e,
+    foreground: 0xb3b1ad,
+    background: 0x10141c,
+    cursor: 0xe6b450,
+    selection: 0x263041,
     ansi: [
-        0x484f58, 0xee7b74, 0x6cc497, 0xe2c46a, 0x7aa2e8, 0xd2a8ff, 0x39c5cf, 0xb1bac4, 0x6f747d,
-        0xffa198, 0x7ee787, 0xf2cc60, 0x96d0ff, 0xe2c5ff, 0x56d4dd, 0xf0f6fc,
+        0x000000, 0xea6c73, 0x91b362, 0xf9af4f, 0x53bdfa, 0xfae994, 0x90e1c6, 0xc7c7c7, 0x686868,
+        0xf07178, 0xc2d94c, 0xffb454, 0x59c2ff, 0xffee99, 0x95e6cb, 0xffffff,
     ],
 };
 
 /// 每一栏按列出的顺序，默认的在前；同一行是同一主题的浅色版和深色版。
 static THEMES: [TerminalTheme; 8] = [
-    MICATERM_LIGHT,
+    AYU_LIGHT,
     TOKYO_DAY,
     CATPPUCCIN_LATTE,
     ROSE_PINE_DAWN,
-    MICATERM_DARK,
+    AYU_DARK,
     TOKYO_NIGHT,
     CATPPUCCIN_MOCHA,
     ROSE_PINE,
@@ -348,9 +349,9 @@ mod tests {
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
     }
 
-    /// spec 第 5 节：只内置 4 对，浅色栏和深色栏按行配对，MicaTerm 在前（默认）。
+    /// spec 第 5 节：只内置 4 对，浅色栏和深色栏按行配对，Ayu 在前（默认）。
     #[test]
-    fn four_pairs_are_built_in_with_micaterm_first() {
+    fn four_pairs_are_built_in_with_ayu_first() {
         let names = |mode| {
             TerminalTheme::for_mode(mode)
                 .map(|theme| (theme.key, theme.name))
@@ -359,7 +360,7 @@ mod tests {
         assert_eq!(
             names(ThemeMode::Light),
             [
-                ("micaterm-light", "MicaTerm Light"),
+                ("ayu-light", "Ayu Light"),
                 ("tokyo-day", "Tokyo Day"),
                 ("catppuccin-latte", "Catppuccin Latte"),
                 ("rose-pine-dawn", "Rosé Pine Dawn"),
@@ -368,7 +369,7 @@ mod tests {
         assert_eq!(
             names(ThemeMode::Dark),
             [
-                ("micaterm-dark", "MicaTerm Dark"),
+                ("ayu-dark", "Ayu Dark"),
                 ("tokyo-night", "Tokyo Night"),
                 ("catppuccin-mocha", "Catppuccin Mocha"),
                 ("rose-pine", "Rosé Pine Moon"),
@@ -377,26 +378,22 @@ mod tests {
         assert_eq!(TerminalTheme::all().len(), 8);
         assert_eq!(
             TerminalTheme::default_for(ThemeMode::Light).key,
-            "micaterm-light"
+            "ayu-light"
         );
-        assert_eq!(
-            TerminalTheme::default_for(ThemeMode::Dark).key,
-            "micaterm-dark"
-        );
+        assert_eq!(TerminalTheme::default_for(ThemeMode::Dark).key, "ayu-dark");
     }
 
-    /// MicaTerm 这一对的底色和文字是原型的卡片底和 `--term`。
+    /// Ayu 这一对的底色跟随界面，浅色的红绿黄青压暗过，深色是 Ayu 原值。
     #[test]
-    fn the_micaterm_pair_takes_the_prototype_tokens() {
-        // 26 号 `.tp-qi`：前景、红、绿、黄、蓝、淡色（亮黑）；背景是 `--content`。
-        let light = TerminalTheme::find("micaterm-light").unwrap();
-        assert_eq!((light.background, light.foreground), (0xfafafb, 0x23252a));
-        assert_eq!(light.ansi[1..=4], [0xc03a2b, 0x1d7d48, 0x8a6100, 0x2a68b4]);
-        assert_eq!(light.ansi[8], 0x878b93);
-        let dark = TerminalTheme::find("micaterm-dark").unwrap();
-        assert_eq!((dark.background, dark.foreground), (0x18191b, 0xd0d3d8));
-        assert_eq!(dark.ansi[1..=4], [0xee7b74, 0x6cc497, 0xe2c46a, 0x7aa2e8]);
-        assert_eq!(dark.ansi[8], 0x6f747d);
+    fn the_ayu_pair_takes_the_ayu_terminal_palette() {
+        let light = TerminalTheme::find("ayu-light").unwrap();
+        assert_eq!((light.background, light.foreground), (0xfcfcfc, 0x5c6166));
+        assert_eq!(light.ansi[1..=4], [0xd45555, 0x6b8a00, 0xa06800, 0x2a80c0]);
+        assert_eq!(light.ansi[8], 0x686868);
+        let dark = TerminalTheme::find("ayu-dark").unwrap();
+        assert_eq!((dark.background, dark.foreground), (0x10141c, 0xb3b1ad));
+        assert_eq!(dark.ansi[1..=4], [0xea6c73, 0x91b362, 0xf9af4f, 0x53bdfa]);
+        assert_eq!(dark.ansi[8], 0x686868);
     }
 
     #[test]
@@ -465,7 +462,7 @@ mod tests {
         // vim asks for the background to choose its light or dark colors.
         assert_eq!(
             light.query_color(NamedColor::Background as usize),
-            rgb(0xfafafb)
+            rgb(0xfcfcfc)
         );
         assert_eq!(
             light.query_color(NamedColor::Foreground as usize),
@@ -480,7 +477,7 @@ mod tests {
         let dark = TerminalTheme::default_for(ThemeMode::Dark);
         assert_eq!(
             dark.query_color(NamedColor::Background as usize),
-            rgb(0x18191b)
+            rgb(0x10141c)
         );
     }
 }

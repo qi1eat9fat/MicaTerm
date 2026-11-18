@@ -134,13 +134,13 @@ fn each_appearance_has_its_own_terminal_theme(cx: &mut TestAppContext) {
     let (handle, workspace) = open_workspace(cx);
     let in_effect = |cx: &mut TestAppContext| cx.update(|cx| TerminalColors::current(cx).name());
     open_settings(cx, handle);
-    assert_eq!(in_effect(cx), "MicaTerm Light");
+    assert_eq!(in_effect(cx), "Ayu Light");
 
     in_frame(cx, handle, |window, cx| {
-        let default_light = window.find("terminal-theme-micaterm-light");
+        let default_light = window.find("terminal-theme-ayu-light");
         assert_eq!(default_light.selected(), Some(true));
         assert_eq!(
-            window.find("terminal-theme-micaterm-dark").selected(),
+            window.find("terminal-theme-ayu-dark").selected(),
             Some(true)
         );
         assert_eq!(
@@ -149,7 +149,7 @@ fn each_appearance_has_its_own_terminal_theme(cx: &mut TestAppContext) {
         );
         // 四对：浅色栏在左、深色栏在右，同一行是一对。
         for (light, dark) in [
-            ("micaterm-light", "micaterm-dark"),
+            ("ayu-light", "ayu-dark"),
             ("tokyo-day", "tokyo-night"),
             ("catppuccin-latte", "catppuccin-mocha"),
             ("rose-pine-dawn", "rose-pine"),
@@ -175,7 +175,7 @@ fn each_appearance_has_its_own_terminal_theme(cx: &mut TestAppContext) {
             Some(true)
         );
         assert_eq!(
-            window.find("terminal-theme-micaterm-light").selected(),
+            window.find("terminal-theme-ayu-light").selected(),
             Some(false)
         );
         // 选深色栏的不影响浅色外观下的终端。

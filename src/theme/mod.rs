@@ -1,7 +1,7 @@
 //! 视觉常量：颜色 token（`tokens`）、尺寸（`size`）、字号（`TypeScale`）和字体。
 //!
-//! 全部取自 26 号逐屏原型（`.scratch/qishell-design/prototypes/26-screens.prototype.html`），
-//! 规则见 `.scratch/qishell-design/ui-lessons.md` 第四节：业务代码里不写颜色、尺寸和字号数字，都从这里取。
+//! 颜色取自 Ayu 主题（见 `tokens`）；尺寸和字号仍按 26 号逐屏原型的换算表（见 `size`、`type_scale`）。
+//! 规则：业务代码里不写颜色、尺寸和字号数字，都从这里取。
 
 pub mod code_colors;
 mod component;

@@ -1,5 +1,5 @@
-//! gpui-component 的主题（对话框、下拉菜单、输入框、开关……用的颜色和字体），从 26 号原型的 token 映射过来：
-//! 从 gpui-component 默认的浅色或深色主题出发，换掉和原型对得上的那些颜色，
+//! gpui-component 的主题（对话框、下拉菜单、输入框、开关……用的颜色和字体），从 `Tokens` 映射过来：
+//! 从 gpui-component 默认的浅色或深色主题出发，换掉和 token 对得上的那些颜色，
 //! 其余（悬停、按下这类）由 gpui-component 自己从这些推出来。界面颜色不跟终端主题走。
 
 use std::rc::Rc;
@@ -40,7 +40,7 @@ pub fn component_theme(mode: ThemeMode, cx: &App) -> Rc<ThemeConfig> {
     config.mono_font_size = Some(13.);
     config.radius = Some(f32::from(size::RADIUS) as usize);
     config.radius_lg = Some(f32::from(size::RADIUS_LG) as usize);
-    // 编辑器（26 号 `.ed`）：语法颜色用默认主题的，正文、行号栏和当前行换成内容区的颜色。
+    // 编辑器：语法颜色用默认主题的，正文、行号栏和当前行换成内容区的颜色。
     // 不换的话行号栏是默认主题的底色，深色下和内容区差一大截。
     let mut highlight = config.highlight.take().unwrap_or_default();
     highlight.editor_background = Some(tokens.content);
@@ -52,7 +52,7 @@ pub fn component_theme(mode: ThemeMode, cx: &App) -> Rc<ThemeConfig> {
     config.highlight = Some(highlight);
     let hex = |color: Hsla| Some(hex(color));
     let colors = &mut config.colors;
-    // 对话框、浮层、菜单：浅色同内容底，深色 `#202124`；外圈 `--line-strong`。
+    // 对话框、浮层、菜单：浅色同内容底，深色用浮层色；外圈 `line_strong`。
     colors.background = hex(tokens.popup);
     colors.foreground = hex(tokens.text);
     colors.border = hex(tokens.line_strong);
@@ -92,7 +92,12 @@ pub fn component_theme(mode: ThemeMode, cx: &App) -> Rc<ThemeConfig> {
     // 弹窗不压暗背景；错误红 `--err`。
     colors.overlay = hex(gpui_kit::transparent_black());
     colors.danger = hex(tokens.err);
-    colors.group_box = hex(tokens.tabbar);
+    // 分组底：浅色用比内容深一档的标签栏色；深色用浮层色——Ayu 深色的标签栏接近纯黑，
+    // 直接拿来做分组块会是一整块黑。
+    colors.group_box = match mode {
+        ThemeMode::Light => hex(tokens.tabbar),
+        ThemeMode::Dark => hex(tokens.popup),
+    };
     // 文件列表：表格本身透明，透出内容区的底；悬停和选中只画在名称格上（工单 10 重做）。
     let clear = Some(SharedString::new_static("#00000000"));
     colors.table = clear.clone();

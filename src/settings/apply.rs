@@ -50,7 +50,7 @@ pub fn apply(settings: &AppSettings, window: &mut Window, cx: &mut App) {
         window.refresh();
     }
 
-    // 终端背景跟着界面的内容底走，主题只管前景和 ANSI 色（26 号，用户定）。
+    // 终端背景跟着界面的内容底走，主题只管前景和 ANSI 色。
     let colors = TerminalColors::new(settings.terminal_theme.theme(mode))
         .on_background(Tokens::current(cx).content);
     if cx.try_global::<TerminalColors>() != Some(&colors) {

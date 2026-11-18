@@ -160,9 +160,9 @@ pub struct InterfaceSettings {
 }
 
 /// 默认的浅色终端主题。主题 key 发布后不能改：它写进 `settings.json`。
-pub const DEFAULT_LIGHT_THEME: &str = "micaterm-light";
+pub const DEFAULT_LIGHT_THEME: &str = "ayu-light";
 /// 默认的深色终端主题。
-pub const DEFAULT_DARK_THEME: &str = "micaterm-dark";
+pub const DEFAULT_DARK_THEME: &str = "ayu-dark";
 
 /// 外观 → 终端主题：浅色和深色各选一套（从内置的 4 对里选），按 key 存。
 /// 这个版本不认识的 key 由使用方退回默认主题，不让整个文件读失败。
@@ -303,8 +303,8 @@ mod tests {
             "Maple Mono Normal NL NF CN"
         );
         assert_eq!(settings.terminal_font.size, 13.);
-        assert_eq!(settings.terminal_theme.light, "micaterm-light");
-        assert_eq!(settings.terminal_theme.dark, "micaterm-dark");
+        assert_eq!(settings.terminal_theme.light, "ayu-light");
+        assert_eq!(settings.terminal_theme.dark, "ayu-dark");
         assert_eq!(settings.terminal_interaction.right_click, RightClick::Menu);
         assert!(!settings.terminal_interaction.copy_on_select);
         assert!(settings.terminal_interaction.cursor_blinking);
@@ -396,12 +396,12 @@ mod tests {
     fn each_column_falls_back_to_its_default_theme() {
         use gpui_kit::component::ThemeMode;
         let mut themes = super::TerminalThemeSettings::default();
-        assert_eq!(themes.theme(ThemeMode::Light).name(), "MicaTerm Light");
-        assert_eq!(themes.theme(ThemeMode::Dark).name(), "MicaTerm Dark");
+        assert_eq!(themes.theme(ThemeMode::Light).name(), "Ayu Light");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Ayu Dark");
         themes.light = "solarized-light".into();
         themes.dark = "tokyo-day".into();
-        assert_eq!(themes.theme(ThemeMode::Light).name(), "MicaTerm Light");
-        assert_eq!(themes.theme(ThemeMode::Dark).name(), "MicaTerm Dark");
+        assert_eq!(themes.theme(ThemeMode::Light).name(), "Ayu Light");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Ayu Dark");
 
         let rose_pine = micaterm_terminal::TerminalTheme::find("rose-pine").unwrap();
         themes.choose(rose_pine);

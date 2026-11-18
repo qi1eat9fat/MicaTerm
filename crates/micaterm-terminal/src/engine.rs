@@ -1590,7 +1590,7 @@ mod tests {
             .collect();
         assert_eq!(
             written,
-            ["\x1b]11;rgb:fafa/fafa/fbfb\x1b\\\x1b[1;3R\x1b]4;1;rgb:c0c0/3a3a/2b2b\x07"]
+            ["\x1b]11;rgb:fcfc/fcfc/fcfc\x1b\\\x1b[1;3R\x1b]4;1;rgb:d4d4/5555/5555\x07"]
         );
 
         // A color the program set is the one it hears back.
