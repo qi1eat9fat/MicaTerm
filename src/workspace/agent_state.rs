@@ -16,7 +16,7 @@ use gpui_kit::*;
 
 use super::Workspace;
 use super::right_sidebar::{AgentRail, RailDot, RightPanel};
-use crate::agent::{AgentState, HookEvent, read_screen};
+use crate::agent::{AgentState, HookEvent, ScreenState, read_screen};
 use crate::card::CardId;
 use crate::i18n::t;
 
@@ -90,12 +90,24 @@ impl Workspace {
                 agent.terminal.read(cx).read_tail(SCREEN_LINES, cx).text,
             ))
         });
-        if let Some((kind, text)) = panel
-            && let Some(text) = self.agent_screens.settle(AgentSlot::Panel, text, now)
-            && let Some(agent) = &mut self.agent
-            && agent.tracker.on_screen(read_screen(kind, &text))
-        {
-            self.agent_changed(AgentSlot::Panel, window, cx);
+        if let Some((kind, text)) = panel {
+            let state = read_screen(kind, &text);
+            let judged = if state == Some(ScreenState::Working) {
+                // 干活时底栏的秒数一直变，屏幕停不下来：认出现在在干活就马上判，不等它停。
+                self.agent_screens.forget(AgentSlot::Panel);
+                state
+            } else {
+                // 其余等屏幕停一秒再判，判的就是同一段文字。
+                self.agent_screens
+                    .settle(AgentSlot::Panel, text, now)
+                    .and(state)
+            };
+            if let Some(state) = judged
+                && let Some(agent) = &mut self.agent
+                && agent.tracker.on_screen(Some(state))
+            {
+                self.agent_changed(AgentSlot::Panel, window, cx);
+            }
         }
         // 前台是 claude、codex 的本地卡片；不再是了的回到空闲。
         let cards: Vec<_> = self
@@ -114,11 +126,18 @@ impl Workspace {
                         .read(cx)
                         .read_tail(SCREEN_LINES, cx)
                         .text;
-                    let Some(text) = self.agent_screens.settle(slot, text, now) else {
+                    let state = read_screen(kind, &text);
+                    let judged = if state == Some(ScreenState::Working) {
+                        self.agent_screens.forget(slot);
+                        state
+                    } else {
+                        self.agent_screens.settle(slot, text, now).and(state)
+                    };
+                    let Some(state) = judged else {
                         continue;
                     };
                     let changed = entity.update(cx, |card, cx| {
-                        card.update_agent(cx, |agent| agent.on_screen(read_screen(kind, &text)))
+                        card.update_agent(cx, |agent| agent.on_screen(Some(state)))
                     });
                     if changed {
                         self.agent_changed(slot, window, cx);

@@ -232,6 +232,64 @@ fn a_local_card_running_claude_is_read_from_its_screen(cx: &mut TestAppContext) 
     wait(cx, handle, |cx| state(cx).0 == AgentState::Idle);
 }
 
+/// 干活时底栏的秒数一直变，屏幕停不下来：认出现在在干活就马上判，不能一直停在「等你确认」，
+/// 等回合结束的 Stop 才回神（2026-11-19）。
+#[gpui_kit::test]
+fn a_working_screen_that_keeps_redrawing_clears_a_waiting_hook(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let endpoint = endpoint(&dir, "redrawing");
+    let factory = Arc::new(FakeTerminalFactory::default());
+    let (handle, workspace) = open(
+        cx,
+        Some(&endpoint),
+        fake_local_terminals_with(factory.clone()),
+        None,
+    );
+    dispatch(cx, handle, ShowAgent);
+    start_new_agent(cx, handle);
+    let me = cx.update(|cx| {
+        workspace
+            .read(cx)
+            .agent_panel()
+            .unwrap()
+            .self_id
+            .to_string()
+    });
+    hook(
+        cx,
+        handle,
+        &endpoint,
+        &me,
+        HookEvent::NeedsAttention,
+        Some("Claude needs your permission"),
+    );
+    let state = |cx: &mut TestAppContext| {
+        cx.update(|cx| workspace.read(cx).agent_panel().unwrap().tracker.state())
+    };
+    assert_eq!(state(cx), AgentState::Waiting);
+
+    // 假 Agent 一直在画「运行中」的底行，秒数每次都不同：到看出运行中之前，屏幕永远停不到一秒。
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let painting = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            let mut second = 0u32;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                factory.print(
+                    1,
+                    &format!("\x1b[2J\x1b[H✻ Pondering… ({second}s · esc to interrupt)\r\n"),
+                );
+                second += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        })
+    };
+    wait(cx, handle, |cx| state(cx) == AgentState::Running);
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(state(cx), AgentState::Running, "认出了在干活就该回到运行中");
+    painting.join().unwrap();
+}
+
 /// 设置 › Agent 的「Agent 状态」：开 Claude Code 的开关，往它的 settings.json 里装 hook；再关就删掉。
 #[gpui_kit::test]
 fn the_settings_switch_installs_the_claude_hooks(cx: &mut TestAppContext) {

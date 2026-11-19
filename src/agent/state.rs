@@ -86,6 +86,11 @@ impl AgentTracker {
         self.hook = Some(state);
         if event == HookEvent::NeedsAttention {
             self.message = message;
+            // 屏幕可能还停在上一轮判出的样子（新判要等屏幕停一秒）：除了「已经在干活」，
+            // 都别拿它当准，等看一眼现在的屏幕再说。
+            if self.screen != Some(ScreenState::Working) {
+                self.screen = None;
+            }
         }
         self.settle()
     }
@@ -136,6 +141,8 @@ fn merge(
     match hook {
         // hook 说在等你，屏幕却已经在干活：用户已经答了（Claude Code 答完不再报 hook，等 Stop）。
         Some(AgentState::Waiting) if screen == Some(ScreenState::Working) => AgentState::Running,
+        // hook 说在等你，提示符却已经回到屏幕上：也答过了。Stop 没报来（被打断、旧版本）时靠它回神。
+        Some(AgentState::Waiting) if screen == Some(ScreenState::Idle) => AgentState::TurnEnded,
         Some(state) => state,
         // 没装 hook：全看屏幕。干完活回到提示符就是回合结束。
         None => match screen {
@@ -211,10 +218,32 @@ mod tests {
             AgentState::Running,
             "屏幕还在干活：已经答过了"
         );
+        // 提示符回来了：回合结束了。Stop 没报来（被打断、旧版本）时也不能一直停在「等你确认」。
         agent.on_screen(Some(ScreenState::Idle));
-        assert_eq!(agent.state(), AgentState::Waiting);
+        assert_eq!(agent.state(), AgentState::TurnEnded);
         agent.on_hook(HookEvent::TurnDone, None);
         assert_eq!(agent.state(), AgentState::TurnEnded);
+    }
+
+    /// hook 说在等你，屏幕上的提示符却回来了：用户答完、回合也结束了，只是 Stop 没报来。
+    /// 下次提交时照常回到运行中。
+    #[test]
+    fn a_prompt_back_on_screen_ends_a_waiting_hook() {
+        let mut agent = AgentTracker::default();
+        agent.on_hook(HookEvent::PromptSubmit, None);
+        agent.on_hook(
+            HookEvent::NeedsAttention,
+            Some("Claude needs your permission".into()),
+        );
+        assert_eq!(agent.state(), AgentState::Waiting);
+        assert_eq!(agent.message(), Some("Claude needs your permission"));
+
+        agent.on_screen(Some(ScreenState::Idle));
+        assert_eq!(agent.state(), AgentState::TurnEnded);
+        assert_eq!(agent.message(), None, "不再等你确认，正文也清掉");
+
+        agent.on_hook(HookEvent::PromptSubmit, None);
+        assert_eq!(agent.state(), AgentState::Running);
     }
 
     /// 没装 hook：全看屏幕，干完活回到提示符算回合结束；一开始就在提示符是空闲。

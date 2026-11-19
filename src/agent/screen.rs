@@ -361,6 +361,46 @@ mod tests {
         assert_eq!(read_screen(AgentKind::Codex, idle), Some(ScreenState::Idle));
     }
 
+    /// Claude Code 2.1.328（2026-11，Windows 的经典渲染器）的两种底行：提示符在两条横线之间，
+    /// 下面一行是模式提示；权限对话框上面那条横线之后是选项，里面的分隔线用的是 `╌`。
+    const CLAUDE_2_IDLE: &str = "\
+● 当前目录是空的。\n\
+\n\
+────────────────────────────────────────────\n\
+❯\n\
+────────────────────────────────────────────\n\
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents";
+
+    const CLAUDE_2_ASKING: &str = "\
+● PowerShell($items = Get-ChildItem -Force; \"Path: $((Get-Location).Path)\")\n\
+\n\
+────────────────────────────────────────────\n\
+ PowerShell command\n\
+ 确认目录路径和项目数量\n\
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n\
+ │ $items = Get-ChildItem -Force; \"Path: $((Get-Location).Path)\"\n\
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n\
+ Command contains subexpressions $()\n\
+\n\
+ Do you want to proceed?\n\
+ ❯ 1. Yes\n\
+   2. Yes, and don’t ask again\n\
+   3. No\n\
+\n\
+ Esc to cancel · Tab to amend";
+
+    #[test]
+    fn the_current_claude_code_bottom_bar_reads_idle_and_asking() {
+        assert_eq!(
+            read_screen(AgentKind::ClaudeCode, CLAUDE_2_IDLE),
+            Some(ScreenState::Idle)
+        );
+        assert_eq!(
+            read_screen(AgentKind::ClaudeCode, CLAUDE_2_ASKING),
+            Some(ScreenState::Blocked)
+        );
+    }
+
     #[test]
     fn an_unrecognised_screen_says_nothing() {
         assert_eq!(
