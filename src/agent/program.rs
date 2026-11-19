@@ -182,38 +182,55 @@ fn known_installs() -> Vec<KnownInstall> {
 
 /// Claude 桌面版可能放数据的目录（里面有 `claude-code/<版本>/…/claude(.exe)`）：
 /// - `%APPDATA%\Claude`（Windows 安装包版）、`~/Library/Application Support/Claude`（macOS）；
+/// - `%LOCALAPPDATA%\Claude-3p`（新版桌面版的 Code 标签页，自带的 Claude Code 在这里）；
 /// - `%LOCALAPPDATA%\Claude-Data\claude_<包 ID>`（Windows 应用商店 / MSIX 版）；
 /// - `%LOCALAPPDATA%\Packages\Claude_<包 ID>\LocalCache\Roaming\Claude`（MSIX 把
 ///   `%APPDATA%` 重定向到这里的情况）。
 fn desktop_data_dirs() -> Vec<PathBuf> {
     let mut found = Vec::new();
     if let Some(config) = dirs::config_dir() {
-        found.push(config.join("Claude"));
+        found.extend(children_starting_with(&config, "claude"));
     }
     if cfg!(windows)
         && let Some(local) = dirs::data_local_dir()
     {
-        found.extend(children_starting_with(
-            &local.join("Claude-Data"),
-            "claude_",
-        ));
-        found.extend(
-            children_starting_with(&local.join("Packages"), "Claude_")
-                .into_iter()
-                .map(|package| package.join("LocalCache").join("Roaming").join("Claude")),
-        );
+        found.extend(local_data_dirs(&local));
     }
     found
 }
 
-/// `dir` 下名字以 `prefix` 开头的子目录；`dir` 不在时是空的。
+/// `%LOCALAPPDATA%` 下桌面版可能用来放数据的目录。桌面版的目录名会随版本变
+/// （`Claude-3p`、`Claude`、`Claude-Data` 之类），所以按 `Claude` 前缀找，
+/// 而不是写死某个名字。
+fn local_data_dirs(local: &Path) -> Vec<PathBuf> {
+    let mut found = children_starting_with(local, "claude");
+    found.extend(children_starting_with(
+        &local.join("Claude-Data"),
+        "claude_",
+    ));
+    found.extend(
+        children_starting_with(&local.join("Packages"), "claude_")
+            .into_iter()
+            .map(|package| package.join("LocalCache").join("Roaming").join("Claude")),
+    );
+    found
+}
+
+/// `dir` 下名字以 `prefix` 开头的子目录（不分大小写）；`dir` 不在时是空的。
 fn children_starting_with(dir: &Path, prefix: &str) -> Vec<PathBuf> {
+    let prefix = prefix.to_lowercase();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     entries
         .flatten()
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_lowercase()
+                .starts_with(&prefix)
+        })
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())
         .collect()
@@ -369,5 +386,37 @@ mod tests {
         // 没有 claude 的目录（`.payload` 之类）不算。
         std::fs::create_dir_all(root.join("2.1.400").join("empty")).unwrap();
         assert_eq!(newest_bundled([data.path().to_path_buf()]), Some(new));
+    }
+
+    #[test]
+    fn a_bundled_claude_code_under_localappdata_is_found() {
+        let local = tempfile::tempdir().unwrap();
+        // 新版桌面版（Code 标签页）把自带的那份放在 %LOCALAPPDATA%\Claude-3p。
+        let file = local
+            .path()
+            .join("Claude-3p")
+            .join("claude-code")
+            .join("2.1.325")
+            .join("806e0a45e6f5")
+            .join(CLAUDE_EXE);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "").unwrap();
+        // 同一个 `%LOCALAPPDATA%` 下别的 Claude 目录没有 claude-code，跳过就好。
+        std::fs::create_dir_all(local.path().join("Claude").join("logs")).unwrap();
+        std::fs::create_dir_all(local.path().join("claude-cli-nodejs").join("Cache")).unwrap();
+
+        assert!(
+            local_data_dirs(local.path()).contains(&local.path().join("Claude-3p")),
+            "{:?}",
+            local_data_dirs(local.path())
+        );
+        assert_eq!(newest_bundled(local_data_dirs(local.path())), Some(file));
+
+        // 应用商店版的目录也还在找。
+        std::fs::create_dir_all(local.path().join("Claude-Data").join("claude_store")).unwrap();
+        assert!(
+            local_data_dirs(local.path())
+                .contains(&local.path().join("Claude-Data").join("claude_store"))
+        );
     }
 }
