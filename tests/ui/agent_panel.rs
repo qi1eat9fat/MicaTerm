@@ -5,9 +5,12 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use gpui_kit::ClipboardItem;
 use micaterm::app::{RestartAgent, ShowAgent};
 use micaterm::workspace::RightPanel;
 use micaterm_terminal::LocalLaunch;
+use micaterm_terminal::TerminalLifecycle;
+use micaterm_terminal::actions::PasteTerminal;
 
 use crate::settings_cli::install_paths;
 use crate::support::*;
@@ -411,6 +414,61 @@ fn the_command_and_the_skill_are_installed_before_starting(cx: &mut TestAppConte
         "Skill 装上了"
     );
     assert!(!has(cx, handle, "agent-prep"));
+}
+
+/// 焦点在 Agent 面板的终端里时，终端动作（右键菜单的粘贴、复制，Ctrl+Shift+V 这些）的对象是它，
+/// 不是在前的卡片（2026-11-19：右键菜单的「粘贴」粘到了卡片的终端里）。
+#[gpui_kit::test]
+fn terminal_actions_in_the_agent_panel_go_to_the_agent(cx: &mut TestAppContext) {
+    let provider = fake_local_terminals();
+    let (handle, workspace) = open(cx, provider, true, Some("claude"), None);
+    dispatch(cx, handle, NewLocalTerminalTab);
+    dispatch(cx, handle, ShowAgent);
+    start_new_agent(cx, handle);
+
+    // 两个终端都跑起来了、排好版：卡片的假 shell 先打出提示符。
+    wait(cx, handle, |cx| {
+        cx.update(|cx| {
+            let agent = workspace.read(cx).agent_panel().is_some_and(|panel| {
+                panel.terminal.read(cx).lifecycle(cx) == TerminalLifecycle::Running
+            });
+            let card = workspace
+                .read(cx)
+                .card_screen_text(CardId(1), cx)
+                .is_some_and(|screen| screen.contains("会议纪要"));
+            agent && card
+        })
+    });
+
+    let terminal = cx.update(|cx| {
+        workspace
+            .read(cx)
+            .agent_panel()
+            .expect("the agent is open")
+            .terminal
+            .clone()
+    });
+    in_frame(cx, handle, |window, cx| {
+        terminal.update(cx, |terminal, cx| terminal.focus(window, cx));
+    });
+    cx.update(|cx| cx.write_to_clipboard(ClipboardItem::new_string("给 Agent 的粘贴".into())));
+    dispatch(cx, handle, PasteTerminal);
+
+    let agent_screen = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            workspace
+                .read(cx)
+                .agent_panel()
+                .map(|panel| panel.terminal.read(cx).screen_text(cx))
+                .unwrap_or_default()
+        })
+    };
+    wait(cx, handle, |cx| {
+        agent_screen(cx).contains("给 Agent 的粘贴")
+    });
+    let card = cx.update(|cx| workspace.read(cx).card_screen_text(CardId(1), cx));
+    let card = card.unwrap_or_default();
+    assert!(!card.contains("给 Agent 的粘贴"), "粘到卡片里去了：{card}");
 }
 
 /// 找不到 Agent 命令（设置里没填，PATH 里也没有）：不启动；「打开设置」跳到 Agent 那一页。
