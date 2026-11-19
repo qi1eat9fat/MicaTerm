@@ -1,4 +1,4 @@
-//! 交给 Agent 的卡片（Agent CLI 工单 06）：右键「交给 Agent」「收回」，定时把交出去的卡片列给
+//! 交给 Agent 的卡片（Agent CLI 工单 06）：右键「交给 Agent」「收回 Agent」，定时把交出去的卡片列给
 //! 外部 CLI 的服务（`cards list`），把排着的 `exec --card` 交给卡片的终端，`cards read` /
 //! `cards send-key` 在 UI 线程上找卡片做掉。CLI 只认交出去的卡片：没交出去、收回了、关了的一律
 //! 回 `no_terminal`，跟卡片不存在一样。

@@ -239,7 +239,7 @@ fn a_card_handed_to_the_agent_is_listed_read_and_typed_into_until_taken_back(
     start_new_agent(cx, handle);
     assert_eq!(cards(cx, &endpoint)[0]["id"], card.as_str());
 
-    // 收回：不再列出，原来的 ID 读不了、也打不进命令。
+    // 收回 Agent：不再列出，原来的 ID 读不了、也打不进命令。
     dispatch(cx, handle, TakeCardBack(CardId(1)));
     assert!(!status(cx, handle).starts_with("Agent"));
     assert!(cards(cx, &endpoint).is_empty());
@@ -276,7 +276,7 @@ fn a_card_handed_to_the_agent_is_listed_read_and_typed_into_until_taken_back(
     assert_ne!(again[0]["id"], card.as_str());
 }
 
-/// 右键菜单：没交出去是「交给 Agent」，交出去了换成「收回」，点了就交出、收回。
+/// 右键菜单：没交出去是「交给 Agent」，交出去了换成「收回 Agent」，点了就交出、收回。
 #[gpui_kit::test]
 fn the_card_menu_hands_the_card_over_and_takes_it_back(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
@@ -284,16 +284,16 @@ fn the_card_menu_hands_the_card_over_and_takes_it_back(cx: &mut TestAppContext) 
     let (handle, _workspace, _remote) = open(cx, &endpoint, FakeTerminalFactory::default());
     let labels = terminal_menu_labels(cx, handle, 1);
     assert!(labels.contains(&"交给 Agent".to_string()), "{labels:?}");
-    assert!(!labels.contains(&"收回".to_string()), "{labels:?}");
+    assert!(!labels.contains(&"收回 Agent".to_string()), "{labels:?}");
 
     click_terminal_menu(cx, handle, 1, "交给 Agent");
     start_new_agent(cx, handle);
     assert_eq!(cards(cx, &endpoint).len(), 1);
     let labels = terminal_menu_labels(cx, handle, 1);
-    assert!(labels.contains(&"收回".to_string()), "{labels:?}");
+    assert!(labels.contains(&"收回 Agent".to_string()), "{labels:?}");
     assert!(!labels.contains(&"交给 Agent".to_string()), "{labels:?}");
 
-    click_terminal_menu(cx, handle, 1, "收回");
+    click_terminal_menu(cx, handle, 1, "收回 Agent");
     assert!(cards(cx, &endpoint).is_empty());
 }
 

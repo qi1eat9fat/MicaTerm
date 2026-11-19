@@ -72,7 +72,7 @@ card.remote.connecting_via:
 card.menu.hand_to_agent:
   zh-CN: 交给 Agent
 card.menu.take_back:
-  zh-CN: 收回
+  zh-CN: 收回 Agent
 card.status.agent:
   zh-CN: Agent
 card.status.agent_running:

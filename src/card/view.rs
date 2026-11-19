@@ -101,7 +101,7 @@ pub struct TerminalCard {
     /// 本地卡片自己的 CLI 卡片 ID（Agent CLI 工单 07）：开卡片时起好，放进它的 `MICATERM_SELF_CARD`。
     /// 远程卡片没有。
     self_id: Option<SharedString>,
-    /// 同一件事给右键菜单看（菜单打开时才建，读不到卡片）：交出去了就显示「收回」。
+    /// 同一件事给右键菜单看（菜单打开时才建，读不到卡片）：交出去了就显示「收回 Agent」。
     agent_flag: Rc<Cell<bool>>,
     /// 前台是 claude、codex 时它在干什么（Agent CLI 工单 09）。
     agent_tracker: crate::agent::AgentTracker,

@@ -29,7 +29,7 @@ pub struct OpenCardSftp(pub CardId);
 #[action(namespace = micaterm, no_json)]
 pub struct HandCardToAgent(pub CardId);
 
-/// 收回交给 Agent 的卡片（右键菜单「收回」）：它的 CLI 卡片 ID 随即失效。
+/// 收回交给 Agent 的卡片（右键菜单「收回 Agent」）：它的 CLI 卡片 ID 随即失效。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
 #[action(namespace = micaterm, no_json)]
 pub struct TakeCardBack(pub CardId);
