@@ -3,6 +3,8 @@ agent.panel.title:
   zh-CN: Agent
 agent.panel.restart:
   zh-CN: 重新开始
+agent.panel.close:
+  zh-CN: 关闭
 agent.start.folder:
   zh-CN: 文件夹
 agent.start.folder_choose:

@@ -145,6 +145,31 @@ fn the_rail_icon_starts_the_agent_and_collapsing_keeps_it_running(cx: &mut TestA
     assert_ne!(agent_id(cx, &workspace), Some(first));
 }
 
+/// 标题行右上角的「关闭」收起面板，Agent 还在跑、不另开；图标栏再点一下展开同一个。
+#[gpui_kit::test]
+fn the_close_button_collapses_the_panel_keeping_the_agent(cx: &mut TestAppContext) {
+    let provider = fake_local_terminals();
+    let (handle, workspace) = open(cx, provider.clone(), true, Some("claude"), None);
+    dispatch(cx, handle, ShowAgent);
+    start_new_agent(cx, handle);
+    let agent = agent_id(cx, &workspace).expect("the agent is running");
+    let launches = provider.launches().len();
+
+    in_frame(cx, handle, |window, cx| {
+        assert_eq!(window.find("agent-panel-close").label(), Some("关闭"));
+        window.click("agent-panel-close", cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(right_panel(cx, &workspace), None);
+    assert!(!has(cx, handle, "agent-panel"));
+    assert_eq!(agent_id(cx, &workspace), Some(agent.clone()), "Agent 还在");
+
+    dispatch(cx, handle, ShowAgent);
+    assert_eq!(right_panel(cx, &workspace), Some(RightPanel::Agent));
+    assert_eq!(agent_id(cx, &workspace), Some(agent));
+    assert_eq!(provider.launches().len(), launches, "展开不另开");
+}
+
 fn label(
     cx: &mut TestAppContext,
     handle: WindowHandle<Root>,

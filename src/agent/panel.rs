@@ -1,5 +1,6 @@
 //! 右侧的 Agent 面板（Agent CLI 工单 07，26 号「Agent 面板」屏）：和凭据、片段同一种停靠面板，宽 440；
-//! 标题行「Agent」+ 淡字程序名和工作文件夹名，右边「重新开始」（先弹启动框选文件夹和对话）；交给它卡片而它已在跑时，标题下一行提示说明填在
+//! 标题行「Agent」+ 淡字程序名和工作文件夹名，右边「重新开始」（先弹启动框选文件夹和对话）和「关闭」
+//! （收起面板，Agent 照常在跑）；交给它卡片而它已在跑时，标题下一行提示说明填在
 //! 输入框里；下面是 Agent 的终端（本地终端，程序是设置里的 Agent 命令）。整个窗口一份，收起时
 //! Agent 照常在跑。
 
@@ -11,7 +12,7 @@ use gpui_kit::*;
 use micaterm_terminal::{TerminalLifecycle, TerminalView};
 
 use super::state::{AgentState, AgentTracker, state_label};
-use crate::app::{CatalogIcon, RestartAgent};
+use crate::app::{CatalogIcon, RestartAgent, ShowAgent};
 use crate::cli::AgentKind;
 use crate::i18n::t;
 use crate::theme::{Tokens, size};
@@ -131,6 +132,15 @@ impl AgentPanel {
                 )
                 .size(px(24.), px(14.))
                 .dispatch(Box::new(RestartAgent), target, tokens),
+            )
+            .child(
+                IconButton::new(
+                    "agent-panel-close",
+                    CatalogIcon::Close,
+                    t!("agent.panel.close"),
+                )
+                .size(px(24.), px(14.))
+                .dispatch(Box::new(ShowAgent), target, tokens),
             );
         let note = self.note.clone().map(|note| {
             div()
