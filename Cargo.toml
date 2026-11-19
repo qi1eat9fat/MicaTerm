@@ -1,6 +1,6 @@
 [package]
 name = "micaterm"
-version = "1.4.1"
+version = "1.4.2"
 edition = "2024"
 publish = false
 description = "以 SSH 主机管理为核心的桌面终端，Rex 风格的卡片分屏"
