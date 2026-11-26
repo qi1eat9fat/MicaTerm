@@ -34,10 +34,12 @@ pub fn open_delete_host_dialog(
     };
     let mut lines = vec![ConfirmLine::Text(t!("host.delete.question", name = name))];
     if !jump_users.is_empty() {
-        lines.push(ConfirmLine::Text(t!(
-            "host.delete.jump_users",
-            count = jump_users.len()
-        )));
+        let count = jump_users.len();
+        lines.push(ConfirmLine::Text(if count == 1 {
+            t!("host.delete.jump_users_one", count = count)
+        } else {
+            t!("host.delete.jump_users", count = count)
+        }));
         lines.extend(jump_users.into_iter().map(ConfirmLine::Item));
         lines.push(ConfirmLine::Text(t!("host.delete.jump_users_after")));
     }

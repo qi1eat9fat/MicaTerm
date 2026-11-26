@@ -322,7 +322,7 @@ mod tests {
     fn a_notice_is_titled_with_its_card() {
         assert_eq!(
             notice_text("pwsh", &program(Some("构建"))),
-            ("pwsh：构建".to_string(), "完成".to_string())
+            ("pwsh: 构建".to_string(), "完成".to_string())
         );
         assert_eq!(
             notice_text("pwsh", &program(None)),
@@ -330,7 +330,7 @@ mod tests {
         );
         assert_eq!(
             notice_text("pwsh", &bell()),
-            ("pwsh：响铃".to_string(), "y/N?".to_string())
+            ("pwsh: Bell".to_string(), "y/N?".to_string())
         );
     }
 

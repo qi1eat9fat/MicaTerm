@@ -309,3 +309,70 @@ async fn a_locked_vault_fails_the_login_with_its_own_error() {
         "{error:?}"
     );
 }
+
+#[tokio::test]
+async fn open_shell_advertises_truecolor_env() {
+    let server = TestServer::start(std::env::temp_dir()).await.unwrap();
+    let key = random_key();
+    server.authorize(key.public_key().clone());
+    let saved = SavedKey::new("env-check");
+    let vault = Vault::with(&[(saved.private_key(), &openssh_text(&key))]);
+
+    let directory = tempfile::tempdir().unwrap();
+    let connector =
+        SshConnector::new(directory.path().join("known_hosts"), vault).with_default_key_dir(None);
+    let (_shutdown, shutdown) = watch::channel(false);
+    let broker_slot: Arc<std::sync::Mutex<Option<std::sync::Weak<SshPrompts>>>> =
+        Arc::default();
+    let reply_slot = broker_slot.clone();
+    let broker = Arc::new(SshPrompts::new(
+        Arc::new(move |prompt| {
+            let reply = match prompt.kind() {
+                ConnectionPromptKind::UnknownHost(_) => ConnectionPromptReply::TrustAndSave,
+                _ => ConnectionPromptReply::Cancel,
+            };
+            if let Some(broker) = reply_slot
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|weak| weak.upgrade())
+            {
+                broker.respond(prompt.request_id(), reply);
+            }
+            true
+        }),
+        shutdown,
+    ));
+    *broker_slot.lock().unwrap() = Some(Arc::downgrade(&broker));
+
+    let (handle, _) = connector
+        .connect(
+            &SshConnectionConfig::from(&key_login(server.port, &saved)),
+            broker,
+        )
+        .await
+        .unwrap();
+    let mut channel = crate::open_shell(
+        &handle,
+        "xterm-256color",
+        crate::PtySize {
+            columns: 80,
+            rows: 24,
+            width: 0,
+            height: 0,
+        },
+    )
+    .await
+    .unwrap();
+    // 等服务器按序处理完 pty_request、env_request、shell_request 后发回的两个 Success。
+    assert!(matches!(channel.wait().await, Some(russh::ChannelMsg::Success)));
+    assert!(matches!(channel.wait().await, Some(russh::ChannelMsg::Success)));
+    assert!(
+        server
+            .seen()
+            .env
+            .contains(&("COLORTERM".to_string(), "truecolor".to_string())),
+        "{:?}",
+        server.seen().env
+    );
+}

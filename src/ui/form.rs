@@ -10,7 +10,7 @@ use zeroize::Zeroizing;
 
 use crate::app::{CatalogIcon, UnlockVault};
 use crate::i18n::t;
-use crate::theme::{Tokens, size};
+use crate::theme::{Tokens, TypeScale, size};
 
 /// 表单里出错的字段和原因，按字段的元素 id 记。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub fn form_group(rows: impl IntoIterator<Item = AnyElement>) -> AnyElement {
     div()
         .flex()
         .flex_col()
-        .gap(px(14.))
+        .gap(px(12.))
         .children(rows)
         .into_any_element()
 }
@@ -76,7 +76,7 @@ pub fn form_field(
         .flex_col()
         .flex_1()
         .min_w_0()
-        .gap(px(6.))
+        .gap(px(4.))
         .children(label.map(|label| div().text_color(tokens.text).child(label)))
         .child(control)
         .children(notes.into_iter().map(|note| note.render(tokens)))
@@ -88,7 +88,7 @@ pub fn form_field(
 pub fn form_pair(left: AnyElement, right: AnyElement, right_width: Option<Pixels>) -> AnyElement {
     div()
         .flex()
-        .gap(px(10.))
+        .gap(px(8.))
         .child(div().flex().flex_1().min_w_0().child(left))
         .child(
             div()
@@ -121,7 +121,8 @@ impl FieldNote {
         })
     }
 
-    fn render(self, tokens: &Tokens) -> AnyElement {
+    /// 画这一行字：错误是红字（元素 id 是 `<field>-error`，原因写在无障碍名称里），提示是灰字。
+    pub fn render(self, tokens: &Tokens) -> AnyElement {
         match self {
             FieldNote::Error { field, message } => div()
                 .id(SharedString::from(format!("{field}-error")))
@@ -151,6 +152,7 @@ pub fn locked_secret(
     row: &'static str,
     unlock: &'static str,
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> impl IntoElement + use<> {
     let text = t!("vault.field.locked");
     let accent = tokens.text;
@@ -163,12 +165,14 @@ pub fn locked_secret(
         .gap(px(8.))
         .h(size::INPUT)
         .px(px(8.))
-        .rounded(size::RADIUS)
-        .bg(tokens.content)
+        .rounded(size::RADIUS_MD)
+        .bg(tokens.input)
         .border_1()
-        .border_color(tokens.line)
+        .border_color(tokens.line_strong)
+        .text_size(scale.sm)
+        .line_height(px(16.))
         .text_color(tokens.st_dim)
-        .child(Icon::new(CatalogIcon::Lock).size(px(13.)))
+        .child(Icon::new(CatalogIcon::Lock).size(size::ICON_MD))
         .child(div().flex_1().min_w_0().truncate().child(text))
         .child(
             div()

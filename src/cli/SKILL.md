@@ -23,7 +23,7 @@ micaterm download <host-id> <remote-path> <local-path>
 micaterm sync <host-id> <local-dir> <remote-dir> [--delete]
 ```
 
-`<host-id>` is the 16-character `id` from `micaterm hosts list`, the same ID that MicaTerm copies with Copy ID (复制 ID) in the host list's right-click menu.
+`<host-id>` is the 16-character `id` from `micaterm hosts list`.
 
 For a simple command, pass one complete remote shell command string as `<command>`.
 Pass a command through stdin when it contains quotes, pipes, redirects, JSON, `$`, backticks, or nested shell code, and quote the heredoc delimiter so the local shell leaves it alone:

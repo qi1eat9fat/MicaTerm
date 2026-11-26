@@ -2,258 +2,386 @@ _version: 2
 # 连接的错误和问题（backend 的 describe、tester、transport）。
 # 来自 since2006/shell-rs @ b2a307a: locales/ssh.yml、connection.yml（只留简体中文；私钥改成保险库里的说法）。
 ssh.agent.empty:
+  en: The SSH Agent has no keys; add one with ssh-add first
   zh-CN: SSH Agent 中没有密钥，请先用 ssh-add 添加
 ssh.agent.hash:
+  en: Could not negotiate an SSH Agent signature algorithm
   zh-CN: 无法协商 SSH Agent 签名算法
 ssh.agent.missing_socket:
+  en: "%{path} does not exist"
   zh-CN: "%{path} 不存在"
 ssh.agent.no_response:
+  en: No response
   zh-CN: 没有响应
 ssh.agent.no_socket:
+  en: SSH_AUTH_SOCK is not set
   zh-CN: 没有设置 SSH_AUTH_SOCK
 ssh.agent.service_not_running:
+  en: The OpenSSH Authentication Agent service is not running
   zh-CN: OpenSSH Authentication Agent 服务没有运行
 ssh.agent.unreachable:
+  en: "Cannot connect to the SSH Agent: %{reason}"
   zh-CN: 无法连接 SSH Agent：%{reason}
 ssh.agent.unsigned:
+  en: The SSH Agent refused the signing request
   zh-CN: SSH Agent 拒绝了签名请求
 ssh.agent.unsupported:
+  en: Not supported on this platform
   zh-CN: 这个平台不支持
 ssh.auth.agent_no_publickey:
+  en: The server does not accept public key authentication, so the SSH Agent cannot be used
   zh-CN: 服务器不接受公钥登录，无法使用 SSH Agent
 ssh.auth.agent_rejected:
+  en: The server did not accept the keys in the SSH Agent
   zh-CN: 服务器未接受 SSH Agent 中的密钥
 ssh.auth.cancelled:
+  en: Authentication was cancelled
   zh-CN: 认证已取消
 ssh.auth.code_title:
+  en: Enter Verification Code
   zh-CN: "输入验证码"
 ssh.auth.enter_password:
+  en: Enter the login password
   zh-CN: 请输入登录密码
 ssh.auth.failed:
+  en: "Authentication failed: the server accepted none of the available methods"
   zh-CN: 认证失败：服务器未接受可用的认证方式
 ssh.auth.invalid_reply:
+  en: Invalid authentication reply
   zh-CN: 认证回复无效
 ssh.auth.key_failed:
+  en: Private key authentication failed
   zh-CN: 私钥认证失败
 ssh.auth.key_rejected:
+  en: The server did not accept the given private key
   zh-CN: 服务器未接受指定的私钥
 ssh.auth.keyboard_cancelled:
+  en: Keyboard-interactive authentication was cancelled
   zh-CN: 交互式认证已取消
 ssh.auth.keyboard_failed:
+  en: Keyboard-interactive authentication failed
   zh-CN: 交互式认证失败
 ssh.auth.keyboard_interactive:
+  en: "The server requires keyboard-interactive authentication (passwords are answered automatically):"
   zh-CN: "服务器要求键盘交互认证（密码已自动回答）："
 ssh.auth.keyboard_start_failed:
+  en: Could not start keyboard-interactive authentication
   zh-CN: 无法开始交互式认证
 ssh.auth.methods_unknown:
+  en: Could not query the authentication methods the server supports
   zh-CN: 无法查询服务器支持的认证方式
 ssh.auth.no_key_accepted:
+  en: The server accepted none of the keys in the SSH Agent or ~/.ssh
   zh-CN: 服务器未接受 SSH Agent 和 ~/.ssh 中的任何私钥
 ssh.auth.password_failed:
+  en: Password authentication failed
   zh-CN: 密码认证失败
 ssh.auth.password_field:
+  en: Password
   zh-CN: 密码
 ssh.auth.prompt_title:
+  en: Enter Password
   zh-CN: "输入密码"
 ssh.auth.rsa_hash:
+  en: Could not negotiate an RSA signature algorithm
   zh-CN: 无法协商 RSA 签名算法
 ssh.auth.saved_password_rejected:
+  en: The server rejected the saved password; enter it again
   zh-CN: 已保存的密码被服务器拒绝，请重新输入
 ssh.connect.cancelled:
+  en: The connection was cancelled
   zh-CN: 连接已取消
 ssh.connect.failed:
+  en: Could not establish the SSH connection; check the address, port and host key
   zh-CN: 无法建立 SSH 连接，请检查地址、端口和主机密钥
 ssh.error.connect_failed:
+  en: "Cannot connect: %{error}"
   zh-CN: 无法连接：%{error}
 ssh.error.no_common.cipher:
+  en: "Cannot establish an SSH connection: no common cipher with the server, which offers %{theirs}"
   zh-CN: 无法建立 SSH 连接：和服务器没有共同的加密算法，服务器支持的是 %{theirs}
 ssh.error.no_common.compression:
+  en: "Cannot establish an SSH connection: no common compression algorithm with the server, which offers %{theirs}"
   zh-CN: 无法建立 SSH 连接：和服务器没有共同的压缩算法，服务器支持的是 %{theirs}
 ssh.error.no_common.host_key:
+  en: "Cannot establish an SSH connection: no common host key algorithm with the server, which offers %{theirs}"
   zh-CN: 无法建立 SSH 连接：和服务器没有共同的主机密钥算法，服务器支持的是 %{theirs}
 ssh.error.no_common.kex:
+  en: "Cannot establish an SSH connection: no common key exchange algorithm with the server, which offers %{theirs}"
   zh-CN: 无法建立 SSH 连接：和服务器没有共同的密钥交换算法，服务器支持的是 %{theirs}
 ssh.error.no_common.mac:
+  en: "Cannot establish an SSH connection: no common message authentication (MAC) algorithm with the server, which offers %{theirs}"
   zh-CN: 无法建立 SSH 连接：和服务器没有共同的消息校验（MAC）算法，服务器支持的是 %{theirs}
 ssh.error.refused:
+  en: The connection was refused; nothing is listening on that port
   zh-CN: 连接被拒绝，该端口上没有服务在监听
 ssh.error.timeout:
+  en: The connection timed out
   zh-CN: 连接超时
 ssh.error.unreachable:
+  en: The host is unreachable
   zh-CN: 主机不可达
 ssh.exec.channel_failed:
+  en: Could not open an SSH channel
   zh-CN: 无法打开 SSH 通道
 ssh.exec.refused:
+  en: The server refused to run the command
   zh-CN: 服务器拒绝执行命令
 ssh.exec.send_failed:
+  en: Could not send the command
   zh-CN: 无法发送命令
 ssh.exec.timeout:
+  en: The command timed out
   zh-CN: 命令超时
 ssh.host_key_changed.lead:
+  en: The server's key does not match the saved one. It may have been reinstalled or rekeyed, or someone may be impersonating it.
   zh-CN: 服务器的密钥和记下的不一致。可能是重装了系统、换了密钥，也可能是有人冒充。
 ssh.jump.deleted:
+  en: Jump host %{number} was deleted; edit this host's connection settings
   zh-CN: 第 %{number} 台跳板主机已被删除，请编辑这台主机的连接方式
 ssh.jump.failed:
+  en: "Jump host \"%{name}\": %{reason}"
   zh-CN: 跳板主机「%{name}」：%{reason}
 ssh.jump.forward.channel_failed:
+  en: "Jump host \"%{name}\" cannot reach %{host}:%{port}: could not open a forwarding channel"
   zh-CN: 跳板主机「%{name}」无法连接到 %{host}:%{port}：无法打开转发通道
 ssh.jump.forward.connect_failed:
+  en: "Jump host \"%{name}\" cannot reach %{host}:%{port}: connection failed"
   zh-CN: 跳板主机「%{name}」无法连接到 %{host}:%{port}：连接失败
 ssh.jump.forward.prohibited:
+  en: "Jump host \"%{name}\" cannot reach %{host}:%{port}: the server does not allow port forwarding"
   zh-CN: 跳板主机「%{name}」无法连接到 %{host}:%{port}：服务器不允许端口转发
 ssh.jump.forward.timed_out:
+  en: "Jump host \"%{name}\" cannot reach %{host}:%{port}: connection timed out"
   zh-CN: 跳板主机「%{name}」无法连接到 %{host}:%{port}：连接超时
 ssh.jump.none:
+  en: No jump host is available
   zh-CN: 没有可用的跳板主机
 ssh.jump_host.instructions:
+  en: "Jump host \"%{name}\""
   zh-CN: 跳板主机「%{name}」
 ssh.jump_host.with_instructions:
+  en: "Jump host \"%{name}\": %{instructions}"
   zh-CN: 跳板主机「%{name}」：%{instructions}
 ssh.key.enter_passphrase:
+  en: "Enter the passphrase for %{key}"
   zh-CN: "请输入%{key}的口令"
 ssh.key.missing:
+  en: "This private key is not in the vault (it may have been deleted, or the vault was copied from another computer). Import it again"
   zh-CN: "保险库里没有这把私钥（可能已删除，或者保险库是从别的电脑拷来的），请重新导入"
 ssh.key.not_chosen:
+  en: Private key authentication requires choosing a private key file
   zh-CN: 私钥认证需要选择私钥文件
 ssh.key.passphrase_field:
+  en: Passphrase
   zh-CN: 口令
 ssh.key.prompt_title:
+  en: Enter Private Key Passphrase
   zh-CN: "输入私钥口令"
 ssh.key.saved_name:
+  en: Saved Private Key
   zh-CN: "保存的私钥"
 ssh.key.saved_passphrase_rejected:
+  en: "The saved passphrase cannot unlock %{key}; enter it again"
   zh-CN: "已保存的口令无法解开%{key}，请重新输入"
 ssh.key.too_many_attempts:
+  en: Too many incorrect private key passphrases
   zh-CN: 私钥口令错误次数过多
 ssh.key.unreadable:
+  en: "Cannot read %{key}"
   zh-CN: "无法读取%{key}"
 ssh.known_hosts.changed_while_saving:
+  en: The trust file changed while saving the host key
   zh-CN: 保存主机密钥时发现信任文件已发生变化
 ssh.known_hosts.corrupt:
+  en: "The host trust file is damaged: %{path}"
   zh-CN: 主机信任文件已损坏：%{path}
 ssh.known_hosts.read_failed:
+  en: "Cannot read the host trust file: %{path}"
   zh-CN: 无法读取主机信任文件：%{path}
 ssh.known_hosts.unreadable:
+  en: "The host trust file is damaged or unreadable: %{path}"
   zh-CN: 主机信任文件已损坏或无法读取：%{path}
 ssh.known_hosts.write_failed:
+  en: "Cannot write the host trust file: %{path}"
   zh-CN: 无法写入主机信任文件：%{path}
 ssh.latency.ms:
+  en: "%{ms} ms"
   zh-CN: "%{ms} ms"
 ssh.latency.timed_out:
+  en: Timed Out
   zh-CN: "超时"
 ssh.list.separator:
+  en: ", "
   zh-CN: "、"
 ssh.missing.keyboard_interactive:
+  en: The server requires keyboard-interactive authentication, which cannot be completed in a test
   zh-CN: 服务器要求键盘交互式认证，无法在测试中完成
 ssh.missing.passphrase:
+  en: The private key is encrypted and no passphrase was entered
   zh-CN: 私钥已加密，未填写口令
 ssh.missing.passphrase_rejected:
+  en: Incorrect private key passphrase
   zh-CN: 私钥口令错误
 ssh.missing.password:
+  en: No password was entered
   zh-CN: 未填写密码
 ssh.missing.password_rejected:
+  en: Incorrect username or password
   zh-CN: 用户名或密码错误
 ssh.password_wanted:
+  en: The server requires a password, and "No Password" will not ask for one; use "Password" or "Credential" instead
   zh-CN: 服务器要求密码，「无密码」不会询问；请改用「密码」或「使用凭据」
 ssh.prompt.request_cancelled:
+  en: The authentication request was cancelled
   zh-CN: 认证请求已取消
 ssh.prompt.view_closed:
+  en: The connection view was closed
   zh-CN: 连接视图已关闭
 ssh.proxy.auth_required:
+  en: The proxy requires authentication; enter the proxy username and password
   zh-CN: 代理服务器要求认证，请填写代理的用户名和密码
 ssh.proxy.bad_credentials:
+  en: The proxy rejected the username or password
   zh-CN: 代理服务器拒绝了用户名或密码
 ssh.proxy.closed:
+  en: The proxy closed the connection without replying
   zh-CN: 代理服务器没有回复就关闭了连接
 ssh.proxy.connect_failed:
+  en: "Cannot connect to the proxy %{host}:%{port}: %{reason}"
   zh-CN: 无法连接代理服务器 %{host}:%{port}：%{reason}
 ssh.proxy.forbidden:
+  en: The proxy does not allow connecting to %{target}
   zh-CN: 代理服务器不允许连接到 %{target}
 ssh.proxy.http.bad_gateway:
+  en: "The proxy cannot reach %{target}: connection failed (HTTP 502)"
   zh-CN: 代理服务器无法连接到 %{target}：连接失败（HTTP 502）
 ssh.proxy.http.gateway_timeout:
+  en: "The proxy cannot reach %{target}: connection timed out (HTTP 504)"
   zh-CN: 代理服务器无法连接到 %{target}：连接超时（HTTP 504）
 ssh.proxy.http.refused:
+  en: "The proxy refused the connection: %{status}"
   zh-CN: 代理服务器拒绝了连接：%{status}
 ssh.proxy.http.unrecognized:
+  en: The proxy's reply was not recognized; make sure it is an HTTP proxy
   zh-CN: 代理服务器的回复无法识别，请确认它是 HTTP 代理
 ssh.proxy.reply_too_long:
+  en: The proxy's reply is too long
   zh-CN: 代理服务器的回复过长
 ssh.proxy.socks.address_type:
+  en: The proxy does not support this address type
   zh-CN: 代理服务器不支持这种地址类型
 ssh.proxy.socks.credentials_too_long:
+  en: The proxy username or password is too long; SOCKS5 allows at most 255 bytes
   zh-CN: 代理的用户名或密码太长，SOCKS5 最多 255 个字节
 ssh.proxy.socks.host_too_long:
+  en: The host name is too long; SOCKS5 allows at most 255 bytes
   zh-CN: 主机名太长，SOCKS5 最多 255 个字节
 ssh.proxy.socks.host_unreachable:
+  en: "The proxy cannot reach %{target}: host unreachable"
   zh-CN: 代理服务器无法连接到 %{target}：主机不可达
 ssh.proxy.socks.internal:
+  en: "The proxy cannot reach %{target}: internal proxy error"
   zh-CN: 代理服务器无法连接到 %{target}：代理服务器内部错误
 ssh.proxy.socks.network_unreachable:
+  en: "The proxy cannot reach %{target}: network unreachable"
   zh-CN: 代理服务器无法连接到 %{target}：网络不可达
 ssh.proxy.socks.no_connect:
+  en: The proxy does not support the CONNECT command
   zh-CN: 代理服务器不支持 CONNECT 命令
 ssh.proxy.socks.no_password_auth:
+  en: The proxy does not accept username and password authentication
   zh-CN: 代理服务器不接受用户名和密码认证
 ssh.proxy.socks.refused:
+  en: "The proxy cannot reach %{target}: connection refused"
   zh-CN: 代理服务器无法连接到 %{target}：连接被拒绝
 ssh.proxy.socks.rules_forbid:
+  en: The proxy's rules do not allow connecting to %{target}
   zh-CN: 代理服务器的规则不允许连接到 %{target}
 ssh.proxy.socks.timeout:
+  en: "The proxy cannot reach %{target}: connection timed out"
   zh-CN: 代理服务器无法连接到 %{target}：连接超时
 ssh.proxy.socks.unrecognized:
+  en: The proxy's reply was not recognized; make sure it is a SOCKS5 proxy
   zh-CN: 代理服务器的回复无法识别，请确认它是 SOCKS5 代理
 ssh.route.connect_failed:
+  en: "Cannot connect to %{host}:%{port}"
   zh-CN: 无法连接到 %{host}:%{port}
 ssh.terminal.card_closed:
+  en: Card Closed
   zh-CN: "卡片已关闭"
 ssh.terminal.connection_lost:
+  en: Connection Closed
   zh-CN: "连接已断开"
 ssh.terminal.pty_refused:
+  en: The server refused to create a terminal
   zh-CN: 服务器拒绝创建终端
 ssh.terminal.resize_failed:
+  en: Could not resize the remote terminal
   zh-CN: 调整远程终端尺寸失败
 ssh.terminal.session_failed:
+  en: Could not create an SSH session channel
   zh-CN: 无法创建 SSH 会话通道
 ssh.terminal.sftp_refused:
+  en: The server does not offer SFTP
   zh-CN: 服务器没有开启 SFTP
 ssh.terminal.sftp_timeout:
+  en: Opening SFTP timed out
   zh-CN: 打开 SFTP 超时
 ssh.terminal.shell_only:
+  en: This terminal is opened through a bastion host; only the terminal itself can be used, not extra commands
   zh-CN: 这个终端经由堡垒机打开，只能使用终端本身，不能另外执行命令
 ssh.terminal.shell_only_sftp:
+  en: This terminal is opened through a bastion host; only the terminal itself can be used, not extra files
   zh-CN: 这个终端经由堡垒机打开，只能使用终端本身，不能另外打开文件
 ssh.terminal.shell_refused:
+  en: The server refused to start a shell
   zh-CN: 服务器拒绝启动 Shell
 ssh.terminal.write_failed:
+  en: Could not write to the remote terminal
   zh-CN: 向远程终端写入失败
 ssh.test.host_key_changed:
+  en: The host key does not match the saved one and the connection was blocked. Verify the server identity first
   zh-CN: 主机密钥与已保存的不一致，已阻止连接。请先核实服务器身份
 ssh.test.host_key_declined:
+  en: The host's key was not trusted
   zh-CN: 未信任该主机的密钥
 ssh.test.unresolved:
+  en: "Cannot resolve host %{host}"
   zh-CN: 无法解析主机 %{host}
 ssh.unknown_host.lead:
+  en: "First connection to this host; verify its host key:"
   zh-CN: 第一次连接这台主机，请核对它的主机密钥：
 ssh.exec.runtime_failed:
+  en: "Could not start the connection: %{error}"
   zh-CN: 无法启动连接：%{error}
 ssh.exec.command_failed:
+  en: "Could not run the command: %{error}"
   zh-CN: 无法执行命令：%{error}
 ssh.exec.aborted:
+  en: The output was no longer received and the command was abandoned
   zh-CN: 输出已无人接收，命令已放弃
 ssh.exec.disconnected:
+  en: The connection dropped before the command finished
   zh-CN: 连接在命令结束前断开
 ssh.exec.host_key_changed:
+  en: "The host key of %{endpoint} does not match the saved one and the connection was refused. Verify the server identity first"
   zh-CN: "%{endpoint} 的主机密钥与已保存的不一致，已拒绝连接。请先核实服务器身份"
 ssh.exec.host_key_unknown:
+  en: "The host key of %{endpoint} is not trusted yet; connect to this host in MicaTerm once first"
   zh-CN: 尚未信任 %{endpoint} 的主机密钥：请先在 MicaTerm 里连接一次这台主机
 ssh.exec.no_saved_password:
+  en: "This host has no saved password; connect to it in MicaTerm once and save the password"
   zh-CN: 这台主机没有保存密码：请先在 MicaTerm 里连接一次这台主机并保存密码
 ssh.exec.saved_password_rejected:
+  en: "The server rejected the saved password; connect to this host in MicaTerm once and save the correct password"
   zh-CN: 保存的密码被服务器拒绝：请在 MicaTerm 里连接一次这台主机并保存正确的密码
 ssh.exec.no_saved_passphrase:
+  en: "The private key is encrypted but no passphrase is saved; connect to this host in MicaTerm once and save the passphrase"
   zh-CN: 私钥已加密，但没有保存口令：请先在 MicaTerm 里连接一次这台主机并保存口令
 ssh.exec.saved_passphrase_rejected:
+  en: "The saved private key passphrase is incorrect; connect to this host in MicaTerm once and save the correct passphrase"
   zh-CN: 保存的私钥口令不正确：请在 MicaTerm 里连接一次这台主机并保存正确的口令
 ssh.exec.keyboard_interactive:
+  en: The server asked a keyboard-interactive question other than a password (such as a verification code), which the external CLI cannot answer
   zh-CN: 服务器在键盘交互式认证中提出了密码以外的问题（如验证码），外部 CLI 无法回答

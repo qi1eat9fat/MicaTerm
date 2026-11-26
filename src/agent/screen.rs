@@ -175,7 +175,7 @@ pub fn read_screen(kind: AgentKind, screen: &str) -> Option<ScreenState> {
     let rules = match kind {
         AgentKind::ClaudeCode => CLAUDE,
         AgentKind::Codex => CODEX,
-        AgentKind::Generic | AgentKind::WorkBuddy => return None,
+        AgentKind::Generic | AgentKind::Antigravity => return None,
     };
     let mut lower = None;
     rules

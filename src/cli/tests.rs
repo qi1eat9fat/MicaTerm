@@ -523,8 +523,8 @@ fn transfers_go_to_the_backend_with_absolute_local_paths_and_print_a_summary() {
         false,
     );
     assert_eq!(code, 0);
-    assert!(stdout.contains("未变 4 个"), "{stdout}");
-    assert!(stdout.contains("删除 2 个"), "{stdout}");
+    assert!(stdout.contains("4 unchanged"), "{stdout}");
+    assert!(stdout.contains("2 deleted"), "{stdout}");
 
     let local = local.display().to_string();
     assert_eq!(
@@ -658,7 +658,7 @@ fn the_cards_handed_over_are_listed() {
     server.set_enabled(true);
     let (code, _, stderr) = run(&endpoint, Request::ListCards, false);
     assert_eq!(code, 0);
-    assert!(stderr.contains("交给 Agent"), "{stderr}");
+    assert!(stderr.contains("handed to an Agent"), "{stderr}");
 
     server.set_cards(vec![
         card("CardAAAAAAAAAAAA", false),
@@ -669,8 +669,8 @@ fn the_cards_handed_over_are_listed() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 3, "{stdout}");
     assert!(lines[1].starts_with("CardAAAAAAAAAAAA  问道"), "{stdout}");
-    assert!(lines[1].ends_with("已连接"), "{stdout}");
-    assert!(lines[2].ends_with("执行中"), "{stdout}");
+    assert!(lines[1].ends_with("Connected"), "{stdout}");
+    assert!(lines[2].ends_with("Running"), "{stdout}");
 
     let (_, json, _) = run(&endpoint, Request::ListCards, true);
     let json: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -813,7 +813,7 @@ fn reading_a_card_and_pressing_a_key_go_to_the_app() {
     })));
     let (code, stdout, stderr) = read.join().unwrap();
     assert_eq!((code, stdout.as_str()), (0, "$ less x\n"));
-    assert!(stderr.contains("全屏程序"), "{stderr}");
+    assert!(stderr.contains("full-screen program"), "{stderr}");
 
     let key = ask(
         Request::SendKey {

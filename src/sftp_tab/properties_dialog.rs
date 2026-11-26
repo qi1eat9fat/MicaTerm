@@ -6,7 +6,7 @@
 //! 勾选框 12 见方，底部「取消 Esc」「应用 Enter」。
 
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::{Icon, WindowExt as _, notification::Notification};
+use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -15,8 +15,11 @@ use super::{CardSide, FileEntry, FileKind, FileOperation, SftpTab};
 use crate::app::CatalogIcon;
 use crate::backend::sftp::PermissionEdit;
 use crate::i18n::t;
-use crate::theme::{MONO_FONT_FAMILY, Tokens, size};
+use crate::theme::Tokens;
+use crate::theme::opacity;
+use crate::theme::space;
 use crate::ui::DialogLayer;
+use crate::ui::checkbox::{CheckBox, CheckState};
 use crate::ui::form::{FieldNote, form_field, form_group};
 use crate::ui::modal::{
     ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button, modal_checkbox,
@@ -264,57 +267,36 @@ impl PropertiesForm {
         cx.notify();
     }
 
-    /// 一个权限位：12 见方的勾选框（同 `modal_checkbox`），勾上是正文色底、白勾；不一致时是「混合」
-    /// （正文色底、白色短横），点了就勾上。改不了时淡掉一半、点不动。
+    /// 一个权限位：12 见方的勾选框（同 `modal_checkbox`），勾上是强调色底、对比色勾；不一致时是「混合」
+    /// （强调色底、对比色短横），点了就勾上。改不了时淡掉一半、点不动。
     fn render_bit(&self, index: usize, tokens: &Tokens, cx: &mut Context<Self>) -> AnyElement {
         let bit = BITS[index];
         let mixed = self.draft.is_mixed(bit) && self.editable;
         let checked = self.draft.is_checked(bit);
         let editable = self.editable;
-        div()
-            .id(("perm", index))
-            .test_support()
-            .aria_label(if mixed {
-                t!("sftp_files.properties.mixed")
-            } else {
-                SharedString::default()
-            })
-            .role(Role::CheckBox)
-            .aria_toggled(if mixed {
-                Toggled::Mixed
-            } else if checked {
-                Toggled::True
-            } else {
-                Toggled::False
-            })
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .size(size::CHECKBOX)
-            .rounded(px(3.))
-            .map(|box_| {
+        let state = if mixed {
+            CheckState::Mixed
+        } else if checked {
+            CheckState::Checked
+        } else {
+            CheckState::Unchecked
+        };
+        CheckBox::new(state)
+            .identity(
+                ("perm", index),
                 if mixed {
-                    box_.bg(tokens.text)
-                        .child(div().w(px(6.)).h(px(1.5)).bg(tokens.content))
-                } else if checked {
-                    box_.bg(tokens.text)
-                        .text_color(tokens.content)
-                        .child(Icon::new(CatalogIcon::Check).size(px(10.)))
+                    t!("sftp_files.properties.mixed")
                 } else {
-                    box_.border_1().border_color(tokens.line_strong)
-                }
-            })
-            .when(!editable, |box_| box_.opacity(0.5))
-            .when(editable, |box_| {
-                box_.cursor_pointer()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        // 混合的位点了就勾上；其余的反过来。
-                        let on = mixed || !this.draft.is_checked(bit);
-                        this.set_bit(bit, on, window, cx)
-                    }))
-            })
-            .into_any_element()
+                    SharedString::default()
+                },
+            )
+            .readonly(!editable)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                // 混合的位点了就勾上；其余的反过来。
+                let on = mixed || !this.draft.is_checked(bit);
+                this.set_bit(bit, on, window, cx)
+            }))
+            .render(tokens)
     }
 
     /// 3×3（原型 `.perm`）。
@@ -356,7 +338,7 @@ impl PropertiesForm {
         div()
             .flex()
             .flex_col()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(header)
             .children(rows)
     }
@@ -409,13 +391,13 @@ impl Render for PropertiesForm {
         let rights = div()
             .flex()
             .flex_col()
-            .gap(px(10.))
+            .gap(space::SPACE_10)
             .child(self.render_grid(&tokens, cx))
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(space::SPACE_8)
                     .child(div().text_color(tokens.text2).child(octal_label))
                     .child(div().flex_none().w(OCTAL_WIDTH).child(octal)),
             );
@@ -431,8 +413,7 @@ impl Render for PropertiesForm {
         };
         let mut rows = vec![form_field(
             Some(t!("sftp_files.properties.location")),
-            value("file-properties-location", self.location.clone().into())
-                .font_family(MONO_FONT_FAMILY),
+            value("file-properties-location", self.location.clone().into()),
             Vec::new(),
             &tokens,
         )];
@@ -456,7 +437,7 @@ impl Render for PropertiesForm {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(6.))
+                    .gap(space::SPACE_6)
                     .child(modal_checkbox(
                         "perm-recursive",
                         recursive,
@@ -471,7 +452,7 @@ impl Render for PropertiesForm {
                     // 「目录加 x」只在递归时算数：不递归时淡掉、点不动。
                     .child(
                         div()
-                            .when(!recursive, |row| row.opacity(0.5))
+                            .when(!recursive, |row| row.opacity(opacity::DISABLED))
                             .child(modal_checkbox(
                                 "perm-dir-x",
                                 self.add_x_to_dirs,
@@ -492,7 +473,7 @@ impl Render for PropertiesForm {
         let cancel: OnClick = Box::new(cx.listener(|this, _, window, cx| this.close(window, cx)));
         let footer = div()
             .flex()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(modal_button(
                 "perm-cancel",
                 t!("sftp_files.cancel"),
@@ -584,8 +565,8 @@ impl SftpTab {
         };
         let focus = form.read(cx).focus_handle.clone();
         layer.open_dismissable(
-            move |dialog, _, _| {
-                modal_dialog(dialog)
+            move |dialog, _, cx| {
+                modal_dialog(dialog, &Tokens::current(cx))
                     // 回车由八进制框自己处理；框改不了时 gpui-component 的 `Confirm` 也不关框。
                     .on_ok(|_, _, _| false)
                     .child(form.clone())

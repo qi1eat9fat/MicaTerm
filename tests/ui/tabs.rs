@@ -78,7 +78,8 @@ fn pick_from_menu(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: u64, 
             .collect();
         assert_eq!(
             labels,
-            ["关闭标签", "关闭其他标签", "关闭右侧的标签"].map(|label| Some(label.to_owned()))
+            ["Close Tab", "Close Other Tabs", "Close Tabs to the Right"]
+                .map(|label| Some(label.to_owned()))
         );
         assert!(popup.try_find(3_usize).is_none(), "only three items");
         popup.click(item, cx);
@@ -172,35 +173,37 @@ fn ctrl_shift_digit_switches_to_the_nth_tab(cx: &mut TestAppContext) {
 /// × 在悬停或在前时出现，点了关闭整个标签和它的 shell。
 #[gpui_kit::test]
 fn the_cross_shows_on_hover_and_closes_the_tab(cx: &mut TestAppContext) {
-    let (handle, workspace, factory) = open_tabs(cx, 3);
+    // 184 宽的标签两个，标题栏里还留得下拖动区。
+    let (handle, workspace, factory) = open_tabs(cx, 2);
 
     in_frame(cx, handle, |window, cx| {
-        // 鼠标在别处：只有在前的那个（3）有 ×（26 号 `.tab.on .x`）。
+        // 鼠标在别处：只有在前的那个（2）有 ×。
         window.hover("title-drag", cx);
         assert!(!window.find(("tab-close", 1usize)).visible());
-        assert!(window.find(("tab-close", 3usize)).visible());
-        window.hover(tab(2), cx);
-        let close = window.find(("tab-close", 2usize));
+        assert!(window.find(("tab-close", 2usize)).visible());
+        window.hover(tab(1), cx);
+        let close = window.find(("tab-close", 1usize));
         assert!(close.visible());
-        assert_eq!(close.label(), Some("关闭标签"));
+        assert_eq!(close.label(), Some("Close Tab"));
         assert!(
             window
-                .find(tab(2))
+                .find(tab(1))
                 .bounds()
                 .contains(&close.bounds().center())
         );
-        assert!(!window.find(("tab-close", 1usize)).visible());
-        window.click(("tab-close", 2usize), cx);
+        // 在前的那个（2）的 × 一直在。
+        assert!(window.find(("tab-close", 2usize)).visible());
+        window.click(("tab-close", 1usize), cx);
     });
 
     assert_eq!(factory.wait_for_shutdowns(1), 1);
-    assert_eq!(tab_ids(cx, &workspace), [TabId(1), TabId(3)]);
+    assert_eq!(tab_ids(cx, &workspace), [TabId(2)]);
     // 关的不是在前的那个：在前的不变。
-    assert_eq!(active_tab(cx, &workspace), Some(TabId(3)));
-    cx.update(|cx| assert!(workspace.read(cx).card(CardId(2), cx).is_none()));
-    assert_in_front(cx, handle, 3);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(2)));
+    cx.update(|cx| assert!(workspace.read(cx).card(CardId(1), cx).is_none()));
+    assert_in_front(cx, handle, 2);
     in_frame(cx, handle, |window, _| {
-        assert!(window.try_find(tab(2)).is_none())
+        assert!(window.try_find(tab(1)).is_none())
     });
 }
 
@@ -312,19 +315,19 @@ fn closing_the_last_tab_shows_the_new_tab_page(cx: &mut TestAppContext) {
     assert_in_front(cx, handle, 3);
 }
 
-/// 标签不随内容伸缩，一律宽 176；放不下时横向滚动，新开的标签露出来，滚轮能滚回去。
+/// 标签不随内容伸缩，一律宽 152；放不下时横向滚动，新开的标签露出来，滚轮能滚回去。
 #[gpui_kit::test]
 fn tabs_keep_their_width_and_the_track_scrolls(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open_tabs(cx, 10);
 
     in_frame(cx, handle, |window, _| {
         let track = window.find("tab-track").bounds();
-        assert!(track.size.width < px(176. * 10.), "{track:?}");
+        assert!(track.size.width < px(152. * 10.), "{track:?}");
         assert!(track.right() <= window.find("new-tab").bounds().left());
         for id in 1..=10 {
             assert_eq!(
                 window.find(tab(id)).bounds().size.width,
-                px(176.),
+                px(152.),
                 "tab {id}"
             );
         }
@@ -462,16 +465,17 @@ fn assert_order(
 /// 拖动不切换在前的标签，松开后在前的还是原来那个。
 #[gpui_kit::test]
 fn dragging_a_tab_moves_it_and_keeps_the_front_one(cx: &mut TestAppContext) {
-    let (handle, workspace, _) = open_tabs(cx, 4);
+    // 1280 宽的测试窗口里放得下 3 个 184 宽的标签；再多会把第一个滚出轨道，拖不到它。
+    let (handle, workspace, _) = open_tabs(cx, 3);
 
     drag_tab(cx, handle, 1, 3, false);
-    assert_order(cx, handle, &workspace, &[2, 3, 1, 4]);
-    assert_eq!(active_tab(cx, &workspace), Some(TabId(4)));
+    assert_order(cx, handle, &workspace, &[2, 3, 1]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(3)));
 
-    drag_tab(cx, handle, 4, 2, true);
-    assert_order(cx, handle, &workspace, &[4, 2, 3, 1]);
-    assert_eq!(active_tab(cx, &workspace), Some(TabId(4)));
-    assert_in_front(cx, handle, 4);
+    drag_tab(cx, handle, 3, 2, true);
+    assert_order(cx, handle, &workspace, &[3, 2, 1]);
+    assert_eq!(active_tab(cx, &workspace), Some(TabId(3)));
+    assert_in_front(cx, handle, 3);
     in_frame(cx, handle, |window, _| {
         assert!(window.try_find("tab-drop-line").is_none())
     });
@@ -619,13 +623,20 @@ fn dropping_past_the_track_puts_the_tab_last(cx: &mut TestAppContext) {
 
 /// 拖过轨道左端，放在「展开主机栏」上：放到第一个（和右端对称）。
 #[gpui_kit::test]
-fn dropping_before_the_track_puts_the_tab_first(cx: &mut TestAppContext) {
+fn dropping_at_the_left_edge_puts_the_tab_first(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open_tabs(cx, 3);
     dispatch(cx, handle, ToggleHostSidebar);
 
     in_frame(cx, handle, |window, cx| {
         let from = window.find(tab(3)).bounds().center();
-        let to = window.find("expand-host-sidebar").bounds().center();
+        // macOS 收起后「展开主机栏」在轨道左边，拖到它上面；Windows、Linux 收起后侧栏
+        // 还占 40 宽，拖到第一个标签的左半边。
+        let to = if cfg!(target_os = "macos") {
+            window.find("expand-host-sidebar").bounds().center()
+        } else {
+            let bounds = window.find(tab(1)).bounds();
+            point(bounds.left() + px(4.), bounds.center().y)
+        };
         window.drag(from, to, cx);
     });
     assert_order(cx, handle, &workspace, &[3, 1, 2]);

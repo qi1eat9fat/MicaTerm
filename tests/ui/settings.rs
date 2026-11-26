@@ -26,12 +26,17 @@ fn ctrl_comma_opens_the_settings_tab_on_appearance(cx: &mut TestAppContext) {
 
     in_frame(cx, handle, |window, _| {
         assert!(window.find("settings").visible());
-        assert_eq!(window.find("settings-title").label(), Some("外观"));
+        // 左栏右边界与上方第一个标签（Settings）严格对齐。
+        assert_eq!(
+            window.find("settings-categories").bounds().right(),
+            window.find(("tab", 1_usize)).bounds().right(),
+        );
+        assert_eq!(window.find("settings-title").label(), Some("Appearance"));
         assert!(window.find("settings-applies-at-once").visible());
         let appearance = window.find(("settings-category", 0_usize));
         let terminal = window.find(("settings-category", 1_usize));
-        assert_eq!(appearance.label(), Some("外观"));
-        assert_eq!(terminal.label(), Some("终端"));
+        assert_eq!(appearance.label(), Some("Appearance"));
+        assert_eq!(terminal.label(), Some("Terminal"));
         assert_eq!(appearance.selected(), Some(true));
         assert_eq!(terminal.selected(), Some(false));
         // 外观在前：能看到应用外观，看不到终端字体。
@@ -64,7 +69,7 @@ fn a_changed_setting_can_be_reset_to_its_default(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, cx| window.click("mica", cx));
     assert!(stored(cx, &workspace).interface.mica);
     in_frame(cx, handle, |window, cx| {
-        assert_eq!(window.find("mica-reset").label(), Some("恢复默认"));
+        assert_eq!(window.find("mica-reset").label(), Some("Restore Default"));
         // 别的没改过的还是没有。
         assert!(window.try_find("appearance-reset").is_none());
         window.click("mica-reset", cx);
@@ -90,7 +95,7 @@ fn the_app_appearance_changes_at_once_and_is_stored(cx: &mut TestAppContext) {
         // 默认跟随系统。
         assert_eq!(
             window.find(("appearance", 0_usize)).label(),
-            Some("跟随系统")
+            Some("System")
         );
         assert_eq!(window.find(("appearance", 0_usize)).selected(), Some(true));
         window.click(("appearance", 2_usize), cx);
@@ -101,8 +106,17 @@ fn the_app_appearance_changes_at_once_and_is_stored(cx: &mut TestAppContext) {
         assert!(theme.is_dark());
         // 弹窗、菜单这些用原型 `.win.dark` 的颜色。
         assert_eq!(theme.theme_name().as_ref(), "MicaTerm Dark");
-        assert_eq!(theme.primary, Tokens::dark().text);
-        assert_eq!(theme.popover, Tokens::dark().popup);
+        assert_eq!(theme.primary, Tokens::dark().brand);
+        // 组件主题按 8 位十六进制写颜色，浮层色是混出来的，留一档误差。
+        let popup = Tokens::dark().popup.to_rgb();
+        let theme_popup = theme.popover.to_rgb();
+        let close = |a: f32, b: f32| (a - b).abs() <= 1. / 255.;
+        assert!(
+            close(popup.r, theme_popup.r)
+                && close(popup.g, theme_popup.g)
+                && close(popup.b, theme_popup.b),
+            "{theme_popup:?} != {popup:?}"
+        );
     });
     in_frame(cx, handle, |window, cx| {
         assert_eq!(window.find(("appearance", 2_usize)).selected(), Some(true));
@@ -113,7 +127,7 @@ fn the_app_appearance_changes_at_once_and_is_stored(cx: &mut TestAppContext) {
     cx.update(|cx| {
         assert!(!cx.theme().is_dark());
         assert_eq!(cx.theme().theme_name().as_ref(), "MicaTerm Light");
-        assert_eq!(cx.theme().primary, Tokens::light().text);
+        assert_eq!(cx.theme().primary, Tokens::light().brand);
     });
 }
 
@@ -129,67 +143,76 @@ fn the_interface_font_size_is_fixed(cx: &mut TestAppContext) {
     cx.update(|cx| assert_eq!(cx.theme().font_size, px(INTERFACE_FONT_SIZE)));
 }
 
+/// 终端主题只列当前界面明暗那一色；浅色和深色各自记住自己选的那套。
 #[gpui_kit::test]
-fn each_appearance_has_its_own_terminal_theme(cx: &mut TestAppContext) {
+fn each_appearance_lists_only_its_own_terminal_themes(cx: &mut TestAppContext) {
     let (handle, workspace) = open_workspace(cx);
     let in_effect = |cx: &mut TestAppContext| cx.update(|cx| TerminalColors::current(cx).name());
     open_settings(cx, handle);
-    assert_eq!(in_effect(cx), "Ayu Light");
+    assert_eq!(in_effect(cx), "Air Neutral Light");
 
     in_frame(cx, handle, |window, cx| {
-        let default_light = window.find("terminal-theme-ayu-light");
-        assert_eq!(default_light.selected(), Some(true));
+        // 浅色界面只列浅色主题：深色那一色的卡片根本不出现。
+        assert!(window.try_find("terminal-theme-air-dark").is_none());
+        assert!(window.try_find("terminal-theme-tokyo-night").is_none());
         assert_eq!(
-            window.find("terminal-theme-ayu-dark").selected(),
+            window.find("terminal-theme-air-light").selected(),
             Some(true)
         );
         assert_eq!(
             window.find("terminal-theme-tokyo-day").selected(),
             Some(false)
         );
-        // 四对：浅色栏在左、深色栏在右，同一行是一对。
-        for (light, dark) in [
-            ("ayu-light", "ayu-dark"),
-            ("tokyo-day", "tokyo-night"),
-            ("catppuccin-latte", "catppuccin-mocha"),
-            ("rose-pine-dawn", "rose-pine"),
-        ] {
-            let id = |key: &str| ElementId::Name(format!("terminal-theme-{key}").into());
-            let light = window.find(id(light)).bounds();
-            let dark = window.find(id(dark)).bounds();
-            assert!(light.right() <= dark.left());
-            assert_eq!(light.top(), dark.top());
-        }
+        // 四张浅色卡片分两列：左列 air-light / tokyo-day，右列 catppuccin-latte / rose-pine-dawn。
+        let air = window.find("terminal-theme-air-light").bounds();
+        let tokyo = window.find("terminal-theme-tokyo-day").bounds();
+        let latte = window.find("terminal-theme-catppuccin-latte").bounds();
+        assert_eq!(air.left(), tokyo.left());
+        assert_eq!(air.top(), latte.top());
+        assert!(air.right() <= latte.left());
         window.click("terminal-theme-rose-pine-dawn", cx);
     });
-    // 浅色外观下立刻换上新选的浅色主题。
+    // 浅色外观下立刻换上新选的浅色主题，背景继续跟随界面的 `Tokens.content`。
     assert_eq!(
         stored(cx, &workspace).terminal_theme.light,
         "rose-pine-dawn"
     );
     assert_eq!(in_effect(cx), "Rosé Pine Dawn");
+    cx.update(|cx| {
+        assert_eq!(TerminalColors::background(cx), Tokens::light().content);
+    });
 
+    // 换成深色外观：列表只列深色主题，浅色卡片不再出现；深色界面用它自己那套（默认 Air Neutral Dark）。
     in_frame(cx, handle, |window, cx| {
+        window.click(("appearance", 2_usize), cx)
+    });
+    assert_eq!(in_effect(cx), "Air Neutral Dark");
+    in_frame(cx, handle, |window, cx| {
+        assert!(window.try_find("terminal-theme-air-light").is_none());
+        assert!(window.try_find("terminal-theme-rose-pine-dawn").is_none());
         assert_eq!(
-            window.find("terminal-theme-rose-pine-dawn").selected(),
+            window.find("terminal-theme-air-dark").selected(),
             Some(true)
         );
-        assert_eq!(
-            window.find("terminal-theme-ayu-light").selected(),
-            Some(false)
-        );
-        // 选深色栏的不影响浅色外观下的终端。
         window.click("terminal-theme-tokyo-night", cx);
     });
     let settings = stored(cx, &workspace);
     assert_eq!(settings.terminal_theme.dark, "tokyo-night");
     assert_eq!(settings.terminal_theme.light, "rose-pine-dawn");
-    assert_eq!(in_effect(cx), "Rosé Pine Dawn");
-
-    in_frame(cx, handle, |window, cx| {
-        window.click(("appearance", 2_usize), cx)
-    });
     assert_eq!(in_effect(cx), "Tokyo Night");
+
+    // 换回浅色：还是之前选的 Rosé Pine Dawn，深色选的不影响它。
+    in_frame(cx, handle, |window, cx| {
+        window.click(("appearance", 1_usize), cx)
+    });
+    assert_eq!(in_effect(cx), "Rosé Pine Dawn");
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("terminal-theme-tokyo-night").is_none());
+        assert_eq!(
+            window.find("terminal-theme-rose-pine-dawn").selected(),
+            Some(true)
+        );
+    });
 }
 
 /// 打开设置，切到「终端」。
@@ -229,10 +252,10 @@ fn the_terminal_category_shows_the_font_interaction_and_local_shell(cx: &mut Tes
         assert_eq!(
             window.find("terminal-font-preview").label(),
             // 测试环境没装 Maple Mono，退回随包的 JetBrains Mono。
-            Some("JetBrains Mono 13 px，行高 1.6")
+            Some("JetBrains Mono 13 px, line height 1.6")
         );
         // 默认：右键显示菜单，选中即复制关着。
-        assert_eq!(window.find("right-click").label(), Some("显示菜单"));
+        assert_eq!(window.find("right-click").label(), Some("Show Menu"));
         assert_eq!(window.find("copy-on-select").checked(), Some(false));
     });
 }
@@ -271,7 +294,7 @@ fn the_terminal_font_size_and_line_height_change_at_once_and_are_stored(cx: &mut
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find("terminal-font-preview").label(),
-            Some("JetBrains Mono 14 px，行高 1.2")
+            Some("JetBrains Mono 14 px, line height 1.2")
         );
         assert_eq!(window.find("terminal-font-size").label(), Some("14"));
         assert!(window.find("terminal-font-size-reset").visible());
@@ -311,14 +334,14 @@ fn copy_on_select_and_the_right_click_action_change_at_once_and_are_stored(
         let mut menu = window.within("popup-menu");
         assert_eq!(
             menu.find(("menu-option", 0_usize)).label(),
-            Some("显示菜单")
+            Some("Show Menu")
         );
-        assert_eq!(menu.find(("menu-option", 1_usize)).label(), Some("粘贴"));
+        assert_eq!(menu.find(("menu-option", 1_usize)).label(), Some("Paste"));
         assert_eq!(
             menu.find(("menu-option", 2_usize)).label(),
-            Some("有选中文字就复制，否则粘贴")
+            Some("Copy if text is selected, otherwise paste")
         );
-        assert_eq!(menu.find(("menu-option", 3_usize)).label(), Some("无动作"));
+        assert_eq!(menu.find(("menu-option", 3_usize)).label(), Some("Do Nothing"));
         menu.click(2_usize, cx);
     });
     assert_eq!(
@@ -334,7 +357,7 @@ fn copy_on_select_and_the_right_click_action_change_at_once_and_are_stored(
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find("right-click").label(),
-            Some("有选中文字就复制，否则粘贴")
+            Some("Copy if text is selected, otherwise paste")
         );
     });
 }

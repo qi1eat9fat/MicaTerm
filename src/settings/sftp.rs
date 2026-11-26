@@ -1,7 +1,7 @@
 // 参考 since2006/shell-rs @ b2a307a: src/settings/settings_panel.rs 的 SFTP 一节
 // 改造：分组照原型「设置 › SFTP」；加「本地默认打开目录」。
-//! 设置 › SFTP（26 号「设置 › SFTP」）：传输（最大同时传输数量），文件列表（本地默认打开目录、
-//! 显示隐藏文件 本机 / 远程）。没有「图标风格」：文件图标只有单色一种（用户定）。
+//! 设置 › SFTP（26 号「设置 › SFTP」）：传输（最大同时传输数量），文件列表（本地默认打开目录）。
+//! 没有「图标风格」：文件图标只有单色一种（用户定）。隐藏文件默认显示，只在文件列表里临时切换。
 //!
 //! 模型在 `model::SftpSettings`，生效在 `apply::apply_sftp`，这里只做界面。
 
@@ -13,13 +13,13 @@ use gpui_kit::*;
 
 use micaterm_ssh::sftp::PARALLEL_TRANSFERS_RANGE;
 
-use super::controls::{dropdown, field_input, reset_if, row, section, setting_switch};
+use super::controls::{dropdown, field_input, reset_if, row, section};
 use super::pages::{WIDE_WIDTH, write};
 use super::tab::SettingsTab;
 use super::{AppSettings, SettingsStore};
 use crate::i18n::t;
-use crate::sftp_tab::CardSide;
-use crate::theme::Tokens;
+use crate::theme::space;
+use crate::theme::{Tokens, TypeScale};
 use crate::ui::modal::{ModalButtonTone, modal_button};
 
 pub(super) fn sftp(
@@ -51,11 +51,18 @@ pub(super) fn sftp(
             }),
             px(96.),
             tokens,
+            TypeScale::current(cx),
         )
     };
 
     vec![
-        section(t!("settings.sftp.transfers"), None, true, tokens),
+        section(
+            t!("settings.sftp.transfers"),
+            None,
+            true,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row(
             t!("settings.sftp.parallel"),
             Some(t!(
@@ -73,7 +80,13 @@ pub(super) fn sftp(
             parallel,
             tokens,
         ),
-        section(t!("settings.sftp.file_list"), None, false, tokens),
+        section(
+            t!("settings.sftp.file_list"),
+            None,
+            false,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row(
             t!("settings.sftp.local_directory"),
             Some(t!("settings.sftp.local_directory_description")),
@@ -87,60 +100,7 @@ pub(super) fn sftp(
             tab.local_directory.clone(),
             tokens,
         ),
-        hidden_row(
-            CardSide::Local,
-            settings.show_hidden.local,
-            default.show_hidden.local,
-            &store,
-            tokens,
-        ),
-        hidden_row(
-            CardSide::Remote,
-            settings.show_hidden.remote,
-            default.show_hidden.remote,
-            &store,
-            tokens,
-        ),
     ]
-}
-
-/// 一侧的「显示隐藏文件」一行：开关，和默认不同时有「恢复默认」。
-fn hidden_row(
-    side: CardSide,
-    checked: bool,
-    default: bool,
-    store: &Entity<SettingsStore>,
-    tokens: &Tokens,
-) -> AnyElement {
-    let (id, title, description) = match side {
-        CardSide::Local => (
-            "sftp-show-hidden-local",
-            t!("settings.sftp.show_hidden_local"),
-            t!("settings.sftp.show_hidden_description"),
-        ),
-        CardSide::Remote => (
-            "sftp-show-hidden-remote",
-            t!("settings.sftp.show_hidden_remote"),
-            t!("settings.sftp.show_hidden_remote_description"),
-        ),
-    };
-    let set = move |settings: &mut AppSettings, checked: bool| match side {
-        CardSide::Local => settings.sftp.show_hidden.local = checked,
-        CardSide::Remote => settings.sftp.show_hidden.remote = checked,
-    };
-    row(
-        title.clone(),
-        Some(description),
-        reset_if(
-            checked != default,
-            id,
-            store,
-            move |settings| set(settings, default),
-            tokens,
-        ),
-        setting_switch(id, title, checked, store, set),
-        tokens,
-    )
 }
 
 /// 本地默认打开目录：一个输入框（留空是「下载」文件夹，灰字显示它的路径），和「选择…」按钮。
@@ -241,7 +201,7 @@ impl Render for LocalDirectoryEditor {
         div()
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(
                 div().w(WIDE_WIDTH).child(field_input(
                     Input::new(&self.input)
@@ -252,7 +212,8 @@ impl Render for LocalDirectoryEditor {
                         )),
                     self.input.read(cx).focus_handle(cx).is_focused(window),
                     &tokens,
-                )),
+                    crate::theme::TypeScale::current(cx),
+                ))
             )
             .child(modal_button(
                 "sftp-local-directory-choose",

@@ -52,7 +52,9 @@ pub use client::{Console, FAILURE_EXIT, PARTIAL_EXIT, run as send_request};
 pub use hosts::{CliTarget, credentials, targets};
 pub(crate) use hosts::{host_details, host_info};
 pub use install::{AgentKind, BinaryStatus, IntegrationPaths, SKILL, SkillStatus, UserPath};
-pub use integration::{CliIntegration, IntegrationChange, IntegrationStatus};
+pub use integration::{
+    CliIntegration, IntegrationChange, IntegrationStatus, antigravity_cli_path, antigravity_found,
+};
 pub use manage::CliChange;
 pub(crate) use manage::{
     SecretChange, credential_details, find_credential, find_host, plan_credential, plan_host,
@@ -67,8 +69,7 @@ pub use server::{ChangeReply, CliBackend, CliServer};
 use crate::i18n::t;
 
 const AFTER_HELP: &str = concat!(
-    "Hosts are named by the 16-character ID that `micaterm hosts list` prints, ",
-    "the one MicaTerm copies with Copy ID.\n",
+    "Hosts are named by the 16-character ID that `micaterm hosts list` prints.\n",
     "MicaTerm must be running, with Settings → Agent → Enable external Agent turned on.\n",
     "\n",
     "Exit codes: exec exits with the remote command's code; 1 means a transfer finished with failures; ",
@@ -122,10 +123,10 @@ enum Command {
     /// MicaTerm. Installed from Settings → Agent; always exits 0.
     #[command(hide = true)]
     Hook {
-        /// `claude` or `codex`.
+        /// `claude`, `codex` or `agy`.
         source: String,
-        /// Codex passes the event as JSON here; Claude Code writes it to
-        /// stdin.
+        /// Codex passes the event as JSON here, Antigravity CLI passes its
+        /// event name; Claude Code writes the JSON to stdin.
         payload: Option<String>,
     },
     /// Say where you are and what you can do: this card's ID, the card the

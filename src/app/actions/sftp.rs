@@ -187,11 +187,6 @@ impl SftpAction {
 #[action(namespace = micaterm, no_json)]
 pub struct SftpShortcut(pub SftpTabCommand);
 
-/// 显示隐藏文件：这一侧的开关，写进设置（Ctrl+Alt+H、空白处的右键菜单）。
-#[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
-#[action(namespace = micaterm, no_json)]
-pub struct ToggleHiddenFiles(pub CardSide);
-
 /// 界面实体在自己的 update 结束以后才派发：窗口壳读它们的最新状态时不会重入。
 pub trait SftpDispatch {
     fn dispatch_sftp_action(

@@ -16,9 +16,8 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::button::Button;
 use gpui_kit::component::input::InputState;
-use gpui_kit::component::{Icon, IconName, Sizable as _};
+use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use zeroize::Zeroizing;
@@ -30,8 +29,10 @@ use super::general::parse_port;
 use crate::host::HostStore;
 use crate::i18n::t;
 use crate::settings::segmented;
-use crate::theme::{Tokens, ui_text};
+use crate::theme::{Tokens, WEIGHT_NORMAL, space, ui_text};
+use crate::ui::empty::{EmptyPlacement, EmptyState};
 use crate::ui::form::{FieldErrors, FieldNote, form_field, locked_secret};
+use crate::ui::icon_button::TextTooltip;
 use crate::ui::modal::{ModalInputKind, modal_input};
 use crate::vault::{SecretField, VaultStore};
 
@@ -373,6 +374,7 @@ impl RouteSection {
                     .unwrap_or(0),
                 choose,
                 tokens,
+                crate::theme::TypeScale::current(cx),
             ),
             FieldNote::error_of(ROUTE_CHOICE, errors)
                 .into_iter()
@@ -415,7 +417,7 @@ impl RouteSection {
             .flex()
             .flex_wrap()
             .items_center()
-            .gap(px(4.))
+            .gap(space::SPACE_4)
             .min_h(px(30.))
             .text_size(ui_text())
             .text_color(tokens.text2)
@@ -426,13 +428,13 @@ impl RouteSection {
                     .flat_map(|(index, (name, pill, gone))| {
                         let stop = if pill {
                             div()
-                                .px(px(8.))
-                                .py(px(2.))
+                                .px(space::SPACE_8)
+                                .py(space::SPACE_2)
                                 .rounded_full()
                                 .bg(tokens.input)
                                 .border_1()
                                 .border_color(tokens.line_strong)
-                                .font_weight(FontWeight::MEDIUM)
+                                .font_weight(WEIGHT_NORMAL)
                                 .text_color(if gone { tokens.err } else { tokens.text })
                                 .child(name)
                         } else {
@@ -460,12 +462,12 @@ impl RouteSection {
                     .aria_label(name.clone())
                     .flex()
                     .items_center()
-                    .gap(px(8.))
-                    .mb(px(4.))
-                    .py(px(4.))
-                    .pl(px(10.))
-                    .pr(px(4.))
-                    .rounded(px(8.))
+                    .gap(space::SPACE_8)
+                    .mb(space::SPACE_4)
+                    .py(space::SPACE_4)
+                    .pl(space::SPACE_10)
+                    .pr(space::SPACE_4)
+                    .rounded(crate::theme::size::RADIUS_LG)
                     .bg(tokens.input)
                     .text_size(ui_text())
                     .child(
@@ -480,7 +482,7 @@ impl RouteSection {
                             .flex()
                             .flex_1()
                             .min_w_0()
-                            .gap(px(6.))
+                            .gap(space::SPACE_6)
                             .child(
                                 div()
                                     .truncate()
@@ -539,18 +541,7 @@ impl RouteSection {
             .flex()
             .flex_col()
             .children(hop_rows)
-            .child(
-                div().child(
-                    Button::new(ADD_JUMP)
-                        .small()
-                        .icon(IconName::Plus)
-                        .label(t!("host.dialog.add_jump_host"))
-                        .on_click(cx.listener(|dialog, _, _, cx| {
-                            dialog.route.picking = !dialog.route.picking;
-                            cx.notify();
-                        })),
-                ),
-            )
+            .child(div().child(add_jump_button(tokens, cx)))
             .children(picker);
         vec![
             form_field(
@@ -580,24 +571,21 @@ impl RouteSection {
             } else {
                 t!("host.dialog.all_hosts_added")
             };
-            div()
-                .id("host-jump-picker-empty")
-                .test_support()
-                .aria_label(note.clone())
-                .px(px(10.))
-                .py(px(6.))
-                .text_size(ui_text())
-                .text_color(tokens.faint)
-                .child(note)
+            EmptyState::new(
+                "host-jump-picker-empty",
+                note,
+                EmptyPlacement::RoutePicker,
+            )
+            .render(tokens, crate::theme::TypeScale::current(cx))
         });
         div()
             .id("host-jump-picker")
             .test_support()
             .flex()
             .flex_col()
-            .mt(px(4.))
-            .p(px(4.))
-            .rounded(px(8.))
+            .mt(space::SPACE_4)
+            .p(space::SPACE_4)
+            .rounded(crate::theme::size::RADIUS_LG)
             .border_1()
             .border_color(tokens.line)
             .children(available.into_iter().map(|host| {
@@ -607,10 +595,10 @@ impl RouteSection {
                     .test_support()
                     .aria_label(host.name.clone())
                     .flex()
-                    .gap(px(6.))
-                    .px(px(8.))
-                    .py(px(4.))
-                    .rounded(px(6.))
+                    .gap(space::SPACE_6)
+                    .px(space::SPACE_8)
+                    .py(space::SPACE_4)
+                    .rounded(crate::theme::size::RADIUS_MD)
                     .text_size(ui_text())
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover))
@@ -668,6 +656,7 @@ impl RouteSection {
                         .unwrap_or(0),
                     choose_kind,
                     tokens,
+                    crate::theme::TypeScale::current(cx),
                 ),
                 Vec::new(),
                 tokens,
@@ -676,7 +665,7 @@ impl RouteSection {
                 Some(t!("host.dialog.proxy_address")),
                 div()
                     .flex()
-                    .gap(px(6.))
+                    .gap(space::SPACE_6)
                     .child(div().flex_1().min_w_0().child(modal_input(
                         FIELD_PROXY_HOST,
                         t!("host.dialog.proxy_address"),
@@ -731,7 +720,12 @@ impl RouteSection {
             form_field(
                 Some(t!("host.dialog.password")),
                 if self.proxy_password.is_locked() {
-                    locked_secret(PROXY_PASSWORD_LOCKED, PROXY_PASSWORD_UNLOCK, tokens)
+                    locked_secret(
+                        PROXY_PASSWORD_LOCKED,
+                        PROXY_PASSWORD_UNLOCK,
+                        tokens,
+                        crate::theme::TypeScale::current(cx),
+                    )
                         .into_any_element()
                 } else {
                     modal_input(
@@ -754,6 +748,37 @@ impl RouteSection {
 }
 
 /// 跳板行右边的小图标按钮（原型 `.ib.sm`）。不能用时变淡、点了没反应。
+/// 「添加跳板主机」：整行宽、高同输入框（28），细边、圆角 6，悬停有底。
+fn add_jump_button(tokens: &Tokens, cx: &mut Context<HostDialog>) -> impl IntoElement + use<> {
+    let hover = tokens.hover;
+    let text = tokens.text;
+    let label = t!("host.dialog.add_jump_host");
+    div()
+        .id(ADD_JUMP)
+        .test_support()
+        .aria_label(label.clone())
+        .role(Role::Button)
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(space::SPACE_6)
+        .h(crate::theme::size::INPUT)
+        .rounded(crate::theme::size::RADIUS_MD)
+        .border_1()
+        .border_color(tokens.line_strong)
+        .text_color(tokens.text2)
+        .text_size(crate::theme::TypeScale::current(cx).sm)
+        .line_height(px(16.))
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover).text_color(text))
+        .on_click(cx.listener(|dialog, _, _, cx| {
+            dialog.route.picking = !dialog.route.picking;
+            cx.notify();
+        }))
+        .child(Icon::new(IconName::Plus).size(crate::theme::size::ICON_SM))
+        .child(label)
+}
+
 fn hop_button(
     id: impl Into<ElementId>,
     icon: IconName,
@@ -766,13 +791,14 @@ fn hop_button(
     div()
         .id(id)
         .test_support()
-        .aria_label(label)
+        .aria_label(label.clone())
+        .tooltip(move |_, cx| TextTooltip::view(label.clone(), cx))
         .flex()
         .flex_none()
         .items_center()
         .justify_center()
-        .size(px(22.))
-        .rounded(px(6.))
+        .size(crate::theme::size::CONTROL_MD)
+        .rounded(crate::theme::size::RADIUS_SM)
         .text_color(if enabled { tokens.icon } else { tokens.faint })
         .when(enabled, |button| {
             button

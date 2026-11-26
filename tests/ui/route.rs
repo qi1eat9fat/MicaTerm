@@ -59,6 +59,15 @@ fn error_of(cx: &mut TestAppContext, handle: WindowHandle<Root>, field: &str) ->
     )
 }
 
+/// 滚进看得见的地方再断言可见（模态正文放不下时要滚动）。
+fn assert_shown(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &'static str) {
+    let element: ElementId = gpui_kit::SharedString::from(id.to_owned()).into();
+    reveal(cx, handle, &element);
+    in_frame(cx, handle, |window, _| {
+        assert!(window.find(id).visible(), "{id}");
+    });
+}
+
 fn choose_jump(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     click(cx, handle, ("host-route", 1usize));
 }
@@ -103,9 +112,9 @@ fn the_route_offers_direct_jump_hosts_and_a_proxy(cx: &mut TestAppContext) {
         assert_eq!(
             choices,
             [
-                Some("直接".into()),
-                Some("SSH 跳板".into()),
-                Some("代理".into())
+                Some("Direct".into()),
+                Some("SSH Jump Host".into()),
+                Some("Proxy".into())
             ]
         );
         // 直接连接没有别的字段。
@@ -114,7 +123,10 @@ fn the_route_offers_direct_jump_hosts_and_a_proxy(cx: &mut TestAppContext) {
     });
 
     choose_jump(cx, handle);
-    assert_eq!(chain(cx, handle).as_deref(), Some("本机 → 当前主机"));
+    assert_eq!(
+        chain(cx, handle).as_deref(),
+        Some("This Computer → Current Host")
+    );
     assert!(label(cx, handle, "host-proxy-host").is_none());
 
     choose_proxy(cx, handle);
@@ -128,14 +140,27 @@ fn the_route_offers_direct_jump_hosts_and_a_proxy(cx: &mut TestAppContext) {
             window.find(("host-proxy-kind", 1usize)).label(),
             Some("SOCKS5")
         );
-        for id in [
-            "host-proxy-host",
-            "host-proxy-port",
-            "host-proxy-user",
-            "host-proxy-password",
-        ] {
+        for id in ["host-proxy-host", "host-proxy-port", "host-proxy-user"] {
             assert!(window.find(id).visible(), "{id}");
         }
+    });
+    // 密码在最后一行，模态正文放不下时要滚动。
+    assert_shown(cx, handle, "host-proxy-password");
+}
+
+/// 「添加跳板主机」是整行宽的一条，高度和输入框一样（28），不再用组件库的 mini 按钮。
+#[gpui_kit::test]
+fn the_add_jump_host_button_is_as_tall_as_an_input(cx: &mut TestAppContext) {
+    let (handle, _workspace, _) = open_with_seed(cx);
+    dispatch(cx, handle, NewHost);
+    choose_jump(cx, handle);
+    reveal(cx, handle, &"host-jump-add".into());
+    in_frame(cx, handle, |window, _| {
+        // 和输入框同一个高（`INPUT = 28`）；组件库的小按钮只有 18。
+        assert_eq!(
+            window.find("host-jump-add").bounds().size.height,
+            micaterm::theme::size::INPUT
+        );
     });
 }
 
@@ -151,7 +176,7 @@ fn jump_hosts_are_added_in_order_shown_as_a_route_and_saved(cx: &mut TestAppCont
     add_jump(cx, handle, 3);
     assert_eq!(
         chain(cx, handle).as_deref(),
-        Some("本机 → web-01 → db-01 → db-master")
+        Some("This Computer → web-01 → db-01 → db-master")
     );
     assert_eq!(
         label(cx, handle, ("host-jump", 0usize)).as_deref(),
@@ -170,13 +195,13 @@ fn jump_hosts_are_added_in_order_shown_as_a_route_and_saved(cx: &mut TestAppCont
     click(cx, handle, ("host-jump-up", 1usize));
     assert_eq!(
         chain(cx, handle).as_deref(),
-        Some("本机 → db-01 → web-01 → db-master")
+        Some("This Computer → db-01 → web-01 → db-master")
     );
     add_jump(cx, handle, 2);
     click(cx, handle, ("host-jump-remove", 1usize));
     assert_eq!(
         chain(cx, handle).as_deref(),
-        Some("本机 → db-01 → web-02 → db-master")
+        Some("This Computer → db-01 → web-02 → db-master")
     );
     save(cx, handle);
 
@@ -198,7 +223,7 @@ fn a_jump_route_needs_a_jump_host(cx: &mut TestAppContext) {
     assert!(dialog_open(cx, handle));
     assert_eq!(
         error_of(cx, handle, "host-jumps").as_deref(),
-        Some("请添加跳板主机")
+        Some("Add a jump host")
     );
     // 加一个，错误收起，能保存。
     add_jump(cx, handle, 1);
@@ -225,7 +250,7 @@ fn a_host_is_not_offered_as_its_own_jump_host(cx: &mut TestAppContext) {
     );
     assert_eq!(
         chain(cx, handle).as_deref(),
-        Some("本机 → db-01"),
+        Some("This Computer → db-01"),
         "最后一站是这台主机自己"
     );
 }
@@ -270,14 +295,14 @@ fn a_proxy_without_an_address_or_with_a_bad_port_says_why(cx: &mut TestAppContex
     assert!(dialog_open(cx, handle));
     assert_eq!(
         error_of(cx, handle, "host-proxy-port").as_deref(),
-        Some("代理端口必须是 1 到 65535 之间的数字")
+        Some("Proxy port must be a number from 1 to 65535")
     );
 
     fill(cx, handle, "host-proxy-port", "1080");
     save(cx, handle);
     assert_eq!(
         error_of(cx, handle, "host-proxy-host").as_deref(),
-        Some("代理地址不能为空")
+        Some("Proxy address is required")
     );
 
     // 填了密码没填用户名：密码没处存。
@@ -286,7 +311,7 @@ fn a_proxy_without_an_address_or_with_a_bad_port_says_why(cx: &mut TestAppContex
     save(cx, handle);
     assert_eq!(
         error_of(cx, handle, "host-proxy-user").as_deref(),
-        Some("填了代理密码就要填用户名")
+        Some("A proxy password requires a username")
     );
 
     fill(cx, handle, "host-proxy-password", "");
@@ -353,7 +378,7 @@ fn deleting_a_jump_host_leaves_a_red_deleted_host_in_the_route(cx: &mut TestAppC
     assert!(
         label(cx, handle, "host-delete-text")
             .unwrap()
-            .contains("有 1 台主机把它当作跳板：\ndb-master")
+            .contains("1 host uses it as a jump host:\ndb-master")
     );
     click(cx, handle, "host-delete-confirm");
     assert_eq!(route_of(cx, &workspace, 7), Route::Jump(vec![None]));
@@ -361,11 +386,11 @@ fn deleting_a_jump_host_leaves_a_red_deleted_host_in_the_route(cx: &mut TestAppC
     dispatch(cx, handle, EditHost(HostId(7)));
     assert_eq!(
         chain(cx, handle).as_deref(),
-        Some("本机 → 已删除的主机 → db-master")
+        Some("This Computer → Deleted Host → db-master")
     );
     assert_eq!(
         label(cx, handle, ("host-jump", 0usize)).as_deref(),
-        Some("已删除的主机")
+        Some("Deleted Host")
     );
     // 已删除的主机只能移除，不能上下移。
     assert!(label(cx, handle, ("host-jump-up", 0usize)).is_none());
@@ -375,7 +400,7 @@ fn deleting_a_jump_host_leaves_a_red_deleted_host_in_the_route(cx: &mut TestAppC
     assert!(dialog_open(cx, handle));
     assert_eq!(
         error_of(cx, handle, "host-jumps").as_deref(),
-        Some("请移除已删除的跳板主机")
+        Some("Remove the deleted jump host")
     );
 
     click(cx, handle, ("host-jump-remove", 0usize));

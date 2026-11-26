@@ -24,10 +24,12 @@ fn lines(
         name = name
     ))];
     if !users.is_empty() {
-        lines.push(ConfirmLine::Text(t!(
-            "credential.delete.users",
-            count = users.len()
-        )));
+        let count = users.len();
+        lines.push(ConfirmLine::Text(if count == 1 {
+            t!("credential.delete.users_one", count = count)
+        } else {
+            t!("credential.delete.users", count = count)
+        }));
         lines.extend(users.into_iter().map(ConfirmLine::Item));
         lines.push(ConfirmLine::Text(match kind.without_credential() {
             AuthKind::Password => t!("credential.delete.then_password", user = user),

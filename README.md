@@ -1,209 +1,260 @@
+<div align="center">
+
+<a href="https://github.com/qi1eat9fat/MicaTerm"><img src="assets/logo/icon-256.png" width="104" alt="MicaTerm"></a>
+
 # MicaTerm
 
-以 SSH 主机管理为核心的桌面终端。Rust + [GPUI](https://github.com/zed-industries/zed)（gpui-kit），Windows 优先。
+### 面向现代运维与 AI 工作流的原生 SSH 桌面终端
 
-![MicaTerm 主界面：左侧主机栏，一个标签内分屏三台主机的终端](assets/screenshots/main-light.png)
+**卡片分屏复用连接 · 双栏 SFTP 与内置远程编辑 · 本地加密保险库 · AI Agent 原生集成**<br>
+基于 Rust 与 [GPUI](https://github.com/zed-industries/zed) 构建，便携化数据目录，原生适配 Windows 11。
 
-**核心设计**
+[![Release](https://img.shields.io/github/v/release/qi1eat9fat/MicaTerm?label=release&color=111111)](https://github.com/qi1eat9fat/MicaTerm/releases/latest) [![Stars](https://img.shields.io/github/stars/qi1eat9fat/MicaTerm?style=flat&color=111111)](https://github.com/qi1eat9fat/MicaTerm/stargazers) [![License](https://img.shields.io/badge/license-GPL--3.0-111111)](LICENSE)<br>
+![Windows 11](https://img.shields.io/badge/Windows%2011-0078D4?logo=windows&logoColor=white) ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white) ![GPUI](https://img.shields.io/badge/UI-GPUI-111111)
 
-- **卡片分屏**：一个标签是一棵卡片树。同一主机分屏时复用已有连接，只新开 shell 通道。
-- **终端、SFTP、远程编辑同屏**：双栏传输，文件在内置编辑器修改后 Ctrl+S 写回。
-- **便携**：主机、凭据、设置全部位于程序旁的 `data/` 目录，整个目录可直接迁移；秘密加密存入保险库。
-- **供 AI Agent 使用**：`micaterm` 命令供 Claude Code、Codex 操作已保存的主机和终端，密码与私钥不出保险库。
+**[下载便携版](https://github.com/qi1eat9fat/MicaTerm/releases/latest)** &nbsp;·&nbsp; **[核心特性](#核心特性)** &nbsp;·&nbsp; **[AI Agent 集成](#ai-agent-集成)** &nbsp;·&nbsp; **[快捷键](#快捷键)** &nbsp;·&nbsp; **[从源码构建](#从源码构建)**
 
-> 仅在 Windows 11 上验证。macOS 与 Linux 的代码路径存在，尚未实测。
+<br>
 
-## 目录
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/workspace-dark.png">
+  <img src="assets/screenshots/workspace-light.png" width="900" alt="MicaTerm 主工作区：左侧主机栏，单标签内三分屏同时运维三台远程主机">
+</picture>
 
-- [功能](#功能)
-- [给 AI Agent 用](#给-ai-agent-用)
-- [下载与使用](#下载与使用)
-- [常用快捷键](#常用快捷键)
-- [从源码构建](#从源码构建)
-- [发布](#发布)
-- [项目结构](#项目结构)
-- [许可](#许可)
+</div>
 
-## 功能
+<br>
 
-### 主机与连接
+## 概览
 
-- 平铺主机列表：系统徽章（登录后自动探测）、搜索（名称 / 地址 / 用户名，多词同时匹配）、拖动排序、连接状态
-- 认证方式：密码、密钥、SSH Agent、无密码。键盘交互式认证自动应答，验证码等问题转交用户
-- 连接方式：直连、跳板机、SOCKS5 / HTTP 代理
-- 独立 known_hosts：首次连接确认主机密钥，密钥变化时告警
-- 断线后按 Enter 在卡片内重连；错误信息为中文并说明原因
+MicaTerm 是一款以 SSH 主机管理为核心的原生桌面终端，面向高频多主机运维、远程文件操作以及与 AI 编程助手协同工作的工程场景。
 
-![新建主机：名称、地址、认证方式、连接方式位于同一页](assets/screenshots/new-host.png)
+| 设计维度 | 实现方式 |
+| :-- | :-- |
+| **卡片树分屏** | 每个标签页均为独立的可变比例分屏树；同主机分屏自动复用底层 SSH 连接与会话通道，对单通道堡垒机自动回退新建连接 |
+| **运维闭环同屏** | 终端会话、WinSCP 风格双栏 SFTP 与 Tree-sitter 语法高亮远程编辑器集成于同一窗口，文件修改后按 `Ctrl+S` 经原连接原子写回 |
+| **便携与安全边界** | 全部主机配置、设置、凭据索引及加密保险库存于程序同级 `data/` 目录，整目录可直接迁移；敏感信息经 Argon2id + ChaCha20-Poly1305 加密保护 |
+| **AI Agent 协同** | 提供 `micaterm` CLI 与内置 Agent 侧边面板，供 Claude Code、Codex、Antigravity 等 Agent 安全操作已保存主机与交接终端，凭据始终隔离于保险库内 |
 
-### 标签与卡片
+> 平台支持说明：当前版本已在 Windows 11 完整验证并发布便携构建；macOS 与 Linux 代码路径已预留，尚未完成实机验证。
 
-- 标签即分屏树：向右 / 向下分屏后出现占位卡片，选择同主机的新终端、本地终端或其他主机
-- 拖动分隔线调整比例；双击状态栏将单张卡片放大到整个标签；卡片可移入新标签
-- 远程卡片分屏复用连接；仅支持单通道的堡垒机自动新建连接
-- 本地卡片分屏在同一目录打开新终端
-- 卡片顶行显示名称与前台程序；底部状态栏显示连接状态、延迟、当前目录、系统与尺寸
-- 目录与前台程序来自远程 OSC 7 / 633 / 1337 / 3008 / 9;9 序列及窗口标题的被动解析；不写远程 rc 文件，也不额外开通道查询进程
-- 后台卡片有输出时标签显示绿点，结束或响铃时显示橙点
+## 快速开始
 
-![深色主题：收起主机栏，打开右侧命令片段面板](assets/screenshots/main-dark.png)
+**1 · 获取便携版**
 
-### 终端
+前往 [GitHub Releases](https://github.com/qi1eat9fat/MicaTerm/releases/latest) 下载 `MicaTerm-<版本>-windows-x86_64-portable.zip`，解压至具备普通写入权限的目录后直接运行 `micaterm.exe`。
 
-- 10000 行回滚、智能大小写查找、Ctrl+单击打开链接、OSC 52 剪贴板、kitty 键盘协议、OSC 9/777 通知
-- 本地 shell 自动检测（Windows 优先 PowerShell 7），支持手动指定
-- 内置 Ayu、Tokyo、Catppuccin、Rosé Pine 四对浅色 / 深色主题；应用外观跟随系统或固定
-- Windows 11 22H2 及以上支持 Mica 背景
+<sub>便携包内置 <code>micaterm.exe</code>、<code>micaterm-cli.exe</code> 及空 <code>data/</code> 目录，全部持久化状态写入其中，请勿部署于 <code>C:\Program Files</code> 等只读目录。二进制已静态链接 C 运行库，无需预装 VC++ Redistributable，兼容 Windows LTSC；可通过环境变量 <code>MICATERM_DATA_DIR</code> 重定向数据目录。当前构建尚未包含代码签名，首次启动如遇 SmartScreen 提示，请选择「更多信息 → 仍要运行」。</sub>
 
-![设置 › 外观：应用外观、Mica 背景与四对终端主题](assets/screenshots/settings.png)
+**2 · 添加主机并连接**
 
-### SFTP 与编辑
+点击左侧主机栏 `+` 或按下 `Ctrl+Shift+N` 创建主机，在同一表单内完成地址、认证方式与网络路由配置后保存，双击主机即可建立 SSH 会话。
 
-- WinSCP 式本地 / 远程双栏：拖放上传下载（含从资源管理器拖入）、传输队列、断点续传、断线自动重连
-- 冲突时覆盖 / 跳过；属性中可修改权限（支持递归）
-- 内置编辑器：行号、查找替换、常见语言语法高亮；Ctrl+S 经原连接写回，保留所有者、权限、BOM 与 CRLF；保存前检查文件是否被外部修改
-- 图片预览、Markdown 预览
+**3 · 启用 AI Agent（可选）**
 
-![SFTP 双栏：左侧本机，右侧远程，底部为传输队列](assets/screenshots/sftp.png)
+进入 **设置 → Agent**，开启 **启用外部 Agent**，按需一键安装 `micaterm` 命令行工具、对应 Agent 的 Skill 及状态 Hook。
 
-![内置编辑器：远程 docker-compose.yml，语法高亮与查找](assets/screenshots/editor.png)
+## 核心特性
 
-### 凭据与保险库
+### 主机管理与多路连接
 
-- 凭据可被多台主机共用；密钥来自文件、粘贴，或现场生成 Ed25519 / RSA 4096
-- 密码、口令、私钥以 Argon2id + ChaCha20-Poly1305 加密存入数据目录的保险库，由主密码保护；可选「在本机记住」，数据密钥存入系统钥匙串
-- 主密码可留空：此时秘密仅由本机钥匙串保护，迁移到其他电脑需重新输入
+平铺式主机清单兼顾检索效率与视觉辨识度，所有连接参数、凭据引用与网络路由集中配置，减少多级目录切换成本。
 
-### 命令片段
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/new-host-dark.png">
+  <img src="assets/screenshots/new-host-light.png" width="900" alt="新建主机对话框：名称、地址、端口、认证方式与路由配置集中于单页">
+</picture>
 
-- 跨主机共用的命令文本，单击输入或直接执行，发往焦点卡片
+| 能力 | 说明 |
+| :-- | :-- |
+| **主机清单与检索** | 登录后自动探测操作系统并展示发行版徽章（Ubuntu、Debian、Rocky、Alpine、Arch 等）；支持按名称、地址、用户名多关键词组合过滤及拖拽排序 |
+| **认证机制** | 支持密码、共享凭据（密码 / 私钥 / SSH Agent）、无密码公钥与键盘交互式认证（自动应答常规提示，MFA / 验证码交由用户交互） |
+| **网络路由** | 支持直连、多级 SSH 跳板机（Jump Host）以及 SOCKS5 / HTTP 代理转发 |
+| **主机密钥与断线恢复** | 维护独立 `known_hosts` 信任库，首次连接二次确认指纹、密钥变更主动告警；连接中断后在卡片内按 `Enter` 即刻重连，并输出清晰的中文故障原因 |
 
-> 截图中的主机、文件与终端输出均为演示数据。
+### 卡片分屏与终端引擎
 
-## 给 AI Agent 用
+标签页以卡片树组织终端布局，配合基于被动转义序列解析的状态栏与现代终端协议支持，兼顾多机并发观测与低侵入性。
 
-Claude Code、Codex 等 Agent 通过 `micaterm` 命令操作已保存的主机：列出 / 查看主机、执行命令、上传 / 下载 / 同步文件、增删改主机与凭据。命令经运行中的 MicaTerm 登录；密码与私钥保留在保险库，Agent 无法读取；保险库锁定时请求用户解锁。
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/settings-dark.png">
+  <img src="assets/screenshots/settings-light.png" width="900" alt="设置 › 外观：中英文即时切换、深浅外观、Windows 11 Mica 背景与四对内置终端主题">
+</picture>
 
-**启用**：设置 › Agent › 启用外部 Agent。同一页可将命令行工具安装到 PATH（便携版安装至程序旁 `bin\`），并为 Claude Code、Codex 安装 Skill。
+- **灵活分屏与连接复用**：支持向右（`Ctrl+Shift+D`）或向下（`Ctrl+Shift+E`）拆分卡片，占位选择器支持快速复用当前主机连接、新建本地终端或切换至任意主机；拖拽分隔线实时调整比例，双击状态栏或按 `Ctrl+Shift+Enter` 临时最大化单张卡片。
+- **低侵入状态感知**：卡片顶栏展示主机名与前台进程，底栏展示当前工作目录、操作系统、连接状态与实时 RTT 延迟。目录与进程信息完全通过被动解析 OSC 7 / 633 / 1337 / 3008 / 9;9 及窗口标题获取，不修改远端 Shell 配置文件，亦不额外开启轮询通道。后台标签存在新输出时显示绿点，任务结束或触发响铃时显示橙点。
+- **现代终端协议**：支持 10,000 行回滚缓冲、智能大小写查找、`Ctrl+单击` 打开链接、OSC 52 剪贴板同步、Kitty 键盘协议与 OSC 9/777 桌面通知；本地终端自动探测 Shell（Windows 优先 PowerShell 7，依次回退 Windows PowerShell 与 `cmd.exe`），分屏时自动继承工作目录。
+- **外观、主题与双语界面**：内置 **Air Neutral**、**Tokyo**、**Catppuccin**、**Rosé Pine** 四对浅色 / 深色主题，支持跟随系统外观与 Windows 11 22H2+ Mica 云母侧栏材质，并支持简体中文与英文界面即时切换。
 
-**Agent 面板**：右侧图标栏最下方的「Agent」在 MicaTerm 内运行 Claude Code 或 Codex。命令在设置 › Agent 中配置，留空则自动检测（包括 Claude 桌面版自带的 claude）。启动前选择工作目录与对话，Claude Code 可续接该目录中的历史对话。缺少总开关、命令行工具或 Skill 时，启动框会列出并提示补齐。
+### 双栏 SFTP 与内置远程编辑
 
-**状态**：面板标题与图标栏显示 Agent 是否在运行、等待确认、回合已结束；等待确认且面板不可见时发送通知。设置 › Agent 可为 Claude Code、Codex 安装状态 hook；未安装时也能从屏幕识别大部分「等待确认」。
+无需切换外部传输工具，按下 `Ctrl+Shift+U` 即可在当前远程连接上打开双栏文件管理器，并直接编辑或预览远端文件。
 
-**交给 Agent**：远程卡片右键「交给 Agent」，将当前终端交给面板中的 Agent。Agent 通过 `exec --card` 在该卡片执行命令（适用于仅允许一次登录的堡垒机），通过 `cards read` 读取屏幕；「收回」后权限终止。Agent 亦可运行在 MicaTerm 之外的终端：未配置 Agent 命令时卡片仍可交出，Agent 用 `micaterm cards list` 找到卡片。
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/sftp-dark.png">
+  <img src="assets/screenshots/sftp-light.png" width="900" alt="双栏 SFTP 文件管理：左侧本地发布目录，右侧远端生产目录与权限信息">
+</picture>
 
-**环境变量**：MicaTerm 内的本地终端带有 `TERM_PROGRAM=micaterm`、`MICATERM_SELF_CARD`、`MICATERM_CLI`；Agent 运行 `micaterm env` 可获知自身位置与可用能力。
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/editor-dark.png">
+  <img src="assets/screenshots/editor-light.png" width="900" alt="内置远程编辑器：Tree-sitter 语法高亮编辑远端 docker-compose.yml">
+</picture>
+
+| 模块 | 能力详情 |
+| :-- | :-- |
+| **双栏传输管理** | WinSCP 风格本机 / 远端双栏视图，支持双向拖拽与从系统资源管理器拖入上传；内置并发传输队列（默认 3 并发，支持 1–10 调节）、断点续传、断线自动重连、冲突策略（覆盖 / 跳过）与递归权限修改 |
+| **内置代码编辑器** | 选中远端文件按 `F4` 即刻编辑，内置行号、查找替换与 Tree-sitter 语法高亮（Bash、YAML、TOML、JSON、SQL、Python、Go、JavaScript、HTML、CSS、Markdown、Makefile、Diff 等）；`Ctrl+S` 经原连接写回并保留原文件属主、权限、BOM 与换行符（LF/CRLF），保存前自动校验外部变更冲突 |
+| **内置文件预览** | 支持远端图片预览与 Markdown 渲染预览，便于直接核查日志附带资产与部署文档 |
+
+### 凭据保险库与命令片段
+
+将高频命令与共享认证材料从单台主机中解耦，在保证本地密钥安全边界的前提下提升日常排障效率。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/snippets-dark.png">
+  <img src="assets/screenshots/snippets-light.png" width="900" alt="命令片段侧边面板：跨主机共享运维命令，单击输入或直接发送至当前焦点卡片">
+</picture>
+
+- **加密保险库**：所有主机密码、私钥与口令均使用 **Argon2id** 密钥派生与 **ChaCha20-Poly1305** 认证加密存储于 `data/` 目录下，支持主密码保护并可选通过系统钥匙串（Windows 凭据管理器）在本机免密记忆数据密钥。
+- **共享凭据与密钥生成**：凭据可被多台主机复用；支持导入密钥文件、粘贴私钥文本或现场生成 **Ed25519** / **RSA 4096** 密钥对。
+- **跨主机命令片段**：右侧栏一键呼出（`Ctrl+Shift+S`），支持按单击仅输入或单击立即执行两种模式，精准发送至当前焦点终端卡片。
+
+## AI Agent 集成
+
+MicaTerm 将运行中的桌面客户端暴露为面向 AI Agent 的受控运维网关。Claude Code、Codex、Antigravity 等 Agent 通过 `micaterm` 命令行工具与运行中的 MicaTerm 经当前用户专属本地通道通信，在不接触任何明文凭据的前提下完成远端巡检、命令执行、文件同步与主机管理。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/settings-agent-dark.png">
+  <img src="assets/screenshots/settings-agent-light.png" width="900" alt="设置 › Agent：外部 Agent 开关、命令行工具安装、Agent Skills 与状态 Hook 管理">
+</picture>
+
+| 集成能力 | 机制与安全边界 |
+| :-- | :-- |
+| **凭据零暴露** | 所有 SSH 登录与 SFTP 传输均由运行中的 MicaTerm 代为完成，明文密码与私钥永不离开保险库，也不通过 CLI 返回；保险库处于锁定状态时自动提示用户解锁 |
+| **内置 Agent 面板** | 标签栏右侧入口可在窗口内直接运行 Claude Code、Codex 或 Antigravity CLI（留空自动探测路径，兼容 Claude 桌面版内置 CLI）；启动前支持选择工作目录及续接 Claude Code 历史对话 |
+| **终端交接（Hand to Agent）** | 在任意远程卡片右键选择「交给 Agent」，即可将已通过 MFA / 单次登录验证的堡垒机终端交由 Agent 接管（`exec --card`、`cards read`、`cards send-key`），操作全程在用户视野内可见，随时可「收回 Agent」立即终止权限 |
+| **状态识别与 Skill 分发** | **设置 → Agent** 支持一键安装 `micaterm` 命令至 `PATH`、安装 Claude Code / Codex / Antigravity / 通用 `~/.agents/skills` Skill 及状态 Hook；在面板折叠时仍可识别「运行中 / 等你确认 / 回合结束」并发送桌面通知 |
+
+常用命令示例（支持管道自动输出 JSON 或显式指定 `--json`）：
 
 ```bash
+# 查看当前运行环境、已交接卡片及可用子命令
 micaterm env
-micaterm hosts list
-micaterm exec <主机 ID> "df -h /"
-micaterm upload <主机 ID> ./dist /tmp/dist
-micaterm cards list
-micaterm exec --card <卡片 ID> "uptime"
-micaterm cards read <卡片 ID> --lines 50
+
+# 检索主机并执行远端命令 / 文件同步
+micaterm hosts list -q prod --json
+micaterm exec <host-id> "docker compose ps"
+micaterm upload <host-id> ./dist /srv/acme-api/dist
+micaterm sync <host-id> ./release /srv/acme-api --delete
+
+# 操作用户交接的实时远程卡片（适用于单登录堡垒机场景）
+micaterm cards list --json
+micaterm cards read <card-id> --lines 120
+micaterm exec --card <card-id> "systemctl status nginx --no-pager"
 ```
 
-主机 ID 位于主机右键菜单的「复制 ID」；卡片 ID 来自 `micaterm cards list`。命令用法见 `micaterm <命令> --help`；输出到管道或加 `--json` 时为 JSON。Windows 上命令为压缩包内的 `micaterm-cli.exe`，安装到 PATH 后名为 `micaterm`。
+<sub>在 MicaTerm 内置本地终端中会自动注入 <code>TERM_PROGRAM=micaterm</code>、<code>MICATERM_SELF_CARD</code> 与 <code>MICATERM_CLI</code> 环境变量。Windows 下原始可执行文件为 <code>micaterm-cli.exe</code>，安装至 <code>PATH</code> 后自动注册为 <code>micaterm</code>。完整参数与协议说明可通过 <code>micaterm --help</code> 查阅。</sub>
 
-## 下载与使用
+## 快捷键
 
-从 [Releases](../../releases) 下载 `MicaTerm-<版本>-windows-x86_64-portable.zip`，解压到有写入权限的目录，运行 `micaterm.exe`。
+Windows / Linux 统一采用 `Ctrl+Shift` 组合，保留全部单 `Ctrl` 组合键供终端内 Shell 使用；macOS 对应 `⌘` 体系。
 
-- 压缩包包含空的 `data/` 目录，全部配置写入其中；整个目录可迁移到其他电脑
-- `micaterm-cli.exe` 供 AI Agent 使用（见上节），不使用 Agent 时可忽略
-- 不要放在 `C:\Program Files` 等普通权限不可写的目录
-- 已静态链接 C 运行库，无需安装 VC++ 运行库，LTSC 版 Windows 可直接运行
-- 暂未签名，首次运行时 SmartScreen 可能提示「未知发布者」，选择「更多信息 → 仍要运行」
+<details>
+<summary><b>展开查看完整快捷键表</b>（窗口、标签、分屏卡片、终端与 SFTP）</summary>
 
-环境变量 `MICATERM_DATA_DIR` 可将数据目录指向其他位置。
-
-## 常用快捷键
-
-Windows / Linux 使用 Ctrl+Shift 组合，单独 Ctrl 的组合全部留给终端；macOS 使用 ⌘。
+<br>
 
 | 操作 | Windows / Linux | macOS |
-|---|---|---|
-| 新建本地终端标签 | Ctrl+Shift+T | ⌘T |
-| 新建主机 | Ctrl+Shift+N | ⌘N |
-| 搜索主机 | Ctrl+Shift+H | ⌘⇧H |
-| 显示 / 隐藏主机栏 | Ctrl+Shift+B | ⌘B |
-| 打开 SFTP | Ctrl+Shift+U | ⌘⇧U |
-| 命令片段 | Ctrl+Shift+S | ⌘⇧S |
-| 设置 | Ctrl+, | ⌘, |
-| 切换标签 | Ctrl+Tab / Ctrl+Shift+Tab | 同左 |
-| 跳到第 N 个标签 | Ctrl+Shift+1…9 | — |
-| 向右 / 向下分屏 | Ctrl+Shift+D / Ctrl+Shift+E | ⌘D / ⌘⇧D |
-| 关闭卡片 | Ctrl+Shift+W | ⌘W |
-| 放大 / 还原卡片 | Ctrl+Shift+Enter | ⌘⇧Enter |
-| 在卡片间移动焦点 | Alt+方向键 | ⌥⌘+方向键 |
-| 移动分隔线 | Alt+Shift+方向键 | ⌃⌘+方向键 |
-| 复制 / 粘贴 | Ctrl+Shift+C / Ctrl+Shift+V | ⌘C / ⌘V |
-| 终端内查找 | Ctrl+Shift+F，F3 / Shift+F3 | ⌘F，⌘G / ⌘⇧G |
-| 清屏 | Ctrl+Shift+K | ⌘K |
-| 终端字号 | Ctrl+= / Ctrl+- / Ctrl+0 | ⌘= / ⌘- / ⌘0 |
+| :-- | :-- | :-- |
+| 新建本地终端标签 | `Ctrl+Shift+T` | `⌘T` |
+| 新建主机 | `Ctrl+Shift+N` | `⌘N` |
+| 聚焦主机搜索 | `Ctrl+Shift+H` | `⌘⇧H` |
+| 显示 / 隐藏左侧主机栏 | `Ctrl+Shift+B` | `⌘B` |
+| 打开双栏 SFTP | `Ctrl+Shift+U` | `⌘⇧U` |
+| 打开 / 收起命令片段面板 | `Ctrl+Shift+S` | `⌘⇧S` |
+| 打开设置 | `Ctrl+,` | `⌘,` |
+| 切换标签页 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 同左 |
+| 跳转至第 1–9 个标签 | `Ctrl+Shift+1`…`9` | `⌘1`…`9` |
+| 向右 / 向下分屏 | `Ctrl+Shift+D` / `Ctrl+Shift+E` | `⌘D` / `⌘⇧D` |
+| 关闭当前卡片 | `Ctrl+Shift+W` | `⌘W` |
+| 最大化 / 还原当前卡片 | `Ctrl+Shift+Enter` | `⌘⇧Enter` |
+| 在分屏卡片间移动焦点 | `Alt+方向键` | `⌥⌘+方向键` |
+| 调整分屏分隔线比例 | `Alt+Shift+方向键` | `⌃⌘+方向键` |
+| 复制 / 粘贴 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | `⌘C` / `⌘V` |
+| 终端内查找 | `Ctrl+Shift+F`（`F3` / `Shift+F3` 跳转） | `⌘F`（`⌘G` / `⌘⇧G`） |
+| 清空屏幕 | `Ctrl+Shift+K` | `⌘K` |
+| 调整终端字号 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | `⌘=` / `⌘-` / `⌘0` |
+| SFTP 文件操作 | `F4` 编辑 · `F5` 传输 · `F2` 重命名 · `F9` 属性 · `Delete` 删除 | 同左 |
 
-SFTP 文件列表：F4 编辑、F5 上传 / 下载、F2 重命名、F9 属性、Delete 删除。
+</details>
 
 ## 从源码构建
 
-依赖：
+### 构建依赖
 
-- Rust：版本由 [`rust-toolchain.toml`](rust-toolchain.toml) 固定，安装 [rustup](https://rustup.rs) 后首次构建自动下载
-- Windows：Visual Studio 2022 生成工具（「使用 C++ 的桌面开发」）、[CMake](https://cmake.org)、[NASM](https://www.nasm.us)（`aws-lc-sys` 需要）
+- **Rust 工具链**：版本由 [`rust-toolchain.toml`](rust-toolchain.toml) 锁定，安装 [rustup](https://rustup.rs) 后首次构建将自动拉取。
+- **Windows 编译环境**：Visual Studio 2022 生成工具（「使用 C++ 的桌面开发」）、[CMake](https://cmake.org) 与 [NASM](https://www.nasm.us)（供 `aws-lc-sys` 编译加密后端）。
+
+### 构建与测试
 
 ```bash
+# 开发运行（独立数据目录位于 target/debug/data/）
 cargo run
-```
 
-```bash
-cargo build --release
-```
+# 发布构建（产物位于 target/release/micaterm.exe 与 micaterm-cli.exe）
+cargo build --release --bin micaterm --bin micaterm-cli
 
-产物位于 `target/release/micaterm.exe`。开发版数据位于 `target/debug/data/`，与日常使用的数据相互独立（`cargo clean` 会一并删除，需要保留时先备份）。
-
-运行全部测试（包含用 GPUI 测试框架驱动真实窗口壳的界面测试，以及进程内 SSH 测试服务器）：
-
-```bash
+# 运行完整测试套件（含 GPUI 界面测试与进程内 SSH/SFTP 测试服务器）
 cargo test --workspace
 ```
 
-## 发布
+<details>
+<summary><b>项目结构与自动化发布流程</b></summary>
 
-推送 `v<版本号>` 标签即触发 [GitHub Actions 发布流程](.github/workflows/release.yml)：
+<br>
 
-1. 核对标签与 `Cargo.toml` 的版本号一致
-2. 在 Windows 上构建 release 版，检查两个程序均不依赖 VC++ 运行库
-3. 打包便携版 zip（`micaterm.exe`、`micaterm-cli.exe`、空 `data/` 目录）并生成 SHA-256 校验文件
-4. 创建 GitHub Release 并上传；版本号含 `-`（如 `1.3.0-beta.1`）的标记为预发布
+#### 工作区模块
+
+| 路径 | 职责 |
+| :-- | :-- |
+| `src/` | 窗口壳、卡片分屏树、主机管理、SFTP 标签、内置编辑器、设置页、保险库与 Agent 面板 |
+| `src/cli/` | `micaterm` 外部 CLI、本地 IPC 服务端、Agent Skill 及状态 Hook 集成 |
+| `crates/micaterm-terminal/` | 终端仿真引擎、GPU 渲染视图、主题配色与本地 PTY 管理 |
+| `crates/micaterm-ssh/` | SSH 协议会话、认证与跳板/代理路由、主机密钥校验与 SFTP 传输引擎 |
+| `crates/micaterm-hosts/` | 主机 / 凭据 / 命令片段领域模型、SQLite 存储层与加密保险库 |
+| `crates/micaterm-ui/` | 跨模块复用的通用界面组件与右键菜单 |
+| `locales/` | 简体中文与英文多语言文案资源 |
+| `tests/ui/` | 基于 GPUI 测试框架的端到端界面测试 |
+
+#### 发布流程
+
+推送与 `Cargo.toml` 版本号一致的 `v<版本号>` 标签即可触发 [GitHub Actions 发布工作流](.github/workflows/release.yml)，自动完成静态 CRT 依赖校验、便携包打包、SHA-256 校验文件生成与 GitHub Release 发布（含 `-` 预发布后缀的版本自动标记为 Pre-release）：
 
 ```bash
-git tag v1.2.0
+git tag v2.0.0 && git push origin v2.0.0
 ```
 
-```bash
-git push origin v1.2.0
-```
+</details>
 
-在 Actions 页面手动运行该流程时，仅构建打包并上传 artifact，不创建 Release。
+## 许可证与致谢
 
-## 项目结构
+本项目基于 **[GPL-3.0](LICENSE)** 开源协议发布。
 
-```
-src/                    窗口壳、卡片分屏、主机、SFTP 标签、编辑器、设置、保险库、Agent 面板
-src/cli/                micaterm 命令行（供 AI Agent 使用）及其与应用间的通道
-crates/
-  micaterm-terminal/    终端引擎、终端视图、本地 PTY
-  micaterm-ssh/         SSH 连接、登录、代理、SFTP 传输
-  micaterm-hosts/       主机 / 凭据 / 命令片段模型与数据库、保险库加密
-  micaterm-ui/          应用与终端共用的界面组件
-locales/                界面文案
-assets/                 字体、图标、标志、README 截图
-tests/ui/               界面测试
-```
+- 终端、SSH 与主机存储模块源自 [shell-rs](https://github.com/since2006/shell-rs) 并深度重构裁剪，原 MIT 许可与版权声明保留于各子 crate 的 `LICENSE` 文件中。
+- Agent 屏幕状态识别规则改写自 [Pebrel](https://github.com/Kuddev/pebrel)（GPL-3.0）。
+- 内置界面字体 [Instrument Sans](assets/fonts/InstrumentSans-OFL.txt) 与等宽字体 [JetBrains Mono](assets/fonts/OFL.txt) 遵循 SIL OFL 1.1；操作系统品牌图标来自 [Simple Icons](https://simpleicons.org)（CC0）。
 
-## 许可
+<sub>注：本文档展示截图中的主机地址、目录结构与终端输出均为隔离测试环境下生成的演示数据。</sub>
 
-[GPL-3.0](LICENSE)。
+<br>
 
-终端、SSH、主机等模块源自 [shell-rs](https://github.com/since2006/shell-rs) 并裁剪改造，原 MIT 部分的许可与版权声明保留在各 crate 的 `LICENSE` 中。Agent 状态的屏幕识别规则改写自 [Pebrel](https://github.com/Kuddev/pebrel)（GPL-3.0）。内置字体 JetBrains Mono 采用 [SIL OFL 1.1](assets/fonts/OFL.txt)，系统徽章来自 [Simple Icons](https://simpleicons.org)（CC0）。
+<div align="center">
+
+<a href="https://star-history.com/#qi1eat9fat/MicaTerm&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=qi1eat9fat/MicaTerm&type=Date&theme=dark">
+    <img src="https://api.star-history.com/svg?repos=qi1eat9fat/MicaTerm&type=Date" width="600" alt="Star History">
+  </picture>
+</a>
+
+</div>

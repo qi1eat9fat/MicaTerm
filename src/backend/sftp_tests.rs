@@ -395,7 +395,7 @@ fn the_sftp_connection_lists_the_home_and_a_folder_that_is_not_there_is_a_reason
 
     let missing = session.home.join("no-such-folder").unwrap();
     let reason = session.list(&missing).unwrap_err();
-    assert!(reason.starts_with("无法读取目录"), "{reason}");
+    assert!(reason.starts_with("Cannot read this directory"), "{reason}");
 }
 
 #[test]

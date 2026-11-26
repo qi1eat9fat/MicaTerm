@@ -188,7 +188,7 @@ mod tests {
         let (store, problem) = SettingsStore::load(path.clone());
         assert_eq!(store.settings(), AppSettings::default());
         assert!(matches!(problem, Some(SettingsProblem::Unreadable(_))));
-        assert!(problem.unwrap().message().starts_with("无法读取设置"));
+        assert!(problem.unwrap().message().starts_with("Could not read the settings"));
         // 用户改设置之前，文件原样留着。
         assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
     }

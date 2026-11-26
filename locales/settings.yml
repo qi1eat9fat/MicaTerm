@@ -1,235 +1,367 @@
 _version: 2
 settings.store.unreadable:
+  en: "Could not read the settings; defaults are used this time: %{error}"
   zh-CN: 无法读取设置，本次使用默认设置：%{error}
 settings.store.unsaved:
+  en: "Could not save the settings; changes made this session will not be saved: %{error}"
   zh-CN: 无法保存设置，本次运行的改动不会被保存：%{error}
 settings.store.save_failed:
+  en: "Could not save the settings: %{error}"
   zh-CN: 无法保存设置：%{error}
 settings.tab.title:
+  en: Settings
   zh-CN: 设置
 settings.tab.applies_at_once:
+  en: Changes apply immediately
   zh-CN: 改动立即生效
 settings.reset:
+  en: Restore Default
   zh-CN: 恢复默认
 settings.category.appearance:
+  en: Appearance
   zh-CN: 外观
 settings.category.terminal:
+  en: Terminal
   zh-CN: 终端
 settings.appearance.general:
+  en: GENERAL
   zh-CN: 常规
+settings.appearance.language:
+  en: Language
+  zh-CN: 语言
+settings.appearance.language_description:
+  en: Switch between English and Simplified Chinese; the interface changes immediately
+  zh-CN: 在英文和简体中文之间切换，界面立即变化
 settings.appearance.mode:
+  en: App Appearance
   zh-CN: 应用外观
 settings.appearance.mode_description:
+  en: Follows Windows light and dark mode when set to System
   zh-CN: 跟随系统时随 Windows 的深浅色切换
 settings.appearance.system:
+  en: System
   zh-CN: 跟随系统
 settings.appearance.light:
+  en: Light
   zh-CN: 浅色
 settings.appearance.dark:
+  en: Dark
   zh-CN: 深色
 settings.appearance.terminal_theme:
+  en: Terminal Theme
   zh-CN: 终端主题
 settings.appearance.terminal_theme_description:
-  zh-CN: 浅色、深色各选一套，同一行是同一套主题；背景跟随界面
+  en: Only themes matching the current light or dark interface; the background follows the interface
+  zh-CN: 只列出与当前界面明暗一致的主题；背景跟随界面
 settings.appearance.theme_chosen:
+  en: "%{name}, selected"
   zh-CN: "%{name}，已选"
 settings.terminal.font:
+  en: Font
   zh-CN: 字体
 settings.terminal.family:
+  en: Font
   zh-CN: 字体
 settings.terminal.family_description:
+  en: Lists only monospace fonts installed on this computer
   zh-CN: 只列出本机装了的等宽字体
 settings.terminal.size:
+  en: Font Size
   zh-CN: 字号
 settings.terminal.size_description:
+  en: "%{min}–%{max}; Ctrl+= / Ctrl+- / Ctrl+0 also work in the terminal"
   zh-CN: "%{min}–%{max}；在终端里按 Ctrl+= / Ctrl+- / Ctrl+0 也能调"
 settings.terminal.line_height:
+  en: Line Height
   zh-CN: 行高
 settings.terminal.line_height_description:
+  en: "%{min}–%{max}× the font size"
   zh-CN: 字号的 %{min}–%{max} 倍
 settings.terminal.interaction:
+  en: INTERACTION
   zh-CN: 交互
 settings.terminal.copy_on_select:
+  en: Copy on Select
   zh-CN: 选中即复制
 settings.terminal.copy_on_select_description:
+  en: Copies to the clipboard when the mouse button is released
   zh-CN: 松开鼠标就复制到剪贴板
 settings.terminal.right_click:
+  en: Right-Click Behavior
   zh-CN: 右键行为
 settings.terminal.right_click_description:
+  en: Show menu / Paste / Copy if text is selected, otherwise paste / Do nothing
   zh-CN: 显示菜单 / 粘贴 / 有选中文字就复制，否则粘贴 / 无动作
 settings.right_click.menu:
+  en: Show Menu
   zh-CN: 显示菜单
 settings.right_click.paste:
+  en: Paste
   zh-CN: 粘贴
 settings.right_click.copy_or_paste:
+  en: Copy if text is selected, otherwise paste
   zh-CN: 有选中文字就复制，否则粘贴
 settings.right_click.nothing:
+  en: Do Nothing
   zh-CN: 无动作
 settings.local_terminal.title:
+  en: LOCAL TERMINAL
   zh-CN: 本地终端
 settings.local_terminal.shell:
+  en: Shell
   zh-CN: Shell
 settings.local_terminal.shell_description:
+  en: "Leave empty to detect automatically: PowerShell 7 first, then Windows PowerShell, then cmd.exe"
   zh-CN: 留空自动检测：优先 PowerShell 7，其次 Windows PowerShell，最后 cmd.exe
 settings.local_terminal.automatic:
+  en: "Automatic (%{shell})"
   zh-CN: 自动检测（%{shell}）
 settings.local_terminal.automatic_unknown:
+  en: Automatic
   zh-CN: 自动检测
 settings.local_terminal.installed:
+  en: Installed Shells
   zh-CN: 常用 shell
 settings.category.sftp:
+  en: SFTP
   zh-CN: SFTP
 settings.sftp.transfers:
+  en: TRANSFERS
   zh-CN: 传输
 settings.sftp.parallel:
+  en: Maximum Concurrent Transfers
   zh-CN: 最大同时传输数量
 settings.sftp.parallel_description:
+  en: "%{min}–%{max}; each SFTP tab transfers up to this many at once"
   zh-CN: "%{min}–%{max}；每个 SFTP 标签各自按这个数传"
 settings.sftp.file_list:
+  en: FILE LIST
   zh-CN: 文件列表
 settings.sftp.local_directory:
+  en: Default Local Folder
   zh-CN: 本地默认打开目录
 settings.sftp.local_directory_description:
+  en: The local side of a new SFTP tab starts here
   zh-CN: 新开 SFTP 标签时本机一侧停在这里
 settings.sftp.local_directory_label:
+  en: "Default local folder, default %{path}"
   zh-CN: 本地默认打开目录，默认 %{path}
 settings.sftp.choose:
+  en: Choose…
   zh-CN: 选择…
 settings.sftp.choose_prompt:
+  en: Choose the default local folder
   zh-CN: 选择本地默认打开目录
-settings.sftp.show_hidden_local:
-  zh-CN: 显示隐藏文件 · 本机
-settings.sftp.show_hidden_description:
-  zh-CN: 名称以 . 开头的文件和目录
-settings.sftp.show_hidden_remote:
-  zh-CN: 显示隐藏文件 · 远程
-settings.sftp.show_hidden_remote_description:
-  zh-CN: 名称以 . 开头的文件和目录，显示时变淡
 settings.appearance.mica:
+  en: Mica Background
   zh-CN: Mica 背景
 settings.appearance.mica_description:
+  en: Only available on Windows 11 22H2 and later; when off, the sidebar uses an opaque background
   zh-CN: 只在 Windows 11 22H2 及以上可用；关闭时侧栏用不透明底色
 settings.category.cli:
+  en: Agent
   zh-CN: Agent
 settings.cli.section:
+  en: FOR AI AGENTS
   zh-CN: 给 AI Agent 用
 settings.cli.enabled:
+  en: Enable External Agents
   zh-CN: 启用外部 Agent
 settings.cli.enabled_description:
+  en: Lets AI Agents such as Claude Code and Codex use the micaterm command to see hosts saved here; Agents cannot see passwords or private keys
   zh-CN: 让 Claude Code、Codex 等 AI Agent 用 micaterm 命令查看这里保存的主机；Agent 看不到密码和私钥
 settings.cli.command:
+  en: After installing the command-line tool below, try running micaterm hosts list in a terminal
   zh-CN: 下面装好命令行工具后，在终端里运行 micaterm hosts list 试试
 settings.cli.tools:
+  en: COMMAND-LINE TOOLS
   zh-CN: 命令行工具
 settings.cli.binary:
+  en: micaterm Command
   zh-CN: micaterm 命令
 settings.cli.binary_installed:
+  en: "Installed: %{path}. Only newly opened terminals and Agents will find it"
   zh-CN: 已安装：%{path}。新开的终端和 Agent 才能找到它
 settings.cli.binary_missing:
+  en: Not installed. Once installed, new terminals and Agents can run micaterm directly
   zh-CN: 未安装。装好后，新开的终端和 Agent 都能直接运行 micaterm
 settings.cli.binary_outdated:
+  en: This is the command from another version of MicaTerm; update it before use
   zh-CN: 装的是另一个版本的 MicaTerm 的命令，更新后才能用
 settings.cli.binary_not_on_path:
+  en: The command exists, but its folder is not on PATH
   zh-CN: 命令在，但它所在的文件夹不在 PATH 里
 settings.cli.binary_stale:
+  en: "micaterm currently points to another MicaTerm: %{target}"
   zh-CN: 现在的 micaterm 指向另一份 MicaTerm：%{target}
 settings.cli.binary_occupied:
+  en: "%{path} is in use by another program; MicaTerm will not change it"
   zh-CN: "%{path} 已被别的程序占用，MicaTerm 不会改动它"
 settings.cli.binary_unavailable:
+  en: micaterm-cli is missing next to the program; it cannot be installed
   zh-CN: 程序旁边没有 micaterm-cli，装不了
 settings.cli.skills:
+  en: AGENT SKILLS
   zh-CN: Agent Skills
 settings.cli.skill_installed:
+  en: Installed
   zh-CN: 已安装
 settings.cli.skill_missing:
+  en: Not Installed
   zh-CN: 未安装
 settings.cli.skill_outdated:
+  en: Outdated Version Installed
   zh-CN: 装的是旧版本
 settings.cli.note_with:
+  en: "%{note}. %{more}"
   zh-CN: "%{note}。%{more}"
-settings.cli.workbuddy_found:
-  zh-CN: 已检测到 WorkBuddy。装上后在 WorkBuddy 里就能让它用 micaterm；它不在 Agent 面板里启动
-settings.cli.workbuddy_missing:
-  zh-CN: 没检测到 WorkBuddy（用户目录下没有 .workbuddy）
+settings.cli.antigravity_found:
+  en: Antigravity CLI detected (agy). Once installed, agy can use micaterm
+  zh-CN: 已检测到 Antigravity CLI（agy）。装上后在 agy 里就能让它用 micaterm
+settings.cli.antigravity_missing:
+  en: Antigravity CLI not detected (no agy in the folder its installer uses)
+  zh-CN: 没检测到 Antigravity CLI（安装脚本放 agy 的目录里没有它）
 settings.cli.install_off:
+  en: Cannot install this session
   zh-CN: 这次运行不能安装
 settings.cli.checking:
+  en: Checking…
   zh-CN: 正在检查…
 settings.cli.install:
+  en: Install
   zh-CN: 安装
 settings.cli.update:
+  en: Update
   zh-CN: 更新
 settings.cli.remove:
+  en: Remove
   zh-CN: 移除
 settings.cli.install_failed:
+  en: "Install or remove did not succeed: %{error}"
   zh-CN: 安装或移除没有成功：%{error}
 settings.cli.copy_skill:
+  en: Copy Skill
   zh-CN: 复制 Skill
 settings.cli.copy_skill_description:
+  en: "Other Agents: copy the full Skill text and put it where that Agent reads Skills"
   zh-CN: 别的 Agent：把 Skill 全文复制下来，放到它读 Skill 的地方
 settings.cli.copy:
+  en: Copy
   zh-CN: 复制
 settings.cli.skill_copied:
+  en: Skill copied
   zh-CN: 已复制 Skill
 settings.cli.elsewhere:
+  en: Another MicaTerm using the same data folder is already receiving external CLI requests; commands will go to it
   zh-CN: 同一个数据目录的另一个 MicaTerm 已经在接收外部 CLI 的请求，命令会交给它
 settings.cli.off:
+  en: No data folder this session; the external CLI is unavailable
   zh-CN: 这次运行没有数据目录，外部 CLI 不可用
 settings.category.app:
+  en: App
   zh-CN: 应用
+settings.language.chinese:
+  en: Chinese (Simplified)
+  zh-CN: 简体中文
+settings.language.english:
+  en: English
+  zh-CN: English
 settings.app.window:
+  en: WINDOW
   zh-CN: 窗口
 settings.app.remember_window:
+  en: Remember Window Size and Position
   zh-CN: 记住窗口大小和位置
 settings.app.remember_window_description:
+  en: Restores the last size, position and maximized state on the next launch
   zh-CN: 下次启动放回上次的大小、位置和最大化状态
 settings.app.data:
+  en: DATA
   zh-CN: 数据
 settings.app.data_dir:
+  en: Data Folder
   zh-CN: 数据目录
 settings.app.data_dir_contents:
+  en: ": database, vault.json, known_hosts, settings.json"
   zh-CN: ：数据库、vault.json、known_hosts、settings.json
 settings.app.data_dir_beside_exe:
+  en: data/ next to the exe
   zh-CN: exe 旁的 data/
 settings.app.no_data_dir:
+  en: No data folder this session; changes will not be saved
   zh-CN: 这次运行没有数据目录，改动不会保存
 settings.app.open_data_dir:
+  en: Open Folder
   zh-CN: 打开文件夹
 settings.app.about:
+  en: ABOUT
   zh-CN: 关于
 settings.app.about_description:
+  en: GPL-3.0 · Some code from shell-rs (MIT)
   zh-CN: GPL-3.0 · 部分代码来自 shell-rs（MIT）
 settings.app.license:
+  en: License
   zh-CN: 许可证
 settings.cli.agent_command:
+  en: Agent Command
   zh-CN: Agent 命令
 settings.cli.agent_command_description:
-  zh-CN: 右侧 Agent 面板里运行的命令。留空时自动检测，先找 claude（含 Claude 桌面版自带的），再找 codex
+  en: "The command run in the Agent panel on the right. Leave empty to detect automatically: claude first (including the one bundled with Claude Desktop), then codex, then the Antigravity CLI (agy)"
+  zh-CN: 右侧 Agent 面板里运行的命令。留空时自动检测，先找 claude（含 Claude 桌面版自带的），再找 codex，最后是 Antigravity CLI（agy）
 settings.cli.agent_command_detecting:
+  en: Automatic
   zh-CN: 自动检测
 settings.cli.agent_command_found:
+  en: "Automatic (%{command})"
   zh-CN: 自动检测（%{command}）
 settings.cli.agent_command_found_desktop:
+  en: Automatic (claude bundled with Claude Desktop)
   zh-CN: 自动检测（Claude 桌面版自带的 claude）
 settings.cli.agent_command_none:
-  zh-CN: 自动检测（没找到 claude 或 codex）
+  en: Automatic (no claude, codex or agy found)
+  zh-CN: 自动检测（没找到 claude、codex 或 agy）
 settings.cli.hooks:
+  en: Agent Status
   zh-CN: Agent 状态
 settings.cli.hooks_description:
+  en: Lets the Agent panel and tabs know whether it is running, waiting for confirmation, or has ended its turn
   zh-CN: 让 Agent 面板和标签知道它在运行、等你确认还是回合结束
 settings.cli.hooks_claude:
+  en: Adds three hooks to %{file}; backs it up before changing. Most "waiting for confirmation" states are detected without it, just more slowly
   zh-CN: 在 %{file} 里加三个 hook，改之前先备份。不开也能认出大部分「等你确认」，只是慢一点
 settings.cli.hooks_codex:
+  en: Adds notify to %{file}; backs it up before changing
   zh-CN: 在 %{file} 里加 notify，改之前先备份
+settings.cli.hooks_antigravity:
+  en: Adds three hooks to %{file}; backs it up before changing. Reports when it starts working and when it ends its turn, not when it waits for confirmation
+  zh-CN: 在 %{file} 里加三个 hook，改之前先备份。报开始干活和回合结束，报不了「等你确认」
 settings.cli.hooks_failed:
+  en: "Could not update the status hooks: %{error}"
   zh-CN: 状态 hook 没有改成：%{error}
 settings.cli.hooks_not_object:
+  en: hooks in settings.json is not an object; MicaTerm will not change it
   zh-CN: settings.json 的 hooks 不是对象，MicaTerm 不会改动它
 settings.cli.hooks_not_array:
+  en: hooks.%{event} in settings.json is not an array; MicaTerm will not change it
   zh-CN: settings.json 的 hooks.%{event} 不是数组，MicaTerm 不会改动它
 settings.cli.hooks_bad_json:
+  en: "settings.json is not valid JSON; MicaTerm will not change it: %{error}"
   zh-CN: settings.json 不是合法的 JSON，MicaTerm 不会改动它：%{error}
 settings.cli.hooks_not_json_object:
+  en: The top level of settings.json is not an object; MicaTerm will not change it
   zh-CN: settings.json 最外层不是对象，MicaTerm 不会改动它
+settings.cli.hooks_agy_bad_json:
+  en: "hooks.json is not valid JSON; MicaTerm will not change it: %{error}"
+  zh-CN: hooks.json 不是合法的 JSON，MicaTerm 不会改动它：%{error}
+settings.cli.hooks_agy_not_json_object:
+  en: The top level of hooks.json is not an object; MicaTerm will not change it
+  zh-CN: hooks.json 最外层不是对象，MicaTerm 不会改动它
+settings.cli.hooks_agy_group_not_object:
+  en: The "micaterm" entry in hooks.json is not an object; MicaTerm will not change it
+  zh-CN: hooks.json 里的 "micaterm" 不是对象，MicaTerm 不会改动它
+settings.cli.hooks_agy_event_not_array:
+  en: The %{event} in the "micaterm" entry is not an array; MicaTerm will not change it
+  zh-CN: hooks.json 的 "micaterm" 里，%{event} 不是数组，MicaTerm 不会改动它
 settings.cli.hooks_foreign_notify:
+  en: "config.toml already has another notify (%{line}); MicaTerm will not change it"
   zh-CN: config.toml 里已经有别的 notify（%{line}），MicaTerm 不会改动它

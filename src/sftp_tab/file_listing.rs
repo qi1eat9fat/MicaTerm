@@ -11,7 +11,9 @@ use std::cmp::Ordering;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
+use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -20,10 +22,15 @@ use super::{
     CardSide, ClickMode, FileCard, FileEntry, FileIcon, SftpTabId, format_changed, format_rights,
     format_size,
 };
-use crate::app::{SftpAction, SftpDispatch as _, SftpTabCommand};
+use crate::app::{CatalogIcon, SftpAction, SftpDispatch as _, SftpTabCommand};
 use crate::backend::sftp::TransferDirection;
 use crate::i18n::t;
-use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY, baseline_shift, ui_text};
+use crate::theme::space;
+use crate::theme::{
+    Elevation, MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY, WEIGHT_NORMAL, baseline_shift,
+    size,
+};
+use crate::ui::empty::{EmptyPlacement, EmptyState};
 use crate::ui::table::{
     self, ColumnWidth, RowState, SortDirection, TableColumn, cell, header_cell, header_row,
     text_cell,
@@ -35,7 +42,6 @@ pub(super) enum ListPlaceholder {
     Connecting,
     #[default]
     Reading,
-    OnlyHidden,
     Empty,
     NotConnected,
     Unreadable,
@@ -46,7 +52,6 @@ impl ListPlaceholder {
         match self {
             Self::Connecting => t!("sftp_tab.list.connecting"),
             Self::Reading => t!("sftp_tab.list.reading"),
-            Self::OnlyHidden => t!("sftp_tab.list.only_hidden"),
             Self::Empty => t!("sftp_tab.list.empty"),
             Self::NotConnected => t!("sftp_tab.list.not_connected"),
             Self::Unreadable => t!("sftp_tab.list.unreadable"),
@@ -147,11 +152,10 @@ pub struct FileListing {
     /// 放得下、显示出来的列（`fit` 按宽度从 `all_columns` 里挑）。
     columns: Vec<TableColumn>,
     fold_order: &'static [&'static str],
-    /// 目录里的全部，读到的样子。
+    /// 目录里的全部，读到的样子（点开头的隐藏文件也在）。
     listed: Vec<FileEntry>,
-    /// 显示的行，排好序：`listed` 去掉不显示的隐藏文件。
+    /// 显示的行：`listed` 的副本，排好序。
     rows: Vec<FileEntry>,
-    show_hidden: bool,
     /// 按哪一列（列的键）、哪个方向排；`None` 是按名称升序。
     sort: Option<(&'static str, SortDirection)>,
 }
@@ -165,7 +169,6 @@ impl FileListing {
             fold_order: fold_order(side),
             listed: Vec::new(),
             rows: Vec::new(),
-            show_hidden: false,
             sort: None,
         }
     }
@@ -218,11 +221,6 @@ impl FileListing {
         &self.listed
     }
 
-    /// 没显示的隐藏文件有几个。
-    pub fn hidden_count(&self) -> usize {
-        self.listed.len() - self.rows.len()
-    }
-
     /// 行的名字，按显示的顺序，`..` 也在。
     pub fn order(&self) -> Vec<&str> {
         self.rows.iter().map(|row| row.name.as_ref()).collect()
@@ -238,28 +236,7 @@ impl FileListing {
 
     pub fn set_rows(&mut self, rows: Vec<FileEntry>) {
         self.listed = rows;
-        self.filter();
-    }
-
-    pub fn shows_hidden(&self) -> bool {
-        self.show_hidden
-    }
-
-    pub fn set_show_hidden(&mut self, show: bool) {
-        if self.show_hidden != show {
-            self.show_hidden = show;
-            self.filter();
-        }
-    }
-
-    fn filter(&mut self) {
-        let show_hidden = self.show_hidden;
-        self.rows = self
-            .listed
-            .iter()
-            .filter(|entry| show_hidden || !entry.is_hidden())
-            .cloned()
-            .collect();
+        self.rows = self.listed.clone();
         self.apply_sort();
     }
 
@@ -292,11 +269,12 @@ impl FileListing {
 }
 
 impl FileCard {
-    /// 表头：点标题排序（降序、升序、回到按名称）。
+    /// Column header row (`11px Regular`, click to cycle sort: Desc -> Asc -> Name).
     pub(super) fn render_header(&self, tokens: &Tokens, cx: &mut Context<Self>) -> Div {
+        let scale = TypeScale::current(cx);
         let geometry = self.marquee.geometry.clone();
         let columns = self.listing.columns();
-        header_row(tokens).children((0..columns.len()).map(|col_ix| {
+        header_row(tokens, scale).children((0..columns.len()).map(|col_ix| {
             let geometry = geometry.clone();
             let key = columns[col_ix].key;
             header_cell(columns, col_ix, self.listing.sort_arrow(key), tokens)
@@ -310,7 +288,7 @@ impl FileCard {
         }))
     }
 
-    /// 列表里 `range` 那几行（`uniform_list` 只要看得见的）。
+    /// Visible slice `range` of virtualized rows.
     pub(super) fn render_rows(
         &mut self,
         range: Range<usize>,
@@ -319,18 +297,29 @@ impl FileCard {
     ) -> Vec<AnyElement> {
         let tokens = Tokens::current(cx);
         let scale = TypeScale::current(cx);
-        // 权限是等宽小字（`.sf-r .pm`，界面 12 时 11.5），和界面字放在同一条基线上（26 号整行按基线对齐）。
-        let rights_size = scale.mono_small;
+        let meta_size = scale.sm;
+        let ui_meta_shift = baseline_shift(
+            window,
+            (UI_FONT_FAMILY, scale.body),
+            (UI_FONT_FAMILY, scale.sm),
+            table::ROW_HEIGHT,
+        );
         let rights_shift = baseline_shift(
             window,
-            (UI_FONT_FAMILY, scale.ui),
-            (MONO_FONT_FAMILY, scale.mono_small),
+            (UI_FONT_FAMILY, scale.body),
+            (MONO_FONT_FAMILY, scale.sm),
             table::ROW_HEIGHT,
         );
         range
             .filter_map(|ix| {
                 let entry = self.listing.entry(ix)?.clone();
-                Some(self.render_row(ix, &entry, (rights_shift, rights_size), &tokens, cx))
+                Some(self.render_row(
+                    ix,
+                    &entry,
+                    (meta_size, ui_meta_shift, rights_shift),
+                    &tokens,
+                    cx,
+                ))
             })
             .collect()
     }
@@ -339,7 +328,7 @@ impl FileCard {
         &self,
         row_ix: usize,
         entry: &FileEntry,
-        (rights_shift, rights_size): (Pixels, Pixels),
+        (meta_size, ui_meta_shift, rights_shift): (Pixels, Pixels, Pixels),
         tokens: &Tokens,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -347,7 +336,6 @@ impl FileCard {
         let name = entry.name.to_string();
         let parent = entry.is_parent();
         let selected = self.selection.contains(&name);
-        // 键盘光标落在没选中的行上（`..`，或者刚用 Ctrl 取消的）时描一圈细边，好找到它。
         let cursor = !selected && self.selection.cursor() == Some(name.as_str());
         let geometry = self.marquee.geometry.clone();
         let card = cx.entity().downgrade();
@@ -355,43 +343,57 @@ impl FileCard {
             selected,
             focused: self.current,
         };
-        let dim = |cell: Div| cell.text_color(tokens.text2);
+        let meta_cell = |cell: Div, color: Hsla| {
+            cell.text_size(meta_size)
+                .text_color(color)
+                .relative()
+                .top(ui_meta_shift)
+        };
         let cells = columns.iter().enumerate().map(|(col_ix, column)| {
             let blank = parent && column.key != "name";
             match column.key {
                 "name" => self.render_name(entry, selected, card.clone(), tokens),
                 _ if blank => cell(columns, col_ix).into_any_element(),
                 "size" => {
-                    let size = (!entry.is_dir()).then(|| format_size(entry.size));
-                    dim(cell(columns, col_ix))
+                    let size_str = (!entry.is_dir()).then(|| format_size(entry.size));
+                    meta_cell(cell(columns, col_ix), tokens.text2)
                         .id(ElementId::Name(format!("size:{name}").into()))
                         .test_support()
-                        .aria_label(size.clone().unwrap_or_default())
-                        .children(size)
+                        .aria_label(size_str.clone().unwrap_or_default())
+                        .children(size_str)
                         .into_any_element()
                 }
-                "type" => dim(text_cell(columns, col_ix, entry.type_label())).into_any_element(),
-                "modified" => dim(text_cell(
-                    columns,
-                    col_ix,
-                    entry.modified.map(format_changed).unwrap_or_default(),
-                ))
+                "type" => {
+                    meta_cell(text_cell(columns, col_ix, entry.type_label()), tokens.st_dim)
+                        .into_any_element()
+                }
+                "modified" => meta_cell(
+                    text_cell(
+                        columns,
+                        col_ix,
+                        entry.modified.map(format_changed).unwrap_or_default(),
+                    ),
+                    tokens.st_dim,
+                )
                 .into_any_element(),
-                "rights" => dim(cell(columns, col_ix))
+                "rights" => cell(columns, col_ix)
                     .child(
                         div()
                             .relative()
                             .top(rights_shift)
                             .font_family(MONO_FONT_FAMILY)
-                            .text_size(rights_size)
-                            .children(entry.permissions.map(format_rights)),
+                            .text_size(meta_size)
+                            .children(
+                                entry
+                                    .permissions
+                                    .map(|mode| styled_rights(&format_rights(mode), tokens)),
+                            ),
                     )
                     .into_any_element(),
-                "owner" => dim(text_cell(
-                    columns,
-                    col_ix,
-                    entry.owner.clone().unwrap_or_default(),
-                ))
+                "owner" => meta_cell(
+                    text_cell(columns, col_ix, entry.owner.clone().unwrap_or_default()),
+                    tokens.st_dim,
+                )
                 .into_any_element(),
                 _ => cell(columns, col_ix).into_any_element(),
             }
@@ -402,19 +404,18 @@ impl FileCard {
             tokens,
         )
         .relative()
-        // 隐藏文件显示出来时整行更淡（`.sf-r.hid`）。
-        .when(entry.is_hidden(), |row| row.text_color(tokens.st_dim))
+        .when(entry.is_hidden() || parent, |row| row.text_color(tokens.st_dim))
         .children(cells)
         .when(cursor, |row| {
             row.child(
                 div()
                     .absolute()
                     .inset_0()
+                    .rounded(size::RADIUS_MD)
                     .border_1()
                     .border_color(tokens.line_strong),
             )
         })
-        // 这一行画在哪，就知道每一行在哪（框选用）。要写明偏移：不写的绝对定位子元素会落到格子下面。
         .child({
             let geometry = geometry.clone();
             canvas(
@@ -429,7 +430,6 @@ impl FileCard {
             .left_0()
             .size_full()
         })
-        // 按在行上（名字以外）：点一下选中它，拖是框选。名字自己先说了就不改。
         .on_any_mouse_down({
             let geometry = geometry.clone();
             move |_, _, _| {
@@ -464,7 +464,6 @@ impl FileCard {
                 }
             }
         })
-        // 右键先选中这一行（没选中时只选它），菜单才对着高亮的项目；`..` 当空白处。
         .on_mouse_down(MouseButton::Right, {
             let hit = (!parent).then(|| name.clone());
             let (menu_hit, card) = (self.menu_hit.clone(), card.clone());
@@ -478,7 +477,6 @@ impl FileCard {
         if parent || !entry.is_dir() {
             return row.test_support().into_any_element();
         }
-        // 放到目录这一行上，就是放进这个目录。
         accept_drops(
             row,
             self.side,
@@ -491,7 +489,7 @@ impl FileCard {
         .into_any_element()
     }
 
-    /// 名称格：图标（14，单色）和名字。图标和名字能拖到另一侧，`..` 不能。
+    /// Name cell: categorized Lucide icon + filename (primary color for directories, dimmed for hidden/parent).
     fn render_name(
         &self,
         entry: &FileEntry,
@@ -502,6 +500,15 @@ impl FileCard {
         let columns = self.listing.columns();
         let name = entry.name.to_string();
         let geometry = self.marquee.geometry.clone();
+        let file_icon = FileIcon::entry(entry);
+        let is_folder = file_icon.kind().is_folder();
+        let icon_color = if entry.is_hidden() || entry.is_parent() {
+            tokens.st_dim
+        } else if is_folder {
+            tokens.text_soft
+        } else {
+            tokens.icon
+        };
         let label = div()
             .id(ElementId::Name(format!("name:{name}").into()))
             .flex()
@@ -510,18 +517,22 @@ impl FileCard {
             .items_center()
             .gap(ICON_GAP)
             .on_any_mouse_down(move |_, _, _| geometry.pressed.set(Pressed::Name))
-            // 图标在 GPUI 里比几何居中高（150% 实测比字面中心高 1 个设备像素），往下挪半个像素。
-            .child(div().flex_none().relative().top(ICON_NUDGE).child(
-                FileIcon::entry(entry).sized(
-                    ICON_SIZE,
-                    if entry.is_hidden() {
-                        tokens.st_dim
-                    } else {
-                        tokens.icon
-                    },
-                ),
-            ))
-            .child(div().min_w_0().truncate().child(entry.name.clone()));
+            .child(
+                div()
+                    .flex_none()
+                    .relative()
+                    .top(ICON_NUDGE)
+                    .child(file_icon.sized(ICON_SIZE, icon_color)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .when(entry.is_dir() && !entry.is_parent(), |text| {
+                        text.font_weight(WEIGHT_NORMAL)
+                    })
+                    .child(entry.name.clone()),
+            );
         let label = if entry.is_parent() {
             label
         } else {
@@ -571,25 +582,51 @@ impl FileCard {
         }
     }
 
-    /// 没有行时列表写的字，在表头下面居中。
+    /// Centered Muxy-style empty / loading / disconnected placeholder state.
     pub(super) fn render_placeholder(
         &self,
         placeholder: ListPlaceholder,
         tokens: &Tokens,
+        scale: TypeScale,
     ) -> AnyElement {
-        let text = placeholder.text();
-        div()
-            .id("list-placeholder")
-            .flex()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .text_color(tokens.faint)
-            .child(text.clone())
-            .aria_label(text)
-            .test_support()
-            .into_any_element()
+        let icon = match placeholder {
+            ListPlaceholder::Empty => Icon::new(IconName::Folder),
+            ListPlaceholder::Connecting | ListPlaceholder::Reading => {
+                Icon::new(IconName::LoaderCircle)
+            }
+            ListPlaceholder::NotConnected | ListPlaceholder::Unreadable => {
+                Icon::new(CatalogIcon::ShieldX)
+            }
+        };
+        EmptyState::new(
+            self.side.placeholder_id(),
+            placeholder.text(),
+            EmptyPlacement::FileList,
+        )
+        .icon(icon)
+        .render(tokens, scale)
     }
+}
+
+/// Highlights active permission bits (`r`, `w`, `x`, `s`, `t`) in `tokens.text2` while keeping `-`
+/// dashes subtly dimmed in `tokens.faint`.
+fn styled_rights(rights: &str, tokens: &Tokens) -> StyledText {
+    let mut highlights = Vec::new();
+    for (idx, ch) in rights.char_indices() {
+        let color = if ch == '-' {
+            tokens.faint
+        } else {
+            tokens.text2
+        };
+        highlights.push((
+            idx..idx + ch.len_utf8(),
+            HighlightStyle {
+                color: Some(color),
+                ..Default::default()
+            },
+        ));
+    }
+    StyledText::new(SharedString::from(rights.to_owned())).with_highlights(highlights)
 }
 
 /// 往另一侧拖的行，路径是它自己那一侧的。
@@ -620,11 +657,12 @@ fn drag_files<P: 'static>(
     })
 }
 
-/// 显示另一侧的行能放到 `element` 上，指针在它上面时告诉那次拖动。
+/// Highlights `element` with a brand-soft outline when an incoming file drag hovers over it.
 pub(super) fn offer_drop<P: 'static>(element: Stateful<Div>, tokens: &Tokens) -> Stateful<Div> {
-    let highlight = tokens.sel;
+    let highlight = tokens.brand_soft;
+    let ring = tokens.brand_ring;
     element
-        .drag_over::<FilesDrag<P>>(move |style, _, _, _| style.bg(highlight))
+        .drag_over::<FilesDrag<P>>(move |style, _, _, _| style.bg(highlight).border_color(ring))
         .on_drag_move(|event: &DragMoveEvent<FilesDrag<P>>, _, cx| {
             event
                 .drag(cx)
@@ -688,6 +726,9 @@ impl DropSpot {
     }
 }
 
+/// 拖动胶囊的入场时长：短到不拖慢手感，长到看得出是「拎起来了」。
+const DRAG_PREVIEW_IN: Duration = Duration::from_millis(120);
+
 struct FileDragPreview {
     direction: TransferDirection,
     count: usize,
@@ -702,34 +743,75 @@ impl Render for FileDragPreview {
         } else {
             CursorStyle::OperationNotAllowed
         };
-        // 拖动的东西最后画，它的光标说了算。
-        let pointer = canvas(
-            |_, _, _| {},
-            move |_, _, window, _| window.set_window_cursor_style(cursor),
-        )
-        .absolute()
-        .top_0()
-        .left_0();
-        if !droppable {
-            return div().child(pointer).into_any_element();
-        }
-        let text = match self.direction {
-            TransferDirection::Upload => t!("sftp_tab.drag.upload", count = self.count),
-            TransferDirection::Download => t!("sftp_tab.drag.download", count = self.count),
+        let count = self.count;
+        let direction = self.direction;
+        let text = match direction {
+            TransferDirection::Upload => {
+                if count == 1 {
+                    t!("sftp_tab.drag.upload_one", count = count)
+                } else {
+                    t!("sftp_tab.drag.upload", count = count)
+                }
+            }
+            TransferDirection::Download => {
+                if count == 1 {
+                    t!("sftp_tab.drag.download_one", count = count)
+                } else {
+                    t!("sftp_tab.drag.download", count = count)
+                }
+            }
         };
+        let label = text.clone();
         let tokens = Tokens::current(cx);
+        let scale = TypeScale::current(cx);
+        let icon = match direction {
+            TransferDirection::Upload => CatalogIcon::Upload,
+            TransferDirection::Download => CatalogIcon::Download,
+        };
+        // 每次拖动都是新视图，带自己的 id，入场动画才会从头播。
+        let view = cx.entity_id();
         div()
             .id("file-drag-preview")
-            .px(px(9.))
-            .py(px(5.))
-            .rounded(px(7.))
-            .bg(tokens.tooltip)
-            .text_color(tokens.tooltip_text)
-            .text_size(ui_text())
-            .child(pointer)
-            .child(text.clone())
             .test_support()
-            .aria_label(text)
+            .aria_label(label)
+            .child(div().with_animation(
+                ("file-drag-preview-in", view),
+                Animation::new(DRAG_PREVIEW_IN).with_easing(|t| 1. - (1. - t).powi(3)),
+                move |_, t| {
+                    // 胶囊一直跟着指针；从 86% 弹到 100%，像被拎起来一样。
+                    let grow = 0.86 + 0.14 * t;
+                    // 拖动的东西最后画，它的光标说了算。
+                    let pointer = canvas(
+                        |_, _, _| {},
+                        move |_, _, window, _| window.set_window_cursor_style(cursor),
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0();
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::SPACE_6 * grow)
+                        .px(space::SPACE_10 * grow)
+                        .py(space::SPACE_4 * grow)
+                        .rounded(size::RADIUS_MD)
+                        .bg(tokens.popup)
+                        .border_1()
+                        .border_color(tokens.line)
+                        .shadow(Elevation::Elevated.shadow(tokens.popup))
+                        .text_color(tokens.text)
+                        .text_size(scale.xs * grow)
+                        .font_weight(WEIGHT_NORMAL)
+                        .opacity(t)
+                        .child(pointer)
+                        .child(
+                            Icon::new(icon)
+                                .size(size::ICON_SM * grow)
+                                .text_color(tokens.brand),
+                        )
+                        .child(text.clone())
+                },
+            ))
             .into_any_element()
     }
 }

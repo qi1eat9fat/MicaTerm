@@ -1,5 +1,5 @@
 // 来自 since2006/shell-rs @ b2a307a: src/cli/install.rs（Agent CLI 工单 05）
-// 改动：程序名 `micaterm`；Skill 装 Claude Code、Codex、WorkBuddy（2026-11-16 照 shell-rs 加）和通用的
+// 改动：程序名 `micaterm`；Skill 装 Claude Code、Codex、Antigravity CLI 和通用的
 // `~/.agents/skills`（规格第 2 节）；
 // Windows 上 MicaTerm 是便携的，命令一律放在程序目录下的 `bin`，拷的是旁边的 `micaterm-cli.exe`
 // （`bin` 里的副本自己认得上一级的数据目录，见 `app::data_dir_of`）。
@@ -31,9 +31,9 @@ pub enum AgentKind {
     Generic,
     Codex,
     ClaudeCode,
-    /// WorkBuddy（腾讯的桌面 AI 助手）：没有能在面板里跑的命令，只装 Skill，
-    /// 让它在自己的终端里用 `micaterm`（和 shell-rs 一样）。
-    WorkBuddy,
+    /// Antigravity CLI（`agy`，Google Antigravity 的命令行版）：Skill 装进它自己的
+    /// `~/.gemini/antigravity-cli/skills`，让 agy 在终端里能用 `micaterm`。
+    Antigravity,
 }
 
 impl AgentKind {
@@ -41,7 +41,7 @@ impl AgentKind {
     pub const ALL: [AgentKind; 4] = [
         AgentKind::ClaudeCode,
         AgentKind::Codex,
-        AgentKind::WorkBuddy,
+        AgentKind::Antigravity,
         AgentKind::Generic,
     ];
 
@@ -50,7 +50,7 @@ impl AgentKind {
             AgentKind::Generic => t!("cli.agent.generic"),
             AgentKind::Codex => "Codex".into(),
             AgentKind::ClaudeCode => "Claude Code".into(),
-            AgentKind::WorkBuddy => "WorkBuddy".into(),
+            AgentKind::Antigravity => "Antigravity".into(),
         }
     }
 
@@ -67,7 +67,7 @@ impl AgentKind {
             AgentKind::Generic => "agents",
             AgentKind::Codex => "codex",
             AgentKind::ClaudeCode => "claude",
-            AgentKind::WorkBuddy => "workbuddy",
+            AgentKind::Antigravity => "antigravity",
         }
     }
 
@@ -78,7 +78,8 @@ impl AgentKind {
             AgentKind::Generic => &[".agents", "skills"],
             AgentKind::Codex => &[".codex", "skills"],
             AgentKind::ClaudeCode => &[".claude", "skills"],
-            AgentKind::WorkBuddy => &[".workbuddy", "skills"],
+            // Antigravity CLI（`agy`）读自己的全局技能目录。
+            AgentKind::Antigravity => &[".gemini", "antigravity-cli", "skills"],
         }
     }
 }
@@ -476,8 +477,8 @@ mod tests {
             file(&[".codex", "skills"])
         );
         assert_eq!(
-            paths.skill_file(AgentKind::WorkBuddy),
-            file(&[".workbuddy", "skills"])
+            paths.skill_file(AgentKind::Antigravity),
+            file(&[".gemini", "antigravity-cli", "skills"])
         );
     }
 

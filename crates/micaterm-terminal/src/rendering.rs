@@ -17,6 +17,9 @@ static SOFTWARE: AtomicBool = AtomicBool::new(false);
 /// How often terminal output is drawn at most while the processor draws.
 pub const SOFTWARE_FRAME_INTERVAL: Duration = Duration::from_millis(50);
 
+/// 终端事件和 SFTP 事件循环的轮询间隔：两处以前各写一个 16ms，现在共用。
+pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+
 /// Note how `window`, the main window, is drawn. `main` calls this once the
 /// window is open; the UI tests never do, so they draw as with a GPU.
 pub fn note_renderer(window: &Window, cx: &mut App) {

@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use gpui_kit::{ClipboardItem, InputEvent as _, Modifiers, MouseMoveEvent, Window, point};
+use gpui_kit::{ClipboardItem, Window, point};
 use micaterm::app::{EditSnippet, ShowSnippets};
 use micaterm::host::{SnippetDraft, SnippetId};
 use micaterm::workspace::RightPanel;
@@ -111,26 +111,6 @@ fn assert_nothing_written(
     assert!(!written, "假 shell 收到了 {:?}", factory.written_text());
 }
 
-/// 鼠标移到片段那一行上。
-fn hover(cx: &mut TestAppContext, handle: WindowHandle<Root>, snippet: u64) {
-    in_frame(cx, handle, |window, cx| {
-        let position = window.find(("snippet", snippet)).bounds().center();
-        window.dispatch_event(
-            MouseMoveEvent {
-                position,
-                pressed_button: None,
-                modifiers: Modifiers::default(),
-            }
-            .to_platform_input(),
-            cx,
-        );
-    });
-}
-
-fn top(window: &mut Window, snippet: u64) -> gpui_kit::Pixels {
-    window.find(("snippet", snippet)).bounds().top()
-}
-
 fn listed(window: &mut Window, snippet: u64) -> bool {
     window.try_find(("snippet", snippet)).is_some()
 }
@@ -171,11 +151,11 @@ fn the_line_left_of_the_panel_drags_its_width_and_the_width_survives_closing(
         });
         cx.run_until_parked();
     };
-    assert_eq!(width(cx), px(280.));
+    assert_eq!(width(cx), px(380.));
 
     // 往左拖 60：面板变宽 60，卡片让出来。
     drag_by(cx, -60.);
-    assert_eq!(width(cx), px(340.));
+    assert_eq!(width(cx), px(440.));
     in_frame(cx, handle, |window, _| {
         let panel = window.find("snippets").bounds();
         assert!(window.find(("card", 1usize)).bounds().right() <= panel.left());
@@ -184,7 +164,7 @@ fn the_line_left_of_the_panel_drags_its_width_and_the_width_survives_closing(
     // 收起再展开：还是拖到的宽度。
     in_frame(cx, handle, |window, cx| window.press("ctrl-shift-s", cx));
     in_frame(cx, handle, |window, cx| window.press("ctrl-shift-s", cx));
-    assert_eq!(width(cx), px(340.));
+    assert_eq!(width(cx), px(440.));
 
     // 往右拖过头：停在下限 200。
     drag_by(cx, 400.);
@@ -200,10 +180,9 @@ fn the_panel_opens_beside_the_focused_card_and_says_where_snippets_go(cx: &mut T
     );
     in_frame(cx, handle, |window, _| {
         let panel = window.find("snippets").bounds();
-        // 宽 280（26 号停靠面板），在卡片和右侧栏之间。
-        assert_eq!(panel.size.width, px(280.));
+        // 右侧面板宽 380，在卡片右边。
+        assert_eq!(panel.size.width, px(380.));
         assert!(window.find(("card", 1usize)).bounds().right() <= panel.left());
-        assert!(panel.right() <= window.find("right-sidebar").bounds().left());
         assert_eq!(window.find("snippets-target").label(), Some("→ pwsh"));
     });
 
@@ -219,95 +198,52 @@ fn the_panel_opens_beside_the_focused_card_and_says_where_snippets_go(cx: &mut T
 }
 
 #[gpui_kit::test]
-fn snippets_are_listed_by_name_and_searched_by_name_or_command(cx: &mut TestAppContext) {
+fn the_headers_collapse_button_closes_the_panel(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open_snippets(cx, hosts_with_snippets());
+    in_frame(cx, handle, |window, cx| window.click("snippets-close", cx));
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("snippets").is_none());
+    });
+    assert_eq!(cx.update(|cx| workspace.read(cx).right_panel()), None);
+}
+
+#[gpui_kit::test]
+fn snippets_are_listed_by_name(cx: &mut TestAppContext) {
     let (handle, _, _) = open_snippets(cx, hosts_with_snippets());
     in_frame(cx, handle, |window, _| {
-        // 按名称排，不分大小写：Docker 容器、查看磁盘、重启 nginx。
-        let order = [top(window, DOCKER), top(window, DISK), top(window, NGINX)];
-        assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{order:?}");
+        // 按名称排，不分大小写：Docker 容器、查看磁盘、重启 nginx；不设搜索框，圆角行间距 2px。
+        assert!(window.try_find("snippets-search").is_none());
+        let docker = window.find(("snippet", DOCKER)).bounds();
+        let disk = window.find(("snippet", DISK)).bounds();
+        let nginx = window.find(("snippet", NGINX)).bounds();
+        assert_eq!(disk.top() - docker.bottom(), px(2.));
+        assert_eq!(nginx.top() - disk.bottom(), px(2.));
         assert_eq!(
             window.find(("snippet", DOCKER)).label(),
             Some("Docker 容器 · docker ps")
         );
     });
-
-    // 按命令搜。
-    in_frame(cx, handle, |window, cx| {
-        window.click("snippets-search", cx);
-        window.input("NGINX", cx);
-    });
-    in_frame(cx, handle, |window, _| {
-        assert!(listed(window, NGINX));
-        assert!(!listed(window, DISK));
-        assert!(!listed(window, DOCKER));
-    });
-
-    // 按名称搜。
-    in_frame(cx, handle, |window, cx| {
-        window.press("ctrl-a", cx);
-        window.input("磁盘", cx);
-    });
-    in_frame(cx, handle, |window, _| {
-        assert!(listed(window, DISK));
-        assert!(!listed(window, NGINX));
-    });
-
-    in_frame(cx, handle, |window, cx| window.input(" kubectl", cx));
-    in_frame(cx, handle, |window, _| {
-        assert_eq!(
-            window.find("snippets-no-match").label(),
-            Some("没有匹配的片段")
-        );
-    });
 }
 
 #[gpui_kit::test]
-fn a_click_types_or_runs_the_snippet_as_it_says(cx: &mut TestAppContext) {
+fn a_click_types_the_snippet_without_running(cx: &mut TestAppContext) {
     let (handle, _, factory) = open_snippets(cx, hosts_with_snippets());
     factory.clear_writes();
 
-    // 只输入的：放到提示符后面，焦点回到终端，好接着改。
+    // 没有尾部执行按钮；所有片段（包括旧库里曾带 run_on_click 的记录）单击一律只上屏、不带回车执行。
     in_frame(cx, handle, |window, cx| {
-        window.click(("snippet", DOCKER), cx)
+        assert!(window.try_find(("snippet-run", DOCKER)).is_none());
+        assert!(window.try_find(("snippet-run", DISK)).is_none());
+        window.click(("snippet", DOCKER), cx);
     });
     take_written(cx, handle, &factory, &format!("{CLEAR_LINE}docker ps"));
     in_frame(cx, handle, |window, _| {
         assert_eq!(terminal_focused(window), Some(true));
     });
 
-    // 点击就执行的：带上回车。
     in_frame(cx, handle, |window, cx| window.click(("snippet", DISK), cx));
-    take_written(cx, handle, &factory, &format!("{CLEAR_LINE}df -h\r"));
-}
-
-#[gpui_kit::test]
-fn the_button_shown_on_hover_always_runs(cx: &mut TestAppContext) {
-    let (handle, _, factory) = open_snippets(cx, hosts_with_snippets());
-    factory.clear_writes();
-    in_frame(cx, handle, |window, _| {
-        assert!(!window.find(("snippet-run", DOCKER)).visible());
-    });
-
-    hover(cx, handle, DOCKER);
-    in_frame(cx, handle, |window, cx| {
-        let run = window.find(("snippet-run", DOCKER));
-        assert!(run.visible());
-        // 只输入的片段显示 ▶，点击就执行的显示 ⚡。
-        assert_eq!(run.label(), Some("直接执行（单击这一行只输入）"));
-        assert!(!window.find(("snippet-run", DISK)).visible());
-        window.click(("snippet-run", DOCKER), cx);
-    });
-    // 只发一次，而且是执行。
-    take_written(cx, handle, &factory, &format!("{CLEAR_LINE}docker ps\r"));
+    take_written(cx, handle, &factory, &format!("{CLEAR_LINE}df -h"));
     assert_nothing_written(cx, handle, &factory);
-
-    hover(cx, handle, DISK);
-    in_frame(cx, handle, |window, _| {
-        assert_eq!(
-            window.find(("snippet-run", DISK)).label(),
-            Some("直接执行（单击这一行也会执行）")
-        );
-    });
 }
 
 #[gpui_kit::test]
@@ -316,13 +252,14 @@ fn a_new_snippet_is_made_in_the_dialog(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, cx| {
         assert_eq!(
             window.find("snippets-empty").label(),
-            Some("还没有命令片段")
+            Some("No snippets yet")
         );
         window.click("snippets-new", cx);
     });
 
-    // 名称马上能打字；没写命令就不让存，说清楚缺什么。
+    // 名称马上能打字，没有「自动执行」勾选框；没写命令就不让存，说清楚缺什么。
     in_frame(cx, handle, |window, cx| {
+        assert!(window.try_find("snippet-run-on-click").is_none());
         assert_eq!(window.find("snippet-name").focused(), Some(true));
         window.input("查看端口", cx);
         window.click("snippet-save", cx);
@@ -330,7 +267,7 @@ fn a_new_snippet_is_made_in_the_dialog(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find("snippet-form-error").label(),
-            Some("请输入命令")
+            Some("Enter a command")
         );
     });
     assert!(snippet_names(&workspace, cx).is_empty());
@@ -338,7 +275,6 @@ fn a_new_snippet_is_made_in_the_dialog(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, cx| {
         window.click("snippet-command", cx);
         window.input("ss -tlnp", cx);
-        window.click("snippet-run-on-click", cx);
         window.click("snippet-save", cx);
     });
     in_frame(cx, handle, |window, _| {
@@ -358,11 +294,11 @@ fn a_new_snippet_is_made_in_the_dialog(cx: &mut TestAppContext) {
             .unwrap()
     });
     assert_eq!(snippet.command, "ss -tlnp");
-    assert!(snippet.run_on_click);
-    // 存的时候不往终端里发东西。
+    assert!(!snippet.run_on_click);
+    // 存的时候不往终端里发东西；单击只上屏不执行。
     factory.clear_writes();
     in_frame(cx, handle, |window, cx| window.click(("snippet", 1u64), cx));
-    take_written(cx, handle, &factory, &format!("{CLEAR_LINE}ss -tlnp\r"));
+    take_written(cx, handle, &factory, &format!("{CLEAR_LINE}ss -tlnp"));
 }
 
 #[gpui_kit::test]
@@ -370,11 +306,10 @@ fn a_snippet_is_edited_in_the_same_dialog(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open_snippets(cx, hosts_with_snippets());
     dispatch(cx, handle, EditSnippet(SnippetId(DISK)));
     in_frame(cx, handle, |window, cx| {
+        assert!(window.try_find("snippet-run-on-click").is_none());
         assert_eq!(window.find("snippet-name").focused(), Some(true));
         window.press("ctrl-a", cx);
         window.input("磁盘", cx);
-        // 原来点击就执行，取消勾选。
-        window.click("snippet-run-on-click", cx);
         window.click("snippet-save", cx);
     });
     let snippet = cx.update(|cx| {
@@ -409,11 +344,11 @@ fn the_menu_types_copies_edits_and_deletes(cx: &mut TestAppContext) {
             assert_eq!(
                 labels,
                 [
-                    Some("输入到终端"),
-                    Some("复制命令"),
+                    Some("Type into Terminal"),
+                    Some("Copy Command"),
                     None,
-                    Some("编辑…"),
-                    Some("删除")
+                    Some("Edit…"),
+                    Some("Delete")
                 ]
                 .map(|label| label.map(str::to_owned))
             );
@@ -474,7 +409,7 @@ fn a_full_screen_program_keeps_the_snippet_out_and_the_panel_says_why(cx: &mut T
     in_frame(cx, handle, |window, cx| {
         assert_eq!(
             window.find("snippets-notice").label(),
-            Some("pwsh 正在运行全屏程序，没有输入「查看磁盘」")
+            Some("pwsh is running a full-screen program and did not receive \"查看磁盘\"")
         );
         // 点一下收起。
         window.click("snippets-notice", cx);
@@ -483,7 +418,7 @@ fn a_full_screen_program_keeps_the_snippet_out_and_the_panel_says_why(cx: &mut T
         assert!(window.try_find("snippets-notice").is_none());
     });
 
-    // 退出全屏程序以后照常发。
+    // 退出全屏程序以后照常发（仅上屏不执行）。
     factory.print(1, "\x1b[?1049l");
     let back = wait_until(cx, handle, |cx| {
         cx.update(|cx| {
@@ -494,7 +429,7 @@ fn a_full_screen_program_keeps_the_snippet_out_and_the_panel_says_why(cx: &mut T
     assert!(back);
     factory.clear_writes();
     in_frame(cx, handle, |window, cx| window.click(("snippet", DISK), cx));
-    take_written(cx, handle, &factory, &format!("{CLEAR_LINE}df -h\r"));
+    take_written(cx, handle, &factory, &format!("{CLEAR_LINE}df -h"));
 }
 
 /// 多行命令在不支持括号粘贴的 shell 里只能直接执行；只输入时不发，面板说为什么。
@@ -510,7 +445,7 @@ fn a_command_of_several_lines_is_only_typed_where_the_shell_can_take_it(cx: &mut
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find("snippets-notice").label(),
-            Some("pwsh 没有收到「更新」：这是一条多行命令，在这个终端里只能直接执行")
+            Some("pwsh did not receive \"更新\": This is a multi-line command and can only be run directly in this terminal")
         );
     });
 
@@ -533,21 +468,67 @@ fn a_command_of_several_lines_is_only_typed_where_the_shell_can_take_it(cx: &mut
     });
 }
 
-/// 没有终端标签时面板不列片段，只说「当前标签没有终端」。
+/// 悬停看一整条长命令时，提示条限宽换行，不会撑成横贯窗口的一条；命令仍是完整的。
+#[gpui_kit::test]
+fn a_long_command_gets_a_wrapped_bounded_tooltip(cx: &mut TestAppContext) {
+    // 像重装脚本那样：两行命令，第二行带着一整段没有空格的 ssh 公钥。
+    let command = format!(
+        "curl -O https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh || wget -O reinstall.sh $_\nbash reinstall.sh debian 13 --ssh-key \"ssh-rsa {}\"",
+        "A".repeat(600)
+    );
+    let mut hosts = HostData::empty();
+    hosts.insert_snippet_unnotified(SnippetDraft::new("重装系统", command.clone()));
+    let (handle, _, _) = open_snippets(cx, hosts);
+
+    in_frame(cx, handle, |window, cx| window.hover(("snippet", 1u64), cx));
+    cx.executor().advance_clock(Duration::from_secs(1));
+    cx.run_until_parked();
+
+    in_frame(cx, handle, |window, _| {
+        let tip = window.find("icon-button-tooltip");
+        // 悬停的仍是完整命令（只是显示上限宽四行）。
+        assert_eq!(tip.label(), Some(command.as_str()));
+        // 320 的内容宽 + 左右各 8 的内边距。
+        let bounds = tip.bounds();
+        let (width, height) = (bounds.size.width, bounds.size.height);
+        assert!(width <= px(336.), "长命令把提示条撑到了 {width:?}");
+        assert!(width >= px(200.), "提示条缩成了一列竖排字：{width:?} × {height:?}");
+        assert!(height <= px(120.), "提示条没有限行：{width:?} × {height:?}");
+    });
+}
+
+/// 没有终端标签时面板照常列出和新建片段；点片段发送时在底部提示「当前标签没有终端」。
 #[gpui_kit::test]
 fn without_a_terminal_tab_the_panel_says_there_is_no_terminal(cx: &mut TestAppContext) {
     let mut services = fake_services();
     services.hosts = hosts_with_snippets();
     let (handle, _) = open_workspace_with(cx, settings_store(), services);
     dispatch(cx, handle, ShowSnippets);
+    in_frame(cx, handle, |window, cx| {
+        assert!(window.try_find("snippets-target").is_none());
+        assert!(listed(window, DOCKER));
+        assert!(listed(window, DISK));
+        assert!(listed(window, NGINX));
+        window.click(("snippet", DISK), cx);
+    });
+    in_frame(cx, handle, |window, cx| {
+        assert_eq!(
+            window.find("snippets-notice").label(),
+            Some("The current tab has no terminal")
+        );
+        // 没有终端标签时新建保存，也立刻显示在列表里。
+        window.click("snippets-new", cx);
+    });
+    in_frame(cx, handle, |window, cx| {
+        window.input("查看内存", cx);
+        window.click("snippet-command", cx);
+        window.input("free -h", cx);
+        window.click("snippet-save", cx);
+    });
     in_frame(cx, handle, |window, _| {
         assert_eq!(
-            window.find("snippets-no-terminal").label(),
-            Some("当前标签没有终端")
+            window.find(("snippet", 4u64)).label(),
+            Some("查看内存 · free -h")
         );
-        assert!(window.try_find("snippets-target").is_none());
-        assert!(!listed(window, DISK));
-        // 「+」照常能新建。
-        assert!(window.find("snippets-new").visible());
     });
 }

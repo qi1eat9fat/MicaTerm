@@ -412,7 +412,7 @@ fn an_image_that_cannot_be_decoded_says_so(cx: &mut TestAppContext) {
             cx,
             &fixture,
             "preview-note"
-        ) == "无法显示这张图片"),
+        ) == "Could not display this image"),
         "没有说明"
     );
     assert!(!visible(cx, &fixture, "preview-picture"));
@@ -667,30 +667,35 @@ fn edit_switches_to_the_editor_already_open(cx: &mut TestAppContext) {
 // ---------- 下载 ----------
 
 #[gpui_kit::test]
-fn download_asks_over_the_preview_and_cancel_goes_back_to_it(cx: &mut TestAppContext) {
+fn download_from_the_preview_goes_straight_to_the_local_folder(cx: &mut TestAppContext) {
     let fixture = open_pictures(cx, &[("/pictures/图.png", PNG)]);
+    move_local_to_folder(cx, &fixture);
     double_click_row(cx, &fixture, "图.png");
     wait_for_scale(cx, &fixture);
 
     click(cx, &fixture, "preview-download");
-    wait_visible(cx, &fixture, "download-confirm");
-    // 确认框在预览上面，预览还开着；目标默认是本地一侧的当前目录。
-    assert!(visible(cx, &fixture, "preview-dialog"));
-    let target = in_frame(cx, fixture.handle, |window, _| {
-        window.find("download-target").value().map(str::to_owned)
-    });
-    assert_eq!(target.as_deref(), Some(LOCAL_DOWNLOADS));
-
-    // 取消：回到预览，焦点也回来了，缩放的按键能用。
-    press(cx, &fixture, "escape");
+    // 不再先确认：直接下载到本地一侧的当前目录，预览还开着。
     assert!(!visible(cx, &fixture, "download-confirm"));
+    let downloads = fixture.sftp.downloads.clone();
+    assert!(
+        wait_until(cx, fixture.handle, |_| !downloads
+            .lock()
+            .unwrap()
+            .is_empty()),
+        "工作线程没有收到下载"
+    );
+    let downloads = downloads.lock().unwrap();
+    assert_eq!(downloads[0].sources()[0].as_str(), "/pictures/图.png");
+    assert_eq!(
+        downloads[0].destination(),
+        std::path::Path::new(local_folder())
+    );
     assert!(visible(cx, &fixture, "preview-dialog"));
-    assert!(fixture.sftp.downloads.lock().unwrap().is_empty());
     press(cx, &fixture, "ctrl-0");
     wait_for_zoom(cx, &fixture, "100%");
 }
 
-/// 本地一侧的目录，两个系统上都是绝对路径：确认框只收绝对路径。
+/// 本地一侧的目录，两个系统上都是绝对路径：下载的目标引擎只收绝对路径。
 fn local_folder() -> &'static str {
     if cfg!(windows) {
         r"C:\收到的"
@@ -699,12 +704,11 @@ fn local_folder() -> &'static str {
     }
 }
 
-#[gpui_kit::test]
-fn a_confirmed_download_goes_into_the_queue_of_this_tab(cx: &mut TestAppContext) {
-    let fixture = open_pictures(cx, &[("/pictures/图.png", PNG)]);
+/// 把本地一侧换到完整路径：下载直接落到本地一侧现在的目录。
+fn move_local_to_folder(cx: &mut TestAppContext, fixture: &Fixture) {
     command(
         cx,
-        &fixture,
+        fixture,
         SftpTabCommand::Navigate {
             side: CardSide::Local,
             path: local_folder().into(),
@@ -720,11 +724,15 @@ fn a_confirmed_download_goes_into_the_queue_of_this_tab(cx: &mut TestAppContext)
         }),
         "本地一侧没有换目录"
     );
+}
+
+#[gpui_kit::test]
+fn a_download_from_the_preview_goes_into_the_queue_of_this_tab(cx: &mut TestAppContext) {
+    let fixture = open_pictures(cx, &[("/pictures/图.png", PNG)]);
+    move_local_to_folder(cx, &fixture);
     double_click_row(cx, &fixture, "图.png");
     wait_visible(cx, &fixture, "preview-download");
     click(cx, &fixture, "preview-download");
-    wait_visible(cx, &fixture, "download-confirm");
-    click(cx, &fixture, "download-confirm");
 
     let downloads = fixture.sftp.downloads.clone();
     assert!(
@@ -742,7 +750,7 @@ fn a_confirmed_download_goes_into_the_queue_of_this_tab(cx: &mut TestAppContext)
         cx.update(|cx| tab.read(cx).transfer_queue().entries().len()),
         1
     );
-    // 框关了，预览还开着。
+    // 没有确认框，预览还开着。
     assert!(!visible(cx, &fixture, "download-confirm"));
     assert!(visible(cx, &fixture, "preview-dialog"));
 }
@@ -762,7 +770,7 @@ fn a_local_file_has_no_download(cx: &mut TestAppContext) {
     assert!(!visible(cx, &fixture, "preview-download"));
     assert!(!visible(cx, &fixture, "preview-edit"));
     let info = label(cx, &fixture, "preview-info");
-    assert!(info.contains("本机"), "{info}");
+    assert!(info.contains("This Computer"), "{info}");
     press(cx, &fixture, "escape");
 
     preview_of(cx, &fixture, false, &format!("{LOCAL_DOWNLOADS}/README.md"));
@@ -777,13 +785,21 @@ fn a_local_file_has_no_download(cx: &mut TestAppContext) {
 fn an_image_over_the_limit_is_refused_and_offers_the_download(cx: &mut TestAppContext) {
     let large = vec![0; IMAGE_LIMIT as usize + 1];
     let fixture = open_pictures(cx, &[("/pictures/图.png", large.as_slice())]);
+    move_local_to_folder(cx, &fixture);
     double_click_row(cx, &fixture, "图.png");
     wait_visible(cx, &fixture, "preview-refused");
     assert!(!visible(cx, &fixture, "preview-dialog"));
     let text = label(cx, &fixture, "preview-refused-text");
     assert!(text.contains("20.0 MB"), "{text}");
     click(cx, &fixture, "preview-refused-download");
-    wait_visible(cx, &fixture, "download-confirm");
+    let downloads = fixture.sftp.downloads.clone();
+    assert!(
+        wait_until(cx, fixture.handle, |_| !downloads
+            .lock()
+            .unwrap()
+            .is_empty()),
+        "工作线程没有收到下载"
+    );
 }
 
 #[gpui_kit::test]

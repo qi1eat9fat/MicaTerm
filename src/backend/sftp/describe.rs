@@ -291,29 +291,29 @@ mod tests {
     fn engine_errors_read_as_they_did() {
         assert_eq!(
             describe_reason(&reason(SftpError::Exists { name: "b".into() })),
-            "已有名为「b」的项目"
+            "An item named \"b\" already exists"
         );
         assert_eq!(
             describe_reason(&reason(SftpError::LocalFolderMissing {
                 path: "/tmp/没有".into()
             })),
-            "本地目录 /tmp/没有 不存在"
+            "The local folder /tmp/没有 does not exist"
         );
         assert_eq!(
             describe_reason(&reason(DownloadError::NameInvalid { name: "a:b".into() })),
-            "名称「a:b」在本机无效"
+            "The name \"a:b\" is not valid on this computer"
         );
         assert_eq!(
             describe_reason(&reason(JournalError::Mismatch)),
-            "续传记录与当前来源或服务器不匹配"
+            "The resume record does not match the current source or server"
         );
         assert_eq!(
             describe_reason(&reason(EditError::Shrank)),
-            "文件在读取时变短了，请重新打开"
+            "The file became shorter while reading; open it again"
         );
         assert_eq!(
             describe_reason(&reason(Cancelled)),
-            "传输已停止，进度已保留"
+            "The transfer stopped; progress was kept"
         );
         // The modification time as it always read: debug-formatted seconds.
         assert_eq!(
@@ -321,14 +321,14 @@ mod tests {
                 size: 12,
                 modified: Some(1_700_000_000)
             })),
-            "远程项目已存在（12 字节，修改时间 Some(1700000000)）。覆盖会替换这个文件或链接。"
+            "The remote item already exists (12 bytes, modified Some(1700000000)). Overwriting replaces this file or link."
         );
         assert_eq!(
             describe_reason(&reason(DownloadError::ExistsChanged {
                 size: 3,
                 modified: None
             })),
-            "目标在下载期间发生变化。本地已有同名项目（3 字节，修改时间 None）。覆盖会替换它。"
+            "The target changed during the download. An item with the same name already exists locally (3 bytes, modified None). Overwriting replaces it."
         );
     }
 
@@ -338,27 +338,36 @@ mod tests {
             JournalError::Unreadable,
             io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
         ));
-        assert_eq!(describe_reason(&cause), "无法读取续传记录: denied");
+        assert_eq!(
+            describe_reason(&cause),
+            "Could not read the resume record: denied"
+        );
         let failed = cause.under(UploadError::Failed);
         // The question shows the first link, which says it all.
         assert_eq!(
             describe_reason_link(&failed),
-            "无法上传：无法读取续传记录: denied"
+            "Cannot upload: Could not read the resume record: denied"
         );
         assert_eq!(describe_reason(&failed), describe_reason_link(&failed));
         let listing = Reason::from(anyhow!("no such file")).under(SftpError::ListFailed);
-        assert_eq!(describe_reason(&listing), "无法读取目录：no such file");
+        assert_eq!(
+            describe_reason(&listing),
+            "Cannot read this directory: no such file"
+        );
         let deleting = Reason::from(anyhow!("busy")).under(SftpError::DeleteFailed);
-        assert_eq!(describe_reason_link(&deleting), "无法删除：busy");
+        assert_eq!(describe_reason_link(&deleting), "Could not delete: busy");
         let downloading = Reason::new(DownloadError::SourceShrank).under(DownloadError::Failed);
         assert_eq!(
             describe_reason_link(&downloading),
-            "无法下载：远程文件在下载期间变短，已停止"
+            "Cannot download: The remote file became shorter during the download; stopped"
         );
         // A notice shows only the first link; a detail all of it.
         let unsaved = Reason::from(wrap(JournalError::Unsaved, anyhow!("disk full")));
-        assert_eq!(describe_reason_link(&unsaved), "无法保存续传进度");
-        assert_eq!(describe_reason(&unsaved), "无法保存续传进度: disk full");
+        assert_eq!(describe_reason_link(&unsaved), "Could not save resume progress");
+        assert_eq!(
+            describe_reason(&unsaved),
+            "Could not save resume progress: disk full"
+        );
     }
 
     #[test]
@@ -367,23 +376,26 @@ mod tests {
             io::ErrorKind::NotConnected,
             SftpError::NoConnection,
         ));
-        assert_eq!(describe_sftp_error(&error), "SFTP 未连接");
+        assert_eq!(describe_sftp_error(&error), "SFTP is not connected");
     }
 
     #[test]
     fn why_there_is_no_connection() {
-        assert_eq!(describe_disconnect(&Disconnect::ByUser), "SFTP 已断开");
+        assert_eq!(
+            describe_disconnect(&Disconnect::ByUser),
+            "SFTP is disconnected"
+        );
         assert_eq!(
             describe_disconnect(&Disconnect::Dropped),
-            "SFTP 连接中断，请重新连接"
+            "The SFTP connection dropped; reconnect to continue"
         );
         assert_eq!(
             describe_disconnect(&Disconnect::DroppedKept),
-            "连接中断，传输进度已保留"
+            "The connection dropped; transfer progress was kept"
         );
         // Starting SFTP is the engine's to word, logging in the SSH layer's.
         let slow = Disconnect::LoginFailed(reason(SftpError::StartTimeout));
-        assert_eq!(describe_disconnect(&slow), "启动 SFTP 超时");
+        assert_eq!(describe_disconnect(&slow), "Starting SFTP timed out");
         let login = anyhow!(ConnectError::Handshake);
         let expected = describe_login_error(&login);
         assert_eq!(
@@ -401,10 +413,13 @@ mod tests {
 
     #[test]
     fn the_editor_s_failures_read_as_they_did() {
-        assert_eq!(describe_read_failure(&ReadFailure::NotFile), "不是普通文件");
+        assert_eq!(
+            describe_read_failure(&ReadFailure::NotFile),
+            "Not a regular file"
+        );
         assert_eq!(
             describe_read_failure(&ReadFailure::TooLarge(6_000_000)),
-            "文件太大（6000000 字节）"
+            "The file is too large (6000000 bytes)"
         );
         assert_eq!(
             describe_read_failure(&ReadFailure::Failed("文件不存在".into())),
@@ -412,7 +427,7 @@ mod tests {
         );
         assert_eq!(
             describe_save_failure(&SaveFailure::Changed { now: None }),
-            "文件在打开后已被修改"
+            "The file was changed after it was opened"
         );
         assert_eq!(
             describe_save_failure(&SaveFailure::Interrupted("reset".into())),

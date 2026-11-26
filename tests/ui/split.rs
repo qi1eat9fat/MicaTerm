@@ -126,7 +126,7 @@ fn closing_every_card_closes_the_tab(cx: &mut TestAppContext) {
     settle(cx, handle);
 
     // 不是焦点卡片也能关：菜单是在它的终端上开的。
-    click_terminal_menu(cx, handle, 1, "关闭卡片");
+    click_terminal_menu(cx, handle, 1, "Close Card");
     settle(cx, handle);
     in_frame(cx, handle, |window, _| {
         assert!(window.try_find(CARD_1).is_none());
@@ -160,7 +160,13 @@ fn ctrl_shift_enter_zooms_the_focused_card_and_back(cx: &mut TestAppContext) {
         assert_eq!(window.find(CARD_2).bounds(), whole);
         assert_eq!(window.find(("terminal", 2usize)).focused(), Some(true));
     });
-    assert!(terminal_menu_labels(cx, handle, 2).contains(&"还原卡片".to_string()));
+    let labels = terminal_menu_labels(cx, handle, 2);
+    assert!(
+        !labels
+            .iter()
+            .any(|label| label == "Zoom Card" || label == "Restore Card"),
+        "菜单里不该再有放大 / 还原：{labels:?}"
+    );
     assert_eq!(
         cx.update(|cx| workspace.read(cx).zoomed_card()),
         Some(CardId(2))
@@ -175,43 +181,41 @@ fn ctrl_shift_enter_zooms_the_focused_card_and_back(cx: &mut TestAppContext) {
         assert!(window.find(CARD_1).visible());
         assert_eq!(window.find(CARD_2).bounds(), tiled);
     });
-    assert!(terminal_menu_labels(cx, handle, 2).contains(&"放大卡片".to_string()));
+    let zoomed = cx.update(|cx| {
+        let card = workspace.read(cx).card(CardId(2), cx).unwrap();
+        card.read(cx).is_zoomed()
+    });
+    assert!(!zoomed, "the card still thinks it is zoomed");
+    let labels = terminal_menu_labels(cx, handle, 2);
+    assert!(
+        !labels
+            .iter()
+            .any(|label| label == "Zoom Card" || label == "Restore Card"),
+        "菜单里不该再有放大 / 还原：{labels:?}"
+    );
     assert_eq!(cx.update(|cx| workspace.read(cx).zoomed_card()), None);
 }
 
-/// 终端右键菜单的「放大卡片」放大的是那张卡片，再点「还原卡片」还原；只有一张卡片时不放大。
+/// 右键菜单最后一组只剩「移到新标签」「关闭卡片」；放大 / 还原不进菜单。
 #[gpui_kit::test]
-fn the_terminal_menu_zooms_its_card_and_back(cx: &mut TestAppContext) {
+fn the_card_menu_has_no_zoom_item(cx: &mut TestAppContext) {
     let (handle, workspace, _, _) = open_tab(cx, FakeTerminalFactory::default());
-    dispatch(cx, handle, ToggleZoomCard);
-    assert_eq!(cx.update(|cx| workspace.read(cx).zoomed_card()), None);
     split_again(cx, handle, SplitRight);
     settle(cx, handle);
 
-    // 菜单最后一组是放大、移到新标签、关闭。
     let labels = terminal_menu_labels(cx, handle, 1);
     assert_eq!(
-        labels[labels.len() - 3..],
-        ["放大卡片", "移到新标签", "关闭卡片"],
+        labels[labels.len() - 2..],
+        ["Move to New Tab", "Close Card"],
         "{labels:?}"
     );
-
-    click_terminal_menu(cx, handle, 1, "放大卡片");
-    settle(cx, handle);
-    assert_eq!(
-        cx.update(|cx| workspace.read(cx).zoomed_card()),
-        Some(CardId(1))
+    assert!(
+        !labels
+            .iter()
+            .any(|label| label == "Zoom Card" || label == "Restore Card"),
+        "{labels:?}"
     );
-    in_frame(cx, handle, |window, _| {
-        assert!(window.try_find(CARD_2).is_none())
-    });
-
-    click_terminal_menu(cx, handle, 1, "还原卡片");
-    settle(cx, handle);
     assert_eq!(cx.update(|cx| workspace.read(cx).zoomed_card()), None);
-    in_frame(cx, handle, |window, _| {
-        assert!(window.find(CARD_2).visible())
-    });
 }
 
 /// Alt+方向键在卡片之间移动焦点，标签跟着焦点卡片。
@@ -376,36 +380,34 @@ fn a_narrow_card_hides_parts_of_its_status_bar(cx: &mut TestAppContext) {
             bar.left() >= card.left() && bar.right() <= card.right(),
             "{bar:?} {card:?}"
         );
-        for part in ["card-status-state", "card-status-terminal"] {
-            let bounds = window.find((part, 5usize)).bounds();
-            assert!(
-                bounds.left() >= bar.left() && bounds.right() <= bar.right() + px(0.5),
-                "{part} {bounds:?} 出了状态栏 {bar:?}"
-            );
-        }
-        // 正中的路径放不下就整段让位；宽的卡片照常写在正中。
-        assert!(window.try_find(("card-status-path", 5usize)).is_none());
+        // 本地卡片只有路径一段：路径自己截断，不出状态栏。
+        let path = window.find(("card-status-path-group", 5usize)).bounds();
+        assert!(
+            path.left() >= bar.left() && path.right() <= bar.right() + px(0.5),
+            "{path:?} 出了状态栏 {bar:?}"
+        );
+        // 本地卡片没有系统和连接状态那两段。
+        assert!(window.try_find(("card-status-system", 5usize)).is_none());
+        assert!(window.try_find(("card-status-state", 5usize)).is_none());
+        // 宽的卡片照常把路径写在左边。
         assert!(window.find(("card-status-path", 1usize)).visible());
     });
 }
 
-/// 卡片顶行右边：「向右分屏」「向下分屏」，标签里不止一张时还有「关闭」（只有一张时和标签的 × 重复，不放）。
+/// 卡片顶行右边：「向右分屏」「向下分屏」「关闭」；「关闭」一直在，标签里只剩一张卡片时也放。
 #[gpui_kit::test]
-fn the_title_row_closes_the_card_only_when_the_tab_has_others(cx: &mut TestAppContext) {
+fn the_title_row_closes_the_card(cx: &mut TestAppContext) {
     let (handle, workspace, _, _) = open_tab(cx, FakeTerminalFactory::default());
     in_frame(cx, handle, |window, _| {
         assert!(window.find(("card-split-right", 1usize)).visible());
-        assert!(window.try_find(("card-close", 1usize)).is_none());
+        assert_eq!(
+            window.find(("card-close", 1usize)).label(),
+            Some("Close Card")
+        );
     });
 
     split_again(cx, handle, SplitRight);
     settle(cx, handle);
-    in_frame(cx, handle, |window, _| {
-        assert_eq!(
-            window.find(("card-close", 1usize)).label(),
-            Some("关闭卡片")
-        );
-    });
     in_frame(cx, handle, |window, cx| {
         window.click(("card-close", 1usize), cx)
     });
@@ -413,7 +415,11 @@ fn the_title_row_closes_the_card_only_when_the_tab_has_others(cx: &mut TestAppCo
 
     assert_eq!(card_ids(cx, &workspace), [2]);
     in_frame(cx, handle, |window, _| {
-        assert!(window.try_find(("card-close", 2usize)).is_none());
+        // 只剩一张卡片：关闭按钮还在。
+        assert_eq!(
+            window.find(("card-close", 2usize)).label(),
+            Some("Close Card")
+        );
     });
 }
 
@@ -445,6 +451,43 @@ fn the_new_cards_close_button_takes_it_back(cx: &mut TestAppContext) {
     });
     settle(cx, handle);
 
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("card-picker-search").is_none());
+        assert_eq!(window.find(("terminal", 1usize)).focused(), Some(true));
+    });
+    assert_eq!(card_ids(cx, &workspace), [1]);
+}
+
+/// 新卡片搜索框：无匹配时显示空状态，点清空按钮恢复快捷项并保留焦点；状态栏「Esc 取消」同样可点击撤销。
+#[gpui_kit::test]
+fn the_new_card_clears_its_search_and_cancels_from_the_status_bar(cx: &mut TestAppContext) {
+    let (handle, workspace, _, _) = open_tab(cx, FakeTerminalFactory::default());
+    dispatch(cx, handle, SplitRight);
+    settle(cx, handle);
+
+    in_frame(cx, handle, |window, cx| window.input("no-such-host", cx));
+    settle(cx, handle);
+    in_frame(cx, handle, |window, _| {
+        assert!(window.find("card-picker-empty").visible());
+        assert!(window.find("card-picker-clear").visible());
+    });
+    assert!(picker_items(cx, handle).is_empty());
+
+    in_frame(cx, handle, |window, cx| {
+        window.click("card-picker-clear", cx)
+    });
+    settle(cx, handle);
+    in_frame(cx, handle, |window, _| {
+        assert!(window.try_find("card-picker-empty").is_none());
+        assert!(window.try_find("card-picker-clear").is_none());
+        assert_eq!(window.find("card-picker-search").focused(), Some(true));
+    });
+    assert_eq!(picker_items(cx, handle).len(), 2);
+
+    in_frame(cx, handle, |window, cx| {
+        window.click("card-picker-cancel", cx)
+    });
+    settle(cx, handle);
     in_frame(cx, handle, |window, _| {
         assert!(window.try_find("card-picker-search").is_none());
         assert_eq!(window.find(("terminal", 1usize)).focused(), Some(true));
@@ -563,8 +606,8 @@ fn splitting_shows_a_new_card_to_choose_from_and_escape_takes_it_back(cx: &mut T
         assert!(search.left() >= card.right(), "{card:?} {search:?}");
     });
     let items = picker_items(cx, handle);
-    assert_eq!(items[1], "本地终端", "{items:?}");
-    assert!(items[0].starts_with("再开一个 "), "{items:?}");
+    assert_eq!(items[1], "Local Terminal", "{items:?}");
+    assert!(items[0].starts_with("Open Another "), "{items:?}");
     assert_eq!(factory.starts(), 1);
     // 新卡片不是卡片：标签里还是一张，焦点卡片还是它。
     assert_eq!(card_ids(cx, &workspace), [1]);
@@ -640,11 +683,11 @@ fn the_status_bar_buttons_split_their_own_card(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find(("card-split-right", 1usize)).label(),
-            Some("向右分屏")
+            Some("Split Right")
         );
         assert_eq!(
             window.find(("card-split-down", 1usize)).label(),
-            Some("向下分屏")
+            Some("Split Down")
         );
         // 不放大时没有「还原」。
         assert!(window.try_find(("card-restore", 1usize)).is_none());
@@ -687,7 +730,7 @@ fn double_clicking_the_status_bar_zooms_the_card_and_back(cx: &mut TestAppContex
         assert!(window.try_find(CARD_2).is_none());
         assert_eq!(
             window.find(("card-restore", 1usize)).label(),
-            Some("还原卡片")
+            Some("Restore Card")
         );
     });
 
@@ -710,7 +753,7 @@ fn the_terminal_menu_moves_a_card_to_a_new_tab(cx: &mut TestAppContext) {
     split_again(cx, handle, SplitRight);
     settle(cx, handle);
 
-    click_terminal_menu(cx, handle, 1, "移到新标签");
+    click_terminal_menu(cx, handle, 1, "Move to New Tab");
     settle(cx, handle);
 
     cx.update(|cx| {
@@ -724,6 +767,6 @@ fn the_terminal_menu_moves_a_card_to_a_new_tab(cx: &mut TestAppContext) {
         assert_eq!(window.find(("terminal", 1usize)).focused(), Some(true));
     });
 
-    click_terminal_menu(cx, handle, 1, "移到新标签");
+    click_terminal_menu(cx, handle, 1, "Move to New Tab");
     cx.update(|cx| assert_eq!(workspace.read(cx).tab_ids().len(), 2));
 }

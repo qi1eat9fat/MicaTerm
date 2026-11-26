@@ -16,6 +16,7 @@ use super::store::{VaultStore, describe, is_wrong_password};
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::theme::space;
 use crate::ui::form::{FieldErrors, typed_secret};
 use crate::ui::modal::{
     ModalButtonTone, ModalInputKind, OnClick, modal_button, modal_checkbox, modal_field,
@@ -201,7 +202,7 @@ impl PasswordDialog {
         tokens: &Tokens,
         window: &Window,
         cx: &App,
-    ) -> Div {
+    ) -> AnyElement {
         modal_field(
             field,
             label,
@@ -226,7 +227,7 @@ impl PasswordDialog {
         div()
             .flex()
             .flex_1()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .when(self.mode == PasswordMode::FirstSave, |footer| {
                 footer.child(modal_button(
                     "vault-password-skip",
@@ -292,12 +293,13 @@ impl Render for PasswordDialog {
         let body = div()
             .flex()
             .flex_col()
-            .gap(px(8.))
+            .gap(space::SPACE_8)
             .child(modal_warn(
                 CatalogIcon::Shield,
                 title.clone(),
                 false,
                 &tokens,
+                cx,
             ))
             .child(modal_question(intro, &tokens))
             .when(changing, |body| {

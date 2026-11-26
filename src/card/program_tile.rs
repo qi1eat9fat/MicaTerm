@@ -1,29 +1,38 @@
-//! 程序图块：标签前面那一块（26 号 `.bdg`），彩色底加单色 `Icon`，颜色和图标由程序名表
-//! （`crate::programs`）查出来。卡片没有头部、标签不叠放（26 号），只有这一种。
-// 参考 gorex 的模型重写：tabs.go 的 `drawTile`。
+//! 程序图块与小徽章：一律实心圆角方块——`tile_bg` 做底、`tile_fg` 画图标（或写字），
+//! 浅色底描一圈细边；断开时方块变灰。标签、卡片标题行和新建卡片面板共用这一种画法。
 
 use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::programs::Program;
-use crate::theme::{Tokens, size};
+use crate::theme::{Tokens, TypeScale, WEIGHT_SEMIBOLD, size};
 
-/// 标签前面那一块的边长（26 号 `.bdg`）。
-const TAB_TILE: Pixels = px(14.);
-
-/// 标签前面的那一块（26 号 `.bdg`）：14×14、圆角 4 的方块，只放焦点卡片的一块，不叠放。
-/// 远程卡片没认出程序时是系统徽章（系统标志，或者名称首字），认出时是程序的图块。
-/// 无障碍名称是程序名。
+/// 标签和卡片顶行前面的实心方块（边长 `size::TAB_BADGE`）。
 pub fn render_tab_tile(
     id: ElementId,
     program: &Program,
     tokens: &Tokens,
 ) -> impl IntoElement + use<> {
+    let scale = TypeScale::from_base(crate::theme::INTERFACE_FONT_SIZE);
+    // 断开的卡片：仍是同样大小的实心方块，只是褪成中性灰、图标用底色挖空，
+    // 免得底色太浅让方块看着比别的图块小一圈。
     let (background, ink): (Hsla, Hsla) = if program.off {
-        (tokens.faint, rgb(0xffffff).into())
+        (tokens.faint, tokens.content)
     } else {
         (rgb(program.tile_bg).into(), rgb(program.tile_fg).into())
+    };
+    let glyph = match &program.letter {
+        Some(letter) => div()
+            .text_size(scale.xs)
+            .line_height(scale.xs)
+            .font_weight(WEIGHT_SEMIBOLD)
+            .child(letter.clone())
+            .into_any_element(),
+        None => Icon::default()
+            .path(program.glyph)
+            .size(size::TAB_BADGE_GLYPH)
+            .into_any_element(),
     };
     div()
         .id(id)
@@ -33,19 +42,13 @@ pub fn render_tab_tile(
         .flex_none()
         .items_center()
         .justify_center()
-        .size(TAB_TILE)
-        .rounded(px(4.))
+        .size(size::TAB_BADGE)
+        .rounded(size::RADIUS_SM)
         .bg(background)
         .text_color(ink)
-        .when(program.border && !program.off, |tile| {
-            tile.border(px(0.5)).border_color(hsla(0., 0., 0., 0.12))
+        // 浅色底的品牌图块（Codex、Bun）描一圈细边，在白底上分得开。
+        .when(program.border, |tile| {
+            tile.border_1().border_color(tokens.line)
         })
-        .map(|tile| match &program.letter {
-            Some(letter) => tile
-                .text_size(size::BADGE_TEXT)
-                .font_weight(FontWeight::BOLD)
-                .line_height(px(9.))
-                .child(letter.clone()),
-            None => tile.child(Icon::default().path(program.glyph).size(px(10.))),
-        })
+        .child(glyph)
 }

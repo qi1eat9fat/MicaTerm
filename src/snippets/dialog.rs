@@ -1,6 +1,6 @@
-//! 命令片段对话框：名称、命令（等宽、可以多行）、「点击时自动执行」。新建和编辑共用；
-//! 保存时才校验，校验过了才写进存储。样子是共用的 `ui::modal` 弹窗（26 号），字段照新建主机的写法：
-//! 字段名在上、框在下；底部「取消 Esc」「保存 Enter」。名称框里回车就是保存，命令框里回车换行。
+//! 命令片段对话框：名称、命令（等宽、可以多行）。新建和编辑共用；保存时才校验，校验过了才写进存储。
+//! 样子是共用的 `ui::modal` 弹窗（26 号），字段照新建主机的写法：字段名在上、框在下；底部「取消 Esc」「保存 Enter」。
+//! 名称框里回车就是保存，命令框里回车换行。
 // 参考 since2006/shell-rs @ b2a307a: src/snippets/snippet_dialog.rs（去掉分类和作用域；
 // 校验错误写在字段下面，不弹通知）。
 
@@ -11,12 +11,13 @@ use crate::app::CatalogIcon;
 use crate::host::{HostStore, SnippetDraft, SnippetDraftError, SnippetId};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::theme::space;
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Confirm, ConfirmLine, open_confirm_dialog};
 use crate::ui::form::{FieldNote, form_field, form_group};
 use crate::ui::modal::{
-    ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button, modal_checkbox,
-    modal_dialog, modal_input, modal_textarea, render_modal,
+    ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button, modal_dialog, modal_input,
+    modal_textarea, render_modal,
 };
 
 /// 两个字段的错误共用的元素 id 前缀：红字是 `snippet-form-error`。
@@ -31,7 +32,6 @@ pub struct SnippetForm {
     editing_name: Option<SharedString>,
     name: Entity<InputState>,
     command: Entity<TextareaState>,
-    run_on_click: bool,
     /// 上一次保存为什么没过。
     error: Option<SnippetDraftError>,
     /// 对话框是哪一层：保存、取消时只关自己。
@@ -51,7 +51,6 @@ impl SnippetForm {
         let draft = snippet
             .as_ref()
             .map(|snippet| snippet.draft())
-            // 新建的片段默认只输入：执行一条还没看过的命令要用户自己勾。
             .unwrap_or_else(|| SnippetDraft::new("", ""));
         let name = cx.new(|cx| {
             InputState::new(window, cx)
@@ -77,6 +76,8 @@ impl SnippetForm {
             cx.subscribe(&command, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.clear_error(SnippetDraftError::Command, cx);
+                    // 空与非空切换时刷新 `modal_textarea` 的占位/等宽字体。
+                    cx.notify();
                 }
             }),
         ];
@@ -86,7 +87,6 @@ impl SnippetForm {
             editing_name: snippet.map(|snippet| snippet.name),
             name,
             command,
-            run_on_click: draft.run_on_click,
             error: None,
             layer: DialogLayer::new(),
             focus_handle: cx.focus_handle(),
@@ -108,7 +108,7 @@ impl SnippetForm {
             &self.name.read(cx).value(),
             &self.command.read(cx).value(),
         ) {
-            Ok(draft) => draft.with_run_on_click(self.run_on_click),
+            Ok(draft) => draft,
             Err(error) => {
                 self.error = Some(error);
                 cx.notify();
@@ -146,7 +146,7 @@ impl SnippetForm {
         let cancel: OnClick = Box::new(move |_, window, cx| layer.close(window, cx));
         div()
             .flex()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(modal_button(
                 "snippet-cancel",
                 t!("snippets.dialog.cancel"),
@@ -220,18 +220,6 @@ impl Render for SnippetForm {
                 self.error_note(SnippetDraftError::Command),
                 &tokens,
             ),
-            modal_checkbox(
-                "snippet-run-on-click",
-                self.run_on_click,
-                t!("snippets.dialog.run_on_click"),
-                None,
-                Box::new(cx.listener(|this, _, _, cx| {
-                    this.run_on_click = !this.run_on_click;
-                    cx.notify();
-                })),
-                &tokens,
-            )
-            .into_any_element(),
         ]);
         let footer = self.render_footer(&tokens, window, cx);
         render_modal(Some(head), body, footer, &tokens, window, cx)
@@ -253,8 +241,8 @@ pub fn open_snippet_dialog(
     let layer = view.read(cx).layer.clone();
     let name = view.read(cx).name.clone();
     layer.open(
-        move |dialog, _, _| {
-            modal_dialog(dialog)
+        move |dialog, _, cx| {
+            modal_dialog(dialog, &Tokens::current(cx))
                 // 回车由名称框自己处理（保存）；命令框里回车是换行。gpui-component 的 `Confirm`
                 // 不关框，否则没校验就关掉了。
                 .on_ok(|_, _, _| false)

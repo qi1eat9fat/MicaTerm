@@ -1,4 +1,4 @@
-//! 设置标签各类的页面：外观、终端（26 号「设置」）。每个页面返回从上到下的分组标题和设置行。
+//! 设置标签各类的页面：外观（含界面语言）、终端（26 号「设置」）。每个页面返回从上到下的分组标题和设置行。
 
 use std::rc::Rc;
 
@@ -16,7 +16,8 @@ use super::{
     AppSettings, Appearance, DEFAULT_TERMINAL_FONT_FAMILY, RightClick, SettingsStore,
     TERMINAL_FONT_SIZE_RANGE, TERMINAL_LINE_HEIGHT_RANGE,
 };
-use crate::i18n::t;
+use crate::i18n::{Language, t};
+use crate::theme::space;
 use crate::theme::{Tokens, TypeScale};
 
 /// 改一项设置，写进存储（存储再写文件、通知窗口壳去应用）。
@@ -31,21 +32,51 @@ pub(super) fn write(
 /// 应用外观的三个选项，按切换按钮从左到右。
 const APPEARANCES: [Appearance; 3] = [Appearance::System, Appearance::Light, Appearance::Dark];
 
-/// 数字下拉框的宽（26 号 `.stg-dd`）。
+/// 数字下拉框的宽。
 const NUMBER_WIDTH: Pixels = px(96.);
-/// 长一些的下拉框、输入框的宽（字体、右键行为、Shell、本地目录）。
-pub(super) const WIDE_WIDTH: Pixels = px(240.);
+/// 长一些的下拉框、输入框的宽（空壳的 240，按界面字号折算；字体、右键行为、Shell、本地目录）。
+pub(super) const WIDE_WIDTH: Pixels = px(192.);
 
-/// 外观：常规（应用外观、Mica 背景）、终端主题。
+/// 外观：常规（界面语言、应用外观、Mica 背景）、终端主题。
 pub(super) fn appearance(
     tab: &SettingsTab,
     tokens: &Tokens,
-    _: &mut Window,
+    window: &mut Window,
     cx: &mut Context<SettingsTab>,
 ) -> Vec<AnyElement> {
     let store = tab.store.clone();
     let settings = store.read(cx).settings();
     let default = AppSettings::default();
+    // 终端主题只列当前界面明暗那一色：和窗口实际应用的一致（跟随系统时看当前系统外观）。
+    let theme_mode = settings.appearance.theme_mode(window.appearance());
+
+    // 界面语言：两项各自用本语言的名字（英文界面里给不认得中文的人看 "Chinese (Simplified)"）。
+    // 2026-11-24 用户定：从设置 › 应用挪到外观。
+    let language = {
+        let store = store.clone();
+        segmented_with_height(
+            "language",
+            Language::ALL
+                .iter()
+                .map(|language| match language {
+                    Language::ChineseSimplified => t!("settings.language.chinese"),
+                    Language::English => t!("settings.language.english"),
+                })
+                .collect(),
+            Language::ALL
+                .iter()
+                .position(|language| *language == settings.language)
+                .unwrap_or_default(),
+            Rc::new(move |index, _, cx| {
+                write(&store, cx, |settings| {
+                    settings.language = Language::ALL[index]
+                })
+            }),
+            CONTROL_HEIGHT,
+            tokens,
+            TypeScale::current(cx),
+        )
+    };
 
     let mode = {
         let store = store.clone();
@@ -67,6 +98,7 @@ pub(super) fn appearance(
             }),
             CONTROL_HEIGHT,
             tokens,
+            TypeScale::current(cx),
         )
     };
 
@@ -80,7 +112,26 @@ pub(super) fn appearance(
     );
 
     vec![
-        section(t!("settings.appearance.general"), None, true, tokens),
+        section(
+            t!("settings.appearance.general"),
+            None,
+            true,
+            tokens,
+            TypeScale::current(cx),
+        ),
+        row(
+            t!("settings.appearance.language"),
+            Some(t!("settings.appearance.language_description")),
+            reset_if(
+                settings.language != default.language,
+                "language",
+                &store,
+                |settings| settings.language = AppSettings::default().language,
+                tokens,
+            ),
+            language,
+            tokens,
+        ),
         row(
             t!("settings.appearance.mode"),
             Some(t!("settings.appearance.mode_description")),
@@ -107,13 +158,16 @@ pub(super) fn appearance(
             mica,
             tokens,
         ),
-        section(
+        // 标题和说明跟「Mica 背景」同一级（用户 2026-11-26）：正文色标题、下面一句说明，
+        // 右边没有控件——选哪套主题由下面的卡片决定。
+        row(
             t!("settings.appearance.terminal_theme"),
             Some(t!("settings.appearance.terminal_theme_description")),
-            false,
+            None,
+            div(),
             tokens,
         ),
-        terminal_theme_grid(&store, tokens, cx).into_any_element(),
+        terminal_theme_grid(&store, theme_mode, tokens, cx).into_any_element(),
     ]
 }
 
@@ -160,8 +214,9 @@ fn number_dropdown(
     store: &Entity<SettingsStore>,
     set: fn(&mut AppSettings, f32),
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> impl IntoElement + use<> {
-    number_dropdown_shown(id, current, values, number_text, store, set, tokens)
+    number_dropdown_shown(id, current, values, number_text, store, set, tokens, scale)
 }
 
 fn number_dropdown_shown(
@@ -172,6 +227,7 @@ fn number_dropdown_shown(
     store: &Entity<SettingsStore>,
     set: fn(&mut AppSettings, f32),
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> impl IntoElement + use<> {
     let store = store.clone();
     let chosen = values
@@ -189,6 +245,7 @@ fn number_dropdown_shown(
         }),
         NUMBER_WIDTH,
         tokens,
+        scale,
     )
 }
 
@@ -212,7 +269,7 @@ const RIGHT_CLICKS: [(RightClick, &str); 4] = [
 pub(super) fn terminal(
     tab: &SettingsTab,
     tokens: &Tokens,
-    window: &mut Window,
+    _window: &mut Window,
     cx: &mut Context<SettingsTab>,
 ) -> Vec<AnyElement> {
     let store = tab.store.clone();
@@ -250,6 +307,7 @@ pub(super) fn terminal(
             }),
             WIDE_WIDTH,
             tokens,
+            TypeScale::current(cx),
         )
     };
 
@@ -260,6 +318,7 @@ pub(super) fn terminal(
         &store,
         |settings, size| settings.terminal_font.size = size,
         tokens,
+        TypeScale::current(cx),
     );
     let line_height = number_dropdown_shown(
         "terminal-line-height",
@@ -269,6 +328,7 @@ pub(super) fn terminal(
         &store,
         |settings, line_height| settings.terminal_font.line_height = line_height,
         tokens,
+        TypeScale::current(cx),
     );
 
     let copy_on_select = setting_switch(
@@ -296,15 +356,16 @@ pub(super) fn terminal(
             }),
             WIDE_WIDTH,
             tokens,
+            TypeScale::current(cx),
         )
     };
 
     let preview = field_box(div(), tokens)
         .h_auto()
-        .mt(px(12.))
-        .mb(px(2.))
-        .px(px(12.))
-        .py(px(10.))
+        .mt(space::SPACE_12)
+        .mb(space::SPACE_2)
+        .px(space::SPACE_12)
+        .py(space::SPACE_10)
         .overflow_hidden()
         .child(TerminalFontPreview::new(
             "terminal-font-preview",
@@ -324,7 +385,13 @@ pub(super) fn terminal(
     let interaction = settings.terminal_interaction;
 
     vec![
-        section(t!("settings.terminal.font"), None, true, tokens),
+        section(
+            t!("settings.terminal.font"),
+            None,
+            true,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row(
             t!("settings.terminal.family"),
             Some(t!("settings.terminal.family_description")),
@@ -348,7 +415,6 @@ pub(super) fn terminal(
                 ),
                 TypeScale::current(cx),
                 tokens,
-                window,
             )),
             reset_if(
                 font.size != default.terminal_font.size,
@@ -383,7 +449,13 @@ pub(super) fn terminal(
             tokens,
         ),
         preview,
-        section(t!("settings.terminal.interaction"), None, false, tokens),
+        section(
+            t!("settings.terminal.interaction"),
+            None,
+            false,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row(
             t!("settings.terminal.copy_on_select"),
             Some(t!("settings.terminal.copy_on_select_description")),
@@ -416,7 +488,13 @@ pub(super) fn terminal(
             right_click,
             tokens,
         ),
-        section(t!("settings.local_terminal.title"), None, false, tokens),
+        section(
+            t!("settings.local_terminal.title"),
+            None,
+            false,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row(
             t!("settings.local_terminal.shell"),
             Some(t!("settings.local_terminal.shell_description")),

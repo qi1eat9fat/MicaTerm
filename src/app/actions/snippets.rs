@@ -24,13 +24,10 @@ pub struct DeleteSnippet(pub SnippetId);
 #[action(namespace = micaterm, no_json)]
 pub struct CopySnippet(pub SnippetId);
 
-/// 把片段的命令发给焦点卡片的终端：`run` 时直接执行，否则只输入到提示符后面。
+/// 把片段的命令输入到焦点卡片的终端提示符后面（不自动执行）。
 #[derive(Action, Clone, Copy, Debug, PartialEq, Eq)]
 #[action(namespace = micaterm, no_json)]
-pub struct EnterSnippet {
-    pub snippet: SnippetId,
-    pub run: bool,
-}
+pub struct EnterSnippet(pub SnippetId);
 
 /// 在 `position`（窗口坐标）为这个片段开右键菜单。
 #[derive(Action, Clone, Copy, Debug, PartialEq)]

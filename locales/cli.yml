@@ -1,331 +1,505 @@
 _version: 2
 cli.unsupported:
+  en: The external CLI is not supported on this system
   zh-CN: 这个系统上不支持外部 CLI
 cli.server.another_app:
+  en: Another MicaTerm using the same data folder is already receiving external CLI requests
   zh-CN: 同一个数据目录的另一个 MicaTerm 已经在接收外部 CLI 的请求
 cli.server.listen_failed:
+  en: "The external CLI could not start receiving requests: %{error}"
   zh-CN: 外部 CLI 无法开始接收请求：%{error}
 cli.server.not_enabled:
+  en: External Agents are not enabled in MicaTerm. Turn on "Enable External Agents" under Settings › Agent
   zh-CN: MicaTerm 没有启用外部 Agent。请在 MicaTerm 的「设置 › Agent」里打开「启用外部 Agent」
 cli.server.version_mismatch:
+  en: The micaterm command and the running MicaTerm are different versions; restart or update MicaTerm
   zh-CN: micaterm 命令和正在运行的 MicaTerm 版本不同，请重启或更新 MicaTerm
 cli.error.host_not_found:
+  en: "No host with ID %{id}. Use micaterm hosts list to see host IDs"
   zh-CN: 找不到 ID 为 %{id} 的主机，请用 micaterm hosts list 查看主机的 ID
 cli.client.not_running:
+  en: MicaTerm is not running; open MicaTerm first
   zh-CN: MicaTerm 没有运行，请先打开 MicaTerm
 cli.client.no_permission:
+  en: "No permission to connect to MicaTerm: the sandbox running this command may block local inter-process communication"
   zh-CN: 没有权限连接 MicaTerm：运行这个命令的沙盒可能禁止了本机的进程间通信
 cli.client.foreign_pipe:
+  en: This named pipe does not belong to the current user; not connected
   zh-CN: 这个命名管道不属于当前用户，没有连接
 cli.client.broken:
+  en: "The connection to MicaTerm was interrupted: %{error}"
   zh-CN: 和 MicaTerm 的连接中断：%{error}
 cli.client.older_app:
+  en: The running MicaTerm is older and does not recognize this command; update MicaTerm
   zh-CN: 正在运行的 MicaTerm 版本较旧，不认识这个命令，请更新 MicaTerm
 cli.client.no_data_dir:
+  en: "Cannot find MicaTerm's data folder: %{error}"
   zh-CN: 找不到 MicaTerm 的数据目录：%{error}
 cli.hosts.none:
+  en: No saved hosts
   zh-CN: 没有保存的主机
 cli.column.id:
+  en: ID
   zh-CN: ID
 cli.column.name:
+  en: Name
   zh-CN: 名称
 cli.column.address:
+  en: Address
   zh-CN: 地址
 cli.column.os:
+  en: System
   zh-CN: 系统
 cli.field.id:
+  en: ID
   zh-CN: ID
 cli.field.name:
+  en: Name
   zh-CN: 名称
 cli.field.address:
+  en: Address
   zh-CN: 地址
 cli.field.auth:
+  en: Auth
   zh-CN: 认证
 cli.field.route:
+  en: Route
   zh-CN: 连接方式
 cli.field.os:
+  en: System
   zh-CN: 系统
 cli.field.notes:
+  en: Notes
   zh-CN: 备注
 cli.auth.password:
+  en: Password
   zh-CN: 密码
 cli.auth.credential:
+  en: Use credential %{id}
   zh-CN: 使用凭据 %{id}
 cli.auth.no_password:
+  en: No Password
   zh-CN: 无密码
 cli.show.saved:
+  en: "%{label} (saved)"
   zh-CN: "%{label}（已保存）"
 cli.show.not_saved:
+  en: "%{label} (not saved)"
   zh-CN: "%{label}（未保存）"
 cli.route.direct:
+  en: Direct
   zh-CN: 直接连接
 cli.route.jump:
+  en: SSH jump %{hosts}
   zh-CN: SSH 跳板 %{hosts}
 cli.route.deleted_host:
+  en: (deleted host)
   zh-CN: （已删除的主机）
 cli.route.http:
+  en: HTTP proxy %{address}
   zh-CN: HTTP 代理 %{address}
 cli.route.socks5:
+  en: SOCKS5 proxy %{address}
   zh-CN: SOCKS5 代理 %{address}
 cli.route.password_saved:
+  en: "%{proxy} (password saved)"
   zh-CN: "%{proxy}（密码已保存）"
 cli.route.password_not_saved:
+  en: "%{proxy} (password not saved)"
   zh-CN: "%{proxy}（密码未保存）"
 cli.error.vault_locked:
+  en: MicaTerm's vault is locked and this host signs in with a password or key from it. Ask the user to unlock the vault in MicaTerm and try again
   zh-CN: MicaTerm 的保险库已锁定，登录这台主机要用里面的密码或私钥。请让用户在 MicaTerm 里解锁保险库后再试
 cli.exec.empty:
+  en: The command cannot be empty
   zh-CN: 命令不能为空
 cli.exec.bad_json:
+  en: "Standard input is not JSON of the form %{form}: %{error}"
   zh-CN: 标准输入不是 %{form} 形式的 JSON：%{error}
 cli.exec.signal:
+  en: "The remote command was terminated by signal %{signal}"
   zh-CN: 远程命令被信号 %{signal} 终止
 cli.stdin.unreadable:
+  en: "Cannot read standard input: %{error}"
   zh-CN: 无法读取标准输入：%{error}
 cli.server.not_absolute:
+  en: "The local path must be absolute: %{path}"
   zh-CN: 本地路径必须是绝对路径：%{path}
 cli.path.unresolvable:
+  en: "Cannot resolve path %{path}: %{error}"
   zh-CN: 无法解析路径 %{path}：%{error}
 cli.transfer.sftp_ended:
+  en: The SFTP connection ended unexpectedly
   zh-CN: SFTP 连接意外结束
 cli.transfer.no_local_folder:
+  en: "The local folder does not exist: %{path}"
   zh-CN: 本地目录不存在：%{path}
 cli.transfer.host_key_unknown:
+  en: This host's key is not trusted yet; connect to this host in MicaTerm once first
   zh-CN: 尚未信任这台主机的密钥：请先在 MicaTerm 里连接一次这台主机
 cli.transfer.host_key_changed:
+  en: The host key does not match the saved one; the connection was refused. Verify the server identity first
   zh-CN: 主机密钥与已保存的不一致，已拒绝连接。请先核实服务器身份
 cli.transfer.missing_credential:
+  en: This host has no saved password or passphrase; connect to it in MicaTerm once and save the password
   zh-CN: 这台主机没有保存可用的密码或口令：请先在 MicaTerm 里连接一次这台主机并保存密码
 cli.transfer.unfinished:
+  en: The transfer did not finish
   zh-CN: 传输未完成
 cli.transfer.empty_remote_path:
+  en: The remote path cannot be empty
   zh-CN: 远程路径不能为空
 cli.progress:
+  en: "%{files}/%{total_files} files, %{bytes} / %{total_bytes}"
+  zh-CN: "%{files}/%{total_files} 个文件，%{bytes} / %{total_bytes}"
+cli.progress_one:
+  en: "%{files}/%{total_files} file, %{bytes} / %{total_bytes}"
   zh-CN: "%{files}/%{total_files} 个文件，%{bytes} / %{total_bytes}"
 cli.summary.transferred:
+  en: "Transferred %{count} files, %{size} in total"
+  zh-CN: 已传输 %{count} 个文件，共 %{size}
+cli.summary.transferred_one:
+  en: "Transferred %{count} file, %{size} in total"
   zh-CN: 已传输 %{count} 个文件，共 %{size}
 cli.summary.unchanged:
+  en: "%{summary}, %{count} unchanged"
   zh-CN: "%{summary}，未变 %{count} 个"
 cli.summary.skipped:
+  en: "%{summary}, %{count} skipped"
   zh-CN: "%{summary}，跳过 %{count} 个"
 cli.summary.deleted:
+  en: "%{summary}, %{count} deleted"
   zh-CN: "%{summary}，删除 %{count} 个"
 cli.summary.failed:
+  en: "%{summary}, %{count} failed"
   zh-CN: "%{summary}，失败 %{count} 个"
 cli.error.credential_not_found:
+  en: "No credential with ID %{id}. Use micaterm credentials list to see credential IDs"
   zh-CN: 找不到 ID 为 %{id} 的凭据，请用 micaterm credentials list 查看凭据的 ID
 cli.server.closed_during_change:
+  en: MicaTerm closed before the change finished; the change may not have been saved
   zh-CN: MicaTerm 在改动完成之前关闭了，改动可能没有保存
 cli.server.change_timed_out:
+  en: MicaTerm did not handle this change in time and it was not made. Make sure MicaTerm is not stuck and try again
   zh-CN: MicaTerm 没有及时处理这个改动，改动没有做。请确认 MicaTerm 没有卡住后再试
 cli.json.from_terminal:
+  en: "Expects a JSON object on standard input, for example: %{example}"
   zh-CN: 要从标准输入读一个 JSON 对象，例如：%{example}
 cli.json.not_json:
+  en: "Standard input is not JSON: %{error}"
   zh-CN: 标准输入不是 JSON：%{error}
 cli.json.invalid:
+  en: "A field in the JSON is wrong: %{error}"
   zh-CN: JSON 里的字段不对：%{error}
 cli.host.credential_with_own_auth:
+  en: When a credential is given, the auth cannot also be "password" or "no-password"
   zh-CN: 指定了凭据，就不能再把认证设成「密码」或「无密码」
 cli.host.no_credential:
+  en: Auth "credential" requires a credential (the credential ID)
   zh-CN: 认证是「使用凭据」时要给 credential（凭据的 ID）
 cli.host.credential_user:
+  en: A host using a credential uses the credential's username %{user} and cannot set another username
   zh-CN: 使用凭据的主机用凭据的用户名 %{user}，不能另设用户名
 cli.host.password_without_auth:
+  en: Only hosts with "password" auth have their own password
   zh-CN: 只有认证是「密码」的主机才有自己的密码
 cli.host.proxy_password_without_user:
+  en: The proxy has no username, so a proxy password cannot be set
   zh-CN: 代理没有用户名，不能设代理密码
 cli.host.jump_self:
+  en: A host cannot be its own jump host
   zh-CN: 主机不能把自己当跳板
 cli.host.jump_repeated:
+  en: Jump host %{id} is listed more than once
   zh-CN: 跳板 %{id} 列了不止一次
 cli.host.created:
+  en: 'Created host "%{name}" with ID %{id}'
   zh-CN: 已创建主机「%{name}」，ID %{id}
 cli.host.saved:
+  en: 'Saved host "%{name}" with ID %{id}'
   zh-CN: 已保存主机「%{name}」，ID %{id}
 cli.host.deleted:
+  en: 'Deleted host "%{name}"'
   zh-CN: 已删除主机「%{name}」
 cli.host.deleted_jump_users:
+  en: 'Deleted host "%{name}"; %{count} hosts used to jump through it, and their jump host lists now contain a deleted host'
+  zh-CN: 已删除主机「%{name}」；%{count} 台主机原来经它跳转，它们的跳板里现在是一台已删除的主机
+cli.host.deleted_jump_users_one:
+  en: 'Deleted host "%{name}"; %{count} host used to jump through it, and its jump host list now contains a deleted host'
   zh-CN: 已删除主机「%{name}」；%{count} 台主机原来经它跳转，它们的跳板里现在是一台已删除的主机
 cli.credential.key_without_kind:
+  en: Only key credentials have a private key
   zh-CN: 只有密钥凭据才有私钥
 cli.credential.password_without_kind:
+  en: Only password credentials have a password
   zh-CN: 只有密码凭据才有密码
 cli.credential.passphrase_without_kind:
+  en: Only key credentials have a passphrase
   zh-CN: 只有密钥凭据才有口令
 cli.credential.two_keys:
+  en: key_path and private_key are mutually exclusive
   zh-CN: key_path 和 private_key 只能给一个
 cli.credential.key_not_absolute:
+  en: "The private key file path must be absolute: %{path}"
   zh-CN: 私钥文件的路径必须是绝对路径：%{path}
 cli.credential.key_unreadable:
+  en: "Cannot read the private key file: %{path}"
   zh-CN: 读不了私钥文件：%{path}
 cli.credential.key_required:
+  en: "Key credentials need a private key: key_path or private_key"
   zh-CN: 密钥凭据要给私钥：key_path 或 private_key
 cli.credential.name_required:
+  en: A credential needs a name
   zh-CN: 凭据要有名称
 cli.credential.key_empty:
+  en: The private key is empty
   zh-CN: 私钥是空的
 cli.credential.key_is_public:
+  en: A public key was given; a private key is required
   zh-CN: 给的是公钥，要的是私钥
 cli.credential.key_not_a_key:
+  en: "Cannot read the private key: not an OpenSSH or PEM private key"
   zh-CN: 读不出私钥：不是 OpenSSH 或 PEM 格式的私钥
 cli.credential.created:
+  en: 'Created credential "%{name}" with ID %{id}'
   zh-CN: 已创建凭据「%{name}」，ID %{id}
 cli.credential.saved:
+  en: 'Saved credential "%{name}" with ID %{id}'
   zh-CN: 已保存凭据「%{name}」，ID %{id}
 cli.credential.deleted:
+  en: 'Deleted credential "%{name}"'
   zh-CN: 已删除凭据「%{name}」
 cli.credential.deleted_released:
+  en: '%{deleted}; hosts using it now sign in on their own: %{hosts}'
   zh-CN: "%{deleted}；用它的主机改为自己登录：%{hosts}"
 cli.credential.private_key:
+  en: Private Key
   zh-CN: 私钥
 cli.credential.passphrase_saved:
+  en: Saved
   zh-CN: 已保存
 cli.credential.passphrase_not_saved:
+  en: Not Saved
   zh-CN: 未保存
 cli.credentials.none:
+  en: No credentials
   zh-CN: 没有凭据
 cli.change.vault_locked:
+  en: MicaTerm's vault is locked and the change was not made. Ask the user to unlock the vault in MicaTerm and try again
   zh-CN: MicaTerm 的保险库已锁定，改动没有做。请让用户在 MicaTerm 里解锁保险库后再试
 cli.change.vault_absent:
+  en: MicaTerm has no vault yet and the change was not made. Ask the user to save a password in MicaTerm once first (it will ask whether to set a master password)
   zh-CN: MicaTerm 还没有建保险库，改动没有做。请让用户先在 MicaTerm 里保存一次密码（会问要不要设主密码）
 cli.change.vault_key_lost:
+  en: MicaTerm's vault was created on another computer and cannot be opened here; the change was not made. Ask the user to handle it in MicaTerm
   zh-CN: MicaTerm 的保险库是在另一台电脑上建的，这里打不开，改动没有做。请让用户在 MicaTerm 里处理
 cli.change.host_gone:
+  en: The host was deleted while making the change
   zh-CN: 主机在改动过程中被删除了
 cli.change.credential_gone:
+  en: The credential was deleted while making the change
   zh-CN: 凭据在改动过程中被删除了
 cli.change.failures:
+  en: "%{before}; %{next}"
   zh-CN: "%{before}；%{next}"
 cli.kind.password:
+  en: Password
   zh-CN: 密码
 cli.kind.key:
+  en: Key
   zh-CN: 密钥
 cli.kind.agent:
+  en: SSH Agent
   zh-CN: SSH Agent
 cli.column.kind:
+  en: Type
   zh-CN: 类型
 cli.column.user:
+  en: Username
   zh-CN: 用户名
 cli.column.hosts:
+  en: Hosts
   zh-CN: 主机数
 cli.field.kind:
+  en: Type
   zh-CN: 类型
 cli.field.user:
+  en: Username
   zh-CN: 用户名
 cli.field.private_key:
+  en: Private Key
   zh-CN: 私钥
 cli.field.public_key:
+  en: Public Key
   zh-CN: 公钥
 cli.field.passphrase:
+  en: Passphrase
   zh-CN: 口令
 cli.field.hosts:
+  en: Hosts
   zh-CN: 主机
 cli.list.separator:
+  en: ", "
   zh-CN: 、
 cli.agent.generic:
+  en: Generic
   zh-CN: 通用
 cli.agent.generic_description:
+  en: Installed into the generic Agent Skills folder ~/.agents/skills, where any Agent that reads it can use it
   zh-CN: 装到 Agent Skills 的通用目录 ~/.agents/skills，读这个目录的 Agent 都能用
 cli.install.unsupported:
+  en: The micaterm command cannot be installed on this system
   zh-CN: 这个系统上不能安装 micaterm 命令
 cli.install.occupied:
+  en: "%{path} is in use by another program; MicaTerm will not change it"
   zh-CN: "%{path} 已被别的程序占用，MicaTerm 不会改动它"
 cli.install.cancelled:
+  en: Cancelled
   zh-CN: 已取消
 cli.install.missing:
+  en: "%{path} not found"
   zh-CN: 找不到 %{path}
 cli.exec.card_and_host:
+  en: A host ID and --card are mutually exclusive
   zh-CN: 主机 ID 和 --card 只能给一个
 cli.column.host:
+  en: Host ID
   zh-CN: 主机 ID
 cli.column.state:
+  en: State
   zh-CN: 状态
 cli.cards.none:
+  en: No cards have been handed to an Agent. Ask the user to right-click a remote card in MicaTerm and choose "Hand to Agent"
   zh-CN: 没有交给 Agent 的卡片。请让用户在 MicaTerm 里右键远程卡片，选「交给 Agent」
 cli.cards.connected:
+  en: Connected
   zh-CN: 已连接
 cli.cards.disconnected:
+  en: Not Connected
   zh-CN: 未连接
 cli.cards.running:
+  en: Running
   zh-CN: 执行中
 cli.cards.alternate_screen:
+  en: A full-screen program owns the screen, shown above (exit it, then try cards send-key with q or ctrl-c)
   zh-CN: 全屏程序占着屏幕，上面是它的画面（退出它可以试 cards send-key 发 q 或 ctrl-c）
 cli.card.timed_out:
+  en: MicaTerm did not accept this command in time; it was not typed into the card
   zh-CN: MicaTerm 没有及时接下这条命令，命令没有打进卡片
 cli.card.not_found:
+  en: "No card with this ID: it was never handed to an Agent, was taken back, or was closed. Use micaterm cards list to see handed-over cards"
   zh-CN: 没有这个 ID 的卡片：没交给 Agent、已收回或已关闭。用 micaterm cards list 看交出来的卡片
 cli.card.not_connected:
+  en: This card is not connected
   zh-CN: 这张卡片没有连接
 cli.card.unknown_shell:
+  en: Cannot tell which shell is in the card; only bash, dash and busybox ash are supported
   zh-CN: 读不出卡片里是什么 shell，只支持 bash、dash 和 busybox ash
 cli.card.unsupported_shell:
+  en: "The card's shell is %{shell}; only bash, dash and busybox ash are supported"
   zh-CN: 卡片里的 shell 是 %{shell}，只支持 bash、dash 和 busybox ash
 cli.card.too_long:
+  en: "The command is too long; at most %{limit} bytes"
   zh-CN: 命令太长，最多 %{limit} 字节
 cli.card.full_screen:
+  en: A full-screen program is running in the card and ^C will not exit it. Use cards read to look, then cards send-key to exit it
   zh-CN: 卡片里有全屏程序在运行，^C 退不出它。先用 cards read 看看，再用 cards send-key 退出它
 cli.card.another_run:
+  en: Another command is still running in the card
   zh-CN: 卡片里还有一条命令在执行
 cli.card.no_answer:
+  en: The shell in the card did not answer; a program in the foreground may be waiting for input. Use cards read to look
   zh-CN: 卡片里的 shell 没有应答，可能有程序在前台等输入。先用 cards read 看看
 cli.card.not_started:
+  en: The command was typed, but the shell did not start running it
   zh-CN: 命令打进去了，但 shell 没有开始执行它
 cli.card.disconnected:
+  en: The card disconnected while the command was running; it may have run partially
   zh-CN: 命令执行中卡片断开了连接，命令可能执行了一部分
 cli.card.key_while_running:
+  en: An exec --card command is running in the card; only ctrl-c can be sent right now
   zh-CN: 卡片里有 exec --card 的命令在执行，这时只能发 ctrl-c
 cli.card.unknown_key:
+  en: "Unknown key: %{key}"
   zh-CN: 不认识的键：%{key}
 cli.env.in_card:
+  en: "In the local card of MicaTerm %{version}, this card's ID: %{card}"
   zh-CN: 在 MicaTerm %{version} 的本地卡片里，这张卡片的 ID：%{card}
 cli.env.not_in_card:
+  en: Not in a local card of MicaTerm
   zh-CN: 不在 MicaTerm 的本地卡片里
 cli.env.cli:
+  en: "micaterm command: %{path}"
   zh-CN: micaterm 命令：%{path}
 cli.env.app.running:
+  en: MicaTerm is running and the external CLI is enabled
   zh-CN: MicaTerm 正在运行，外部 CLI 已启用
 cli.env.app.not_running:
+  en: MicaTerm is not running; ask the user to open MicaTerm first
   zh-CN: MicaTerm 没有运行：请用户先打开 MicaTerm
 cli.env.app.not_enabled:
+  en: MicaTerm's external CLI is not enabled; ask the user to turn it on under Settings › Agent
   zh-CN: MicaTerm 的外部 CLI 没启用：请用户在 设置 › Agent 里打开
 cli.env.app.unreachable:
+  en: "Cannot reach MicaTerm: %{reason}"
   zh-CN: 连不上 MicaTerm：%{reason}
 cli.env.card.connected:
+  en: "Card handed to you: %{id} (host %{host}, connected)"
   zh-CN: 交给你的卡片：%{id}（主机 %{host}，已连接）
 cli.env.card.disconnected:
+  en: "Card handed to you: %{id} (host %{host}, not connected)"
   zh-CN: 交给你的卡片：%{id}（主机 %{host}，没有连接）
 cli.env.card.taken_back:
+  en: The card handed to you, %{id}, was taken back or closed
   zh-CN: 交给你的卡片 %{id} 已收回或已关闭
 cli.env.card.unknown:
+  en: "Card handed to you: %{id} (MicaTerm did not answer; unknown whether it still exists)"
   zh-CN: 交给你的卡片：%{id}（问不到 MicaTerm，不知道还在不在）
 cli.env.cards:
+  en: "%{count} cards have been handed to Agents (micaterm cards list)"
   zh-CN: 交给 Agent 的卡片共 %{count} 张（micaterm cards list）
 cli.env.commands:
+  en: "Commands available:"
   zh-CN: 可以用的命令：
 cli.env.command.env:
+  en: Where I am and what I can do (this command)
   zh-CN: 我在哪、能做什么（就是这条）
 cli.env.command.hosts_list:
+  en: List saved hosts
   zh-CN: 列出保存的主机
 cli.env.command.hosts_show:
+  en: Show one host
   zh-CN: 看一台主机
 cli.env.command.exec:
+  en: Open a new connection and run one command on a host
   zh-CN: 新开一条连接，在主机上执行一条命令
 cli.env.command.exec_card:
+  en: Run a command in a card handed to you (use this for bastion hosts that allow only one login)
   zh-CN: 在交给你的卡片里执行命令（只许登录一次的堡垒机用这个）
 cli.env.command.cards_list:
+  en: List cards handed to Agents
   zh-CN: 列出交给 Agent 的卡片
 cli.env.command.cards_read:
+  en: Read the last lines of a card's screen and scrollback
   zh-CN: 读卡片屏幕和滚动内容的最后几行
 cli.env.command.cards_send_key:
+  en: Press a key in a card (q, y, enter, ctrl-c…)
   zh-CN: 在卡片里按一个键（q、y、enter、ctrl-c…）
 cli.env.command.upload:
+  en: Upload files or folders
   zh-CN: 上传文件或文件夹
 cli.env.command.download:
+  en: Download files or folders
   zh-CN: 下载文件或文件夹
 cli.env.command.sync:
+  en: Sync a local folder to a host
   zh-CN: 把本机文件夹同步到主机
 cli.env.command.hosts_manage:
+  en: Create, modify and delete hosts (JSON on standard input)
   zh-CN: 新建、修改、删除主机（JSON 从标准输入读）
 cli.env.command.credentials:
+  en: Create, read, update and delete credentials (passwords are write-only)
   zh-CN: 凭据的增删改查（密码只写不读）
 cli.env.command.help:
+  en: Detailed usage for each command
   zh-CN: 每条命令的详细用法

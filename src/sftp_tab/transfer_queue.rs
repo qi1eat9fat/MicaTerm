@@ -499,17 +499,17 @@ mod tests {
         let first = queue.push(upload("a"));
         queue.push(upload("b"));
         let status = |queue: &TransferQueue, index: usize| queue.entries()[index].status();
-        assert_eq!(status(&queue, 0), "等待中");
+        assert_eq!(status(&queue, 0), "Waiting");
         queue.start_next();
-        assert_eq!(status(&queue, 0), "正在扫描");
+        assert_eq!(status(&queue, 0), "Scanning");
         queue.on_progress(TransferProgress::new(TransferPhase::Transferring).with_bytes(294, 1000));
         assert_eq!(status(&queue, 0), "29%");
         report(&mut queue, TransferPhase::Waiting);
-        assert_eq!(status(&queue, 0), "等待回答");
+        assert_eq!(status(&queue, 0), "Waiting for an Answer");
         report(&mut queue, TransferPhase::Stopped);
-        assert_eq!(status(&queue, 0), "已停止");
+        assert_eq!(status(&queue, 0), "Stopped");
         queue.abandon_head(Removal::Discarded);
-        assert_eq!(status(&queue, 0), "已丢弃续传进度");
+        assert_eq!(status(&queue, 0), "Resume Progress Discarded");
         assert_eq!(queue.entries()[0].id(), first);
 
         queue.start_next();
@@ -519,7 +519,7 @@ mod tests {
                 TransferDetail::failed("/srv/b", anyhow::anyhow!("permission denied")),
             ]),
         );
-        assert_eq!(status(&queue, 1), "部分失败（1 项）");
+        assert_eq!(status(&queue, 1), "Partly Failed (1)");
     }
 
     /// 关闭确认框的括号：在传的文件和这一批的百分比。
@@ -562,7 +562,7 @@ mod tests {
         };
         assert_eq!(upload(&["/data/a.zip"]).source_label(), "/data/a.zip");
         assert_eq!(upload(&["/data/a.zip", "/data/b"]).source_label(), "/data");
-        assert_eq!(upload(&["/data/a", "/tmp/b"]).source_label(), "多个位置");
+        assert_eq!(upload(&["/data/a", "/tmp/b"]).source_label(), "Multiple Locations");
         let download = TransferJob::Download {
             paths: vec!["/var/log".into(), "/var/tmp".into()],
             target: "/local".into(),

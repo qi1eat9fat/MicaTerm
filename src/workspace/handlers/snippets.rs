@@ -38,7 +38,6 @@ impl Workspace {
     pub(in crate::workspace) fn render_snippet_panel(
         &self,
         tokens: &Tokens,
-        window: &Window,
         cx: &App,
     ) -> AnyElement {
         let props = SnippetPanelProps {
@@ -48,7 +47,7 @@ impl Workspace {
                 .map(|tab| tab.focused_card().read(cx).name()),
         };
         self.snippet_panel
-            .render(props, &self.focus_handle, tokens, window, cx)
+            .render(props, &self.focus_handle, tokens, cx)
             .into_any_element()
     }
 
@@ -97,11 +96,11 @@ impl Workspace {
         }
     }
 
-    /// 把片段发给在前标签的焦点卡片：`run` 时执行，否则只输入；发出去了焦点给那张卡片，
-    /// 好接着改或者回车。发不出去（全屏程序、多行命令只输入、没连上）时在面板底部说为什么。
+    /// 把片段输入到在前标签的焦点卡片提示符后面（不自动回车执行），焦点交给那张卡片，
+    /// 好接着改或者回车。发不出去（全屏程序、多行命令不支持括号粘贴、没终端）时在面板底部说为什么。
     fn on_enter_snippet(
         &mut self,
-        &EnterSnippet { snippet, run }: &EnterSnippet,
+        &EnterSnippet(snippet): &EnterSnippet,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -134,7 +133,7 @@ impl Workspace {
         } else {
             terminal
                 .update(cx, |terminal, cx| {
-                    terminal.enter_command(&snippet.command, run, replace, cx)
+                    terminal.enter_command(&snippet.command, false, replace, cx)
                 })
                 .map_err(|why| {
                     t!(

@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use gpui_kit::*;
 
+use crate::theme::Tokens;
 use crate::ui::DialogLayer;
 use crate::ui::modal::modal_dialog;
 
@@ -61,8 +62,8 @@ pub(super) fn open_small_dialog<V: Render>(
 ) {
     let layer = reply.layer.clone();
     layer.open_dismissable(
-        move |dialog, _, _| {
-            modal_dialog(dialog)
+        move |dialog, _, cx| {
+            modal_dialog(dialog, &Tokens::current(cx))
                 // 回车由框里的输入框自己处理（解锁、设主密码在后台算完才关）：gpui-component 的
                 // `Confirm` 不关框，否则还没算完就当成取消关掉了（工单 33 发现）。
                 .on_ok(|_, _, _| false)

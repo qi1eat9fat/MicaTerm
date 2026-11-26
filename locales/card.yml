@@ -1,79 +1,115 @@
 _version: 2
 card.close:
+  en: Close Card
   zh-CN: 关闭卡片
 card.local.title:
+  en: Local Terminal
   zh-CN: 本地终端
-card.zoom:
-  zh-CN: 放大卡片
 card.restore:
+  en: Restore Card
   zh-CN: 还原卡片
 card.move_to_new_tab:
+  en: Move to New Tab
   zh-CN: 移到新标签
 card.split_right:
+  en: Split Right
   zh-CN: 向右分屏
 card.split_down:
+  en: Split Down
   zh-CN: 向下分屏
 card.picker.title:
+  en: New Card
   zh-CN: 新卡片
 card.picker.hint:
+  en: Choose a terminal to open
   zh-CN: 选择要打开的终端
 card.picker.cancel:
+  en: Cancel
   zh-CN: 取消
 card.picker.search:
+  en: Search Hosts
   zh-CN: 搜索主机
 card.picker.duplicate:
+  en: Open Another %{name}
   zh-CN: 再开一个 %{name}
 card.picker.reuse_connection:
+  en: Reuse Connection
   zh-CN: 复用连接
 card.picker.same_directory:
+  en: Same Directory
   zh-CN: 同一目录
 card.dot.busy:
+  en: Output
   zh-CN: 有输出
 card.dot.attention:
+  en: Needs Attention
   zh-CN: 需要注意
 card.remote.connecting:
+  en: Connecting
   zh-CN: 正在连接
 card.remote.connected:
+  en: Connected
   zh-CN: 已连接
 card.remote.disconnected:
+  en: Disconnected
   zh-CN: 已断开
 card.remote.exited:
+  en: "Shell exited (code %{code})"
   zh-CN: shell 已退出（退出码 %{code}）
 card.remote.exited_signal:
+  en: "Shell ended by signal %{signal}"
   zh-CN: shell 被信号 %{signal} 结束
 card.remote.stopped:
+  en: Disconnected
   zh-CN: 已断开连接
 card.remote.ended:
+  en: Connection closed
   zh-CN: 连接已断开
 card.remote.ended_press:
+  en: Press
   zh-CN: 按
 card.remote.ended_reconnect:
+  en: Reconnect
   zh-CN: 重新连接
 card.remote.ended_close:
+  en: Close
   zh-CN: 关闭
 card.menu.copy_ip:
+  en: Copy IP
   zh-CN: 复制 IP
 card.menu.copy_host_name:
+  en: Copy Hostname
   zh-CN: 复制主机名
 card.menu.open_sftp:
+  en: Open SFTP
   zh-CN: 打开 SFTP
 card.menu.reconnect:
+  en: Reconnect
   zh-CN: 重新连接
 card.menu.disconnect:
+  en: Disconnect
   zh-CN: 断开连接
 card.remote.waiting_for_vault:
+  en: Waiting for Vault Unlock
   zh-CN: 等待解锁保险库
 card.remote.vault_not_unlocked:
+  en: Vault Is Locked
   zh-CN: 保险库没有解锁
 card.remote.connecting_to:
+  en: Connecting to %{endpoint}…
   zh-CN: 正在连接 %{endpoint}…
 card.remote.connecting_via:
+  en: "Connecting to %{endpoint} via %{route}…"
   zh-CN: 正在连接 %{endpoint}（经 %{route}）…
 card.menu.hand_to_agent:
+  en: Hand to Agent
   zh-CN: 交给 Agent
 card.menu.take_back:
+  en: Take Back from Agent
   zh-CN: 收回 Agent
 card.status.agent:
+  en: Agent
   zh-CN: Agent
 card.status.agent_running:
+  en: Agent Running
   zh-CN: Agent 执行中

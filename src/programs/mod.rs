@@ -1,8 +1,9 @@
 //! 程序名表：命令名（进程名，或远程报告的命令）映射到程序图块的图标和颜色。
 //! 本地卡片和远程卡片共用的纯函数模块，不依赖 gpui，颜色用 `0xRRGGBB`。
 //!
-//! 判断顺序：去掉路径和前导 `-` → 按小写查表 → 是 shell 就用终端图块 →
-//! 其余用终端图标，底色按名称的 FNV-1a 哈希从 8 种颜色里取一种（同一个名字每次都一样）。
+//! 判断顺序：去掉路径和前导 `-` → 按小写查表 → 是 shell 就用同一个终端图块（同一个图标、同一种
+//! 中性底色，不随 shell 品牌变色）→ 其余用终端图标，底色按名称的 FNV-1a 哈希从 8 种颜色里取一种
+//! （同一个名字每次都一样）。
 // 参考 gorex 的模型重写：programs.go（程序表的数值取自它，图标只用 Simple Icons 和 Lucide）。
 
 /// 一个程序在界面上怎么显示。
@@ -36,16 +37,24 @@ impl Program {
 /// 表里的一项：命令名（小写），显示名，图标，底色，图标色，要不要描边。
 type Entry = (&'static str, &'static str, &'static str, u32, u32, bool);
 
-/// 终端图标（Lucide `terminal`）：shell 和表里没有的程序都用它。
+/// 终端图标（Lucide `terminal`）：所有 shell 和表里没有的程序都用它。
 pub const TERMINAL_GLYPH: &str = "icons/terminal.svg";
 /// 文件夹图标（Lucide `folder`）：SFTP 标签的图块。
 pub const FOLDER_GLYPH: &str = "icons/folder.svg";
 /// 显示器图标（Lucide `monitor`）：SFTP 标签里「本机」那张卡片。
 pub const MONITOR_GLYPH: &str = "icons/monitor.svg";
 
-/// shell 图块的颜色：取全部界面原型的 `PROG.pwsh`。
+/// 所有 shell 共用的图块颜色：不论 PowerShell、bash 还是 cmd，本地终端都长一样，
+/// 不随品牌变色。取值沿用原型 `PROG.pwsh` 的深灰底。
 const SHELL_BG: u32 = 0x334155;
-const SHELL_FG: u32 = 0x86efac;
+const SHELL_FG: u32 = 0xffffff;
+
+/// Python 图块配色（Simple Icons 的 `python`）。
+const PYTHON_BG: u32 = 0x3776AB;
+const PYTHON_FG: u32 = 0xffd43b;
+
+/// 本机终端图块的蓝底（原型 `fcard` 的显示器卡片）；`card::picker` 也用它。
+pub const LOCAL_FILES_BG: u32 = 0x3b82f6;
 
 /// 在提示符下的 shell。
 const SHELLS: &[&str] = &[
@@ -111,24 +120,24 @@ const PROGRAMS: &[Entry] = &[
         "python",
         "Python",
         "icons/brands/python.svg",
-        0x3776ab,
-        0xffd43b,
+        PYTHON_BG,
+        PYTHON_FG,
         false,
     ),
     (
         "python3",
         "Python",
         "icons/brands/python.svg",
-        0x3776ab,
-        0xffd43b,
+        PYTHON_BG,
+        PYTHON_FG,
         false,
     ),
     (
         "ipython",
         "Python",
         "icons/brands/python.svg",
-        0x3776ab,
-        0xffd43b,
+        PYTHON_BG,
+        PYTHON_FG,
         false,
     ),
     (
@@ -423,7 +432,8 @@ pub fn program_of(name: &str) -> Program {
     }
 }
 
-/// 在提示符下的 shell `name`：不管表里有没有它，都是终端图块（卡片的 shell 自己在前台时用）。
+/// 在提示符下的 shell `name`：所有 shell 都用同一个终端图块——同一个终端图标、同一种中性底色，
+/// 不随品牌变色。和标签、卡片标题行上的实心方块用的是同一套颜色。
 pub fn shell_program(name: &str) -> Program {
     Program {
         name: name.to_string(),
@@ -450,7 +460,7 @@ pub fn local_files_program() -> Program {
     Program {
         name: "Local".to_string(),
         glyph: MONITOR_GLYPH,
-        tile_bg: 0x3b82f6,
+        tile_bg: LOCAL_FILES_BG,
         tile_fg: 0xffffff,
         border: false,
         shell: false,
@@ -485,7 +495,7 @@ pub fn editor_program(name: &str) -> Program {
         "yaml" => Some(("Y", 0xCB171E, 0xffffff)),
         "toml" => Some(("T", 0x9C4221, 0xffffff)),
         "json" => Some(("{}", 0xCBCB41, 0x1a1a1a)),
-        "python" => Some(("py", 0x3776AB, 0xffd43b)),
+        "python" => Some(("py", PYTHON_BG, PYTHON_FG)),
         "javascript" => Some(("js", 0xF7DF1E, 0x1a1a1a)),
         "html" => Some(("<>", 0xE34F26, 0xffffff)),
         "css" => Some(("#", 0x1572B6, 0xffffff)),
@@ -533,7 +543,22 @@ pub fn glyphs() -> impl Iterator<Item = &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{editor_program, program_of};
+    use super::{
+        LOCAL_FILES_BG, PYTHON_BG, PYTHON_FG, editor_program, local_files_program, program_of,
+    };
+
+    /// 重复出现的品牌色都从命名常量取，值不变。
+    #[test]
+    fn duplicate_brand_colors_share_named_constants() {
+        let python = editor_program("script.py");
+        assert_eq!((python.tile_bg, python.tile_fg), (PYTHON_BG, PYTHON_FG));
+        let table_python = program_of("python");
+        assert_eq!(
+            (table_python.tile_bg, table_python.tile_fg),
+            (PYTHON_BG, PYTHON_FG)
+        );
+        assert_eq!(local_files_program().tile_bg, LOCAL_FILES_BG);
+    }
 
     /// 颜色和字取自原型的 `PROG`。
     #[test]
@@ -575,13 +600,31 @@ mod tests {
         assert!(codex.border, "浅色底描边");
     }
 
+    /// 所有 shell（不论品牌）都用同一个终端图块：同一个图标、同一种中性底色，不随品牌变色。
     #[test]
-    fn a_shell_shows_the_terminal_tile_under_its_own_name() {
-        for shell in ["pwsh", "powershell", "cmd", "bash", "-zsh", "fish", "nu"] {
+    fn every_shell_shows_the_same_neutral_terminal_tile() {
+        for shell in [
+            "cmd",
+            "sh",
+            "dash",
+            "ksh",
+            "tcsh",
+            "csh",
+            "elvish",
+            "xonsh",
+            "pwsh",
+            "powershell",
+            "PWSh.EXE",
+            "PowerShell",
+            "bash",
+            "zsh",
+            "fish",
+            "nu",
+        ] {
             let program = program_of(shell);
             assert!(program.shell, "{shell}");
-            assert_eq!(program.glyph, "icons/terminal.svg");
-            assert_eq!((program.tile_bg, program.tile_fg), (0x334155, 0x86efac));
+            assert_eq!(program.glyph, "icons/terminal.svg", "{shell}");
+            assert_eq!((program.tile_bg, program.tile_fg), (0x334155, 0xffffff));
         }
         assert_eq!(program_of("-zsh").name, "zsh");
         assert_eq!(program_of("pwsh.exe").name, "pwsh");

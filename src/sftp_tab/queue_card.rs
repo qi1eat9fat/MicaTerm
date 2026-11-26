@@ -1,8 +1,13 @@
-// 参考 since2006/shell-rs @ b2a307a: src/explorer/queue_panel.rs 改写
-// 改造：照 26 号「SFTP」的传输队列（`.sf-q`）：标题行 + 一排文字按钮，下面和文件列表同一种表格（`ui::table`）。
-// 裁剪：去掉右侧栏用的窄版和大小格式。
-//! 传输队列：有传输才出现在两栏下面。每批一行，在跑的那批下面一行是正在传的文件，
-//! 点折叠箭头展开看每一项怎么结束的。
+//! SFTP transfer list panel (redesigned after Muxy's docked panels, `agents_panel`, and meter bars):
+//! appears beneath the two file panes whenever the queue is non-empty.
+//!
+//! - Header (`28px` with bottom hairline): `ArrowUpDown` icon + `Semibold` title + rounded count
+//!   pill + status summary on the left; compact `22px` icon+label action buttons on the right.
+//! - Streamlined activity rows (`26px` tall, `4px` inset, `6px` rounded hover/selection):
+//!   expand chevron + state-tinted `Upload`/`Download` badge + `Source [count] → Target` flow +
+//!   live `speed · remaining · size` telemetry + right-aligned `232px` Muxy brand/emerald/amber/pink
+//!   progress bar or status indicator.
+//! - Active sub-row shows the file currently in flight; expanding a batch reveals per-item outcomes.
 
 use std::ops::Range;
 use std::time::Duration;
@@ -15,78 +20,41 @@ use super::{QueueEntry, QueueId, QueueState, SftpTab, format_size, percent};
 use crate::app::{CatalogIcon, SftpAction, SftpDispatch as _, SftpTabCommand};
 use crate::backend::sftp::{TransferDirection, TransferOutcome, TransferPhase, describe_reason};
 use crate::i18n::t;
-use crate::theme::{Tokens, TypeScale, size};
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, WEIGHT_SEMIBOLD, size, space};
+use crate::ui::count::count_badge;
 use crate::ui::icon_button::TextTooltip;
-use crate::ui::table::{
-    self, Align, ColumnWidth, RowState, TableColumn, cell, header_cell, header_row, text_cell,
-};
+use crate::ui::table::{self, RowState};
 
-/// 标题行的高（`.sf-qh`）、按钮的高（`.qb`）。
-const TITLE_HEIGHT: Pixels = px(32.);
-const BUTTON_HEIGHT: Pixels = px(24.);
-/// 折叠箭头（`.sf-q .sf-r .op svg`）：12 见方，左边 13，和文件列表的图标在同一条竖线上。
-const CHEVRON: Pixels = px(12.);
-const CHEVRON_LEFT: Pixels = px(13.);
-/// 12 的图标在 GPUI 里比字面中心高 1.5 个设备像素（150% 实测），往下挪 1。
-const ICON_NUDGE: Pixels = px(1.);
-/// 批次里的文件、展开的结果缩进一级（`.sub`）。
-const SUB_INDENT: Pixels = px(22.);
-/// 进度条（`.pg > i`）的高、状态文字的最小宽（`.pg > em`）。
+/// Panel header height and compact toolbar button height.
+const HEADER_HEIGHT: Pixels = px(28.);
+const ACTION_HEIGHT: Pixels = size::SEGMENT_ITEM;
+/// Fixed width of the right-hand progress & status column (`232px`).
+const PROGRESS_WIDTH: Pixels = px(232.);
+/// Fixed width of the batch progress bar: the status label never squeezes it, so bars line up.
+const BAR_WIDTH: Pixels = px(88.);
+/// Fixed width of the status label zone: statuses of different lengths share one centre line,
+/// and `已完成（跳过 12 项）` still fits without truncating.
+const STATUS_WIDTH: Pixels = px(120.);
+/// Progress bar heights (batch vs active sub-file).
 const BAR_HEIGHT: Pixels = px(4.);
-const STATUS_WIDTH: Pixels = px(44.);
+const FILE_BAR_HEIGHT: Pixels = px(3.);
+/// Left indent for sub-rows (active file and expanded outcome details) so they align under Source.
+const SUB_INDENT: Pixels = px(48.);
 
-/// 七列（26 号 `.sf-q` 的 `grid-template-columns`）：折叠箭头 32、来源、目标 210、文件大小 76、
-/// 剩余 68、速度 80、进度 148。表头居中，来源、目标居左，文件大小居右（用户定）。
-fn columns() -> Vec<TableColumn> {
-    let fixed = |key: &'static str, title: SharedString, width: f32| {
-        TableColumn::new(key, title, ColumnWidth::Fixed(px(width))).header(Align::Center)
-    };
-    vec![
-        TableColumn::new("expand", "", ColumnWidth::Fixed(px(32.))).bare(),
-        TableColumn::new(
-            "source",
-            t!("sftp_transfer.queue.column.source"),
-            ColumnWidth::Fill,
-        ),
-        TableColumn::new(
-            "target",
-            t!("sftp_transfer.queue.column.target"),
-            ColumnWidth::Fixed(px(210.)),
-        ),
-        fixed("size", t!("sftp_transfer.queue.column.size"), 76.).right(),
-        fixed("remaining", t!("sftp_transfer.queue.column.remaining"), 68.)
-            .right()
-            .header(Align::Center),
-        fixed("speed", t!("sftp_transfer.queue.column.speed"), 80.)
-            .right()
-            .header(Align::Center),
-        fixed("progress", t!("sftp_transfer.queue.column.progress"), 148.),
-    ]
-}
-
-/// 列的序号。
-const EXPAND: usize = 0;
-const SOURCE: usize = 1;
-const TARGET: usize = 2;
-const SIZE: usize = 3;
-const REMAINING: usize = 4;
-const SPEED: usize = 5;
-const PROGRESS: usize = 6;
-
-/// 表格里的一行。
+/// Virtualized row kind in the transfer list.
 #[derive(Clone, Copy, Debug)]
 enum QueueRow {
-    /// 一批，按在队列里的序号。
+    /// Batch summary row (`entries[ix]`).
     Batch(usize),
-    /// 那批正在传的文件。
+    /// Currently transferring file sub-row for active batch `ix`.
     File(usize),
-    /// 展开的一批里第几项的结果（最新的在上面）。
+    /// Completed/skipped/failed item detail row (`entries[ix]`, reverse index `detail`).
     Detail(usize, usize),
-    /// 展开的一批还没有结果。
+    /// Placeholder sub-row when an expanded batch has no completed items yet.
     NoDetail(usize),
 }
 
-/// `0:00:03`。
+/// Formats remaining duration as `H:MM:SS` (`0:00:03`).
 fn clock(duration: Duration) -> String {
     let seconds = duration.as_secs();
     format!(
@@ -97,7 +65,7 @@ fn clock(duration: Duration) -> String {
     )
 }
 
-/// 标题后面的淡字：`1 批进行中 · 1 批等待`。都结束了就说结束了几批。
+/// Header status summary (`1 running · 1 waiting`, or `N finished` when all batches have ended).
 fn summary(entries: &[QueueEntry]) -> String {
     let count = |state: QueueState| entries.iter().filter(|e| e.state() == state).count();
     let parts: Vec<SharedString> = [
@@ -119,50 +87,85 @@ fn summary(entries: &[QueueEntry]) -> String {
     parts.join(" \u{b7} ")
 }
 
-/// 进度格（`.pg`）：一条 4 高的进度条和后面的状态字。`fraction` 是 `None` 时条不画但占着位置。
+/// Right-aligned `232px` progress bar + status/percentage cell.
+#[allow(clippy::too_many_arguments)]
 fn progress_cell(
-    columns: &[TableColumn],
     fraction: Option<f32>,
-    color: Hsla,
+    bar_height: Pixels,
+    bar_color: Hsla,
+    dot_color: Option<Hsla>,
+    status_color: Hsla,
     status: SharedString,
+    scale: TypeScale,
     tokens: &Tokens,
 ) -> Div {
-    cell(columns, PROGRESS)
-        .gap(px(8.))
-        .child(
+    let base = div()
+        .flex()
+        .flex_none()
+        .w(PROGRESS_WIDTH)
+        .h_full()
+        .items_center()
+        .pl(space::SPACE_8)
+        .pr(space::SPACE_8)
+        .gap(space::SPACE_8)
+        .overflow_hidden()
+        .whitespace_nowrap();
+    match fraction {
+        Some(fraction) => base
+            .child(
+                // 进度条定宽：状态文字再长也只压缩文字，不会把条挤短。
+                div()
+                    .flex_none()
+                    .w(BAR_WIDTH)
+                    .h(bar_height)
+                    .rounded_full()
+                    .overflow_hidden()
+                    .bg(tokens.sel)
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(fraction.clamp(0., 1.)))
+                            .rounded_full()
+                            .bg(bar_color),
+                    ),
+            )
+            .child(
+                // 状态区定宽居中：长短状态共用一条中线，和进度条的间距不再忽大忽小；
+                // 放不下时由 truncate 从末尾出省略号，不再把开头硬裁掉。
+                div()
+                    .w(STATUS_WIDTH)
+                    .flex_none()
+                    .truncate()
+                    .text_center()
+                    .text_size(scale.sm)
+                    .font_weight(WEIGHT_NORMAL)
+                    .text_color(status_color)
+                    .child(status),
+            ),
+        None => base.justify_end().gap(space::SPACE_5).children(dot_color.map(|color| {
+            crate::ui::dot(color, size::DOT)
+        })).child(
             div()
-                .flex_1()
-                .h(BAR_HEIGHT)
-                .rounded(px(2.))
-                .overflow_hidden()
-                .when(fraction.is_some(), |bar| bar.bg(tokens.line))
-                .children(fraction.map(|fraction| {
-                    div()
-                        .h_full()
-                        .w(relative(fraction.clamp(0., 1.)))
-                        .rounded(px(2.))
-                        .bg(color)
-                })),
-        )
-        .child(
-            div()
+                .w(STATUS_WIDTH)
                 .flex_none()
-                .min_w(STATUS_WIDTH)
-                .max_w(relative(0.7))
                 .truncate()
-                .text_color(tokens.text2)
+                .text_center()
+                .text_size(scale.sm)
+                .font_weight(WEIGHT_NORMAL)
+                .text_color(status_color)
                 .child(status),
-        )
+        ),
+    }
 }
 
 impl SftpTab {
-    /// 传输队列（26 号 `.sf-q`）。队列空的时候这个位置收起，不占地方。
+    /// Bottom transfer list panel (`id = "transfer-queue"`). Hidden when the queue is empty.
     pub(super) fn render_queue(&self, cx: &mut Context<Self>) -> AnyElement {
         let tokens = Tokens::current(cx);
         let scale = TypeScale::current(cx);
         let queue = &self.transfers.queue;
+        let total = queue.entries().len();
         let summary = summary(queue.entries());
-        let columns = columns();
         let rows = self.queue_rows().len();
         div()
             .id("transfer-queue")
@@ -178,54 +181,69 @@ impl SftpTab {
             .bg(tokens.content)
             .border_t(size::LINE)
             .border_color(tokens.line)
-            .text_size(scale.ui)
+            .text_size(scale.body)
             .child(
                 div()
                     .flex()
                     .flex_none()
                     .items_center()
-                    .gap(px(8.))
-                    .h(TITLE_HEIGHT)
-                    .pl(px(12.))
-                    .pr(px(8.))
+                    .gap(space::SPACE_6)
+                    .h(HEADER_HEIGHT)
+                    .pl(space::SPACE_10)
+                    .pr(space::SPACE_6)
+                    .border_b(size::LINE)
+                    .border_color(tokens.line)
                     .whitespace_nowrap()
                     .child(
                         div()
                             .flex_none()
+                            .text_color(tokens.icon)
+                            .child(Icon::new(CatalogIcon::ArrowUpDown).size(size::ICON_SM)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(scale.sm)
+                            .font_weight(WEIGHT_SEMIBOLD)
                             .text_color(tokens.text)
                             .child(t!("sftp_transfer.queue.title")),
                     )
+                    .child(count_badge(total, &tokens, scale))
                     .child(
                         div()
                             .id("transfer-queue-summary")
                             .test_support()
                             .aria_label(summary.clone())
                             .min_w_0()
+                            .ml(space::SPACE_2)
                             .truncate()
+                            .text_size(scale.sm)
                             .text_color(tokens.st_dim)
                             .child(summary),
                     )
                     .child(div().flex_1())
-                    .child(self.render_queue_buttons(&tokens)),
+                    .child(self.render_queue_buttons(&tokens, scale)),
             )
             .child(
-                header_row(&tokens).children(
-                    (0..columns.len())
-                        .map(|ix| header_cell(&columns, ix, None, &tokens).test_support()),
-                ),
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .child(table::body(
+                        "transfer-queue-rows",
+                        rows,
+                        &self.transfers.scroll,
+                        cx,
+                        Self::render_queue_rows,
+                    ))
+                    .child(table::scrollbar_from(px(0.), &self.transfers.scroll)),
             )
-            .child(table::body(
-                "transfer-queue-rows",
-                rows,
-                &self.transfers.scroll,
-                cx,
-                Self::render_queue_rows,
-            ))
-            .child(table::scrollbar(&self.transfers.scroll))
             .into_any_element()
     }
 
-    /// 表格里的行，从上到下：每批一行，在跑的那批下面是正在传的文件，展开的批下面是每一项的结果。
+    /// Flattens batches, active file sub-rows, and expanded outcome rows in display order.
     fn queue_rows(&self) -> Vec<QueueRow> {
         let queue = &self.transfers.queue;
         let mut rows = Vec::new();
@@ -254,22 +272,21 @@ impl SftpTab {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let tokens = Tokens::current(cx);
-        let columns = columns();
+        let scale = TypeScale::current(cx);
         let rows = self.queue_rows();
         let entries = self.transfers.queue.entries();
         rows.get(range)
             .unwrap_or_default()
             .iter()
             .map(|row| match *row {
-                QueueRow::Batch(ix) => self.render_batch_row(&entries[ix], &columns, &tokens),
-                QueueRow::File(ix) => render_file_row(&entries[ix], &columns, &tokens),
-                QueueRow::Detail(ix, detail) => render_detail(&entries[ix], detail, &tokens),
-                QueueRow::NoDetail(ix) => render_no_detail(&entries[ix], &tokens),
+                QueueRow::Batch(ix) => self.render_batch_row(&entries[ix], scale, &tokens),
+                QueueRow::File(ix) => render_file_row(&entries[ix], scale, &tokens),
+                QueueRow::Detail(ix, detail) => render_detail(&entries[ix], detail, scale, &tokens),
+                QueueRow::NoDetail(ix) => render_no_detail(&entries[ix], scale, &tokens),
             })
             .collect()
     }
 
-    /// 发给这个标签的命令。
     fn queue_command(
         &self,
         command: SftpTabCommand,
@@ -280,74 +297,95 @@ impl SftpTab {
         }
     }
 
-    /// 标题行右边的按钮（`.qb`，只有文字）：继续、停止、移出队列 ｜ 丢弃续传进度、清除已完成。
-    fn render_queue_buttons(&self, tokens: &Tokens) -> impl IntoElement + use<> {
+    /// Compact Muxy icon+label toolbar buttons on the right of the transfer panel header.
+    fn render_queue_buttons(&self, tokens: &Tokens, scale: TypeScale) -> impl IntoElement + use<> {
         let queue = &self.transfers.queue;
-        let (label, faint, hover) = (tokens.label, tokens.faint, tokens.hover);
-        let button = |id: &'static str, text: SharedString, enabled: bool, command| {
+        let (text, text2, faint, hover) = (tokens.text, tokens.text2, tokens.faint, tokens.hover);
+        let button = |id: &'static str,
+                      icon: Icon,
+                      label: SharedString,
+                      enabled: bool,
+                      command: SftpTabCommand| {
             div()
                 .id(id)
                 .test_support()
-                .aria_label(text.clone())
+                .aria_label(label.clone())
                 .flex()
                 .flex_none()
                 .items_center()
-                .h(BUTTON_HEIGHT)
-                .px(px(8.))
-                .rounded(size::RADIUS)
-                .text_color(if enabled { label } else { faint })
+                .gap(space::SPACE_4)
+                .h(ACTION_HEIGHT)
+                .px(space::SPACE_6)
+                .rounded(size::RADIUS_SM)
+                .text_size(scale.sm)
+                .font_weight(WEIGHT_NORMAL)
+                .text_color(if enabled { text2 } else { faint })
+                .when(!enabled, |button| button.opacity(0.45))
                 .when(enabled, |button| {
                     button
                         .cursor_pointer()
-                        .hover(move |style| style.bg(hover))
+                        .hover(move |style| style.bg(hover).text_color(text))
                         .on_click(self.queue_command(command))
                 })
-                .child(text)
+                .child(icon.size(px(11.)))
+                .child(label)
         };
         div()
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(8.))
+            .gap(space::SPACE_2)
             .child(button(
                 "resume-transfer",
+                Icon::new(CatalogIcon::Play),
                 t!("sftp_transfer.queue.resume"),
                 self.can_resume_transfer(),
                 SftpTabCommand::ResumeTransfer,
             ))
             .child(button(
                 "cancel-transfer",
+                Icon::new(CatalogIcon::Square),
                 t!("sftp_transfer.queue.stop"),
                 self.transfer_running(),
                 SftpTabCommand::CancelTransfer,
             ))
             .child(button(
                 "remove-transfer",
+                Icon::new(IconName::Close),
                 t!("sftp_transfer.queue.remove"),
                 self.can_remove_transfer(),
                 SftpTabCommand::RemoveQueueEntry,
             ))
-            .child(div().flex_none().w(size::LINE).h(px(14.)).bg(tokens.line))
+            .child(
+                div()
+                    .flex_none()
+                    .w(size::LINE)
+                    .h(px(12.))
+                    .mx(px(3.))
+                    .bg(tokens.line),
+            )
             .child(button(
                 "discard-transfer",
+                Icon::new(CatalogIcon::Undo2),
                 t!("sftp_transfer.queue.discard"),
                 self.can_discard_transfer(),
                 SftpTabCommand::DiscardTransfer,
             ))
             .child(button(
                 "clear-finished-transfers",
+                Icon::new(CatalogIcon::Eraser),
                 t!("sftp_transfer.queue.clear_finished"),
                 queue.has_finished(),
                 SftpTabCommand::ClearFinishedTransfers,
             ))
     }
 
-    /// 一批：传什么到哪、多大、走到哪了。点一下选中，折叠箭头展开每一项的结果；
-    /// 悬停箭头看是上传还是下载（「操作」一列只留箭头，用户定）。
+    /// Renders a transfer batch row: expand toggle + direction badge + `Source [count] → Target` +
+    /// telemetry (`speed · remaining · size`) + `148px` progress/status column.
     fn render_batch_row(
         &self,
         entry: &QueueEntry,
-        columns: &[TableColumn],
+        scale: TypeScale,
         tokens: &Tokens,
     ) -> AnyElement {
         let queue = &self.transfers.queue;
@@ -359,19 +397,21 @@ impl SftpTab {
         let state = entry.state();
         let status = entry.status();
         let progress = entry.progress();
+        let failed_count = progress.map_or(0, |p| p.failed());
         let transferring = state == QueueState::Active
             && progress.is_some_and(|progress| progress.phase() == TransferPhase::Transferring);
-        let direction = match entry.job().direction() {
-            TransferDirection::Upload => t!("sftp_transfer.queue.upload"),
-            TransferDirection::Download => t!("sftp_transfer.queue.download"),
+        let is_upload = entry.job().direction() == TransferDirection::Upload;
+        let direction = if is_upload {
+            t!("sftp_transfer.queue.upload")
+        } else {
+            t!("sftp_transfer.queue.download")
         };
-        // 测试等的是队头的状态，不管它是什么。
         let status_id: ElementId = if is_head {
             "transfer-status".into()
         } else {
             ("queue-status", id).into()
         };
-        let size = progress
+        let size_str = progress
             .map(|progress| progress.total_bytes())
             .filter(|bytes| *bytes > 0)
             .map(format_size);
@@ -388,7 +428,7 @@ impl SftpTab {
                 )
             });
         let fraction = match state {
-            QueueState::Done => Some(1.0),
+            QueueState::Done if failed_count == 0 => Some(1.0),
             QueueState::Stopped => progress.map(|progress| progress.fraction()),
             QueueState::Active => progress
                 .filter(|progress| {
@@ -400,12 +440,56 @@ impl SftpTab {
                 .map(|progress| progress.fraction()),
             _ => None,
         };
-        let bar_color = match state {
-            QueueState::Done => tokens.ok,
-            QueueState::Stopped => tokens.warn,
-            _ => tokens.icon,
+        let (badge_bg, badge_fg, bar_color, dot_color, status_color) = match state {
+            QueueState::Active => (
+                tokens.brand_soft,
+                tokens.brand,
+                tokens.brand,
+                Some(tokens.brand),
+                tokens.text,
+            ),
+            QueueState::Done if failed_count > 0 => (
+                tokens.err_soft,
+                tokens.err,
+                tokens.err,
+                Some(tokens.err),
+                tokens.err,
+            ),
+            QueueState::Done => (
+                tokens.ok_soft,
+                tokens.ok,
+                tokens.ok,
+                Some(tokens.ok),
+                tokens.ok_text,
+            ),
+            QueueState::Stopped => (
+                tokens.warn_soft,
+                tokens.warn,
+                tokens.warn,
+                Some(tokens.warn),
+                tokens.warn,
+            ),
+            QueueState::Pending => (
+                tokens.sel,
+                tokens.icon,
+                tokens.brand,
+                Some(tokens.faint),
+                tokens.st_dim,
+            ),
+            QueueState::Removed => (tokens.sel, tokens.st_dim, tokens.st_dim, None, tokens.st_dim),
         };
-        let dim = tokens.text2;
+        let source_label = entry.job().source_label();
+        let item_count = entry.job().count();
+        let full_source = source_text(entry);
+        let expand_hover = tokens.hover;
+        let expand_text = tokens.text;
+        let direction_tip = direction;
+        let expand_tip = if expanded {
+            t!("sftp_transfer.queue.collapse_details")
+        } else {
+            t!("sftp_transfer.queue.expand_details")
+        };
+
         table::row(
             ("queue-entry", id),
             RowState {
@@ -416,16 +500,26 @@ impl SftpTab {
         )
         .aria_selected(selected)
         .aria_label(status.clone())
+        .items_center()
+        .gap(space::SPACE_6)
         .on_click(self.queue_command(SftpTabCommand::SelectQueueEntry { id: id as u64 }))
         .child(
-            cell(columns, EXPAND)
+            div()
                 .id(("queue-expand", id))
                 .test_support()
-                .aria_label(direction.clone())
+                .aria_label(expand_tip.clone())
                 .aria_expanded(expanded)
-                .pl(CHEVRON_LEFT)
+                .ml(space::SPACE_4)
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(size::CONTROL_SM)
+                .rounded(size::RADIUS_SM)
                 .text_color(tokens.st_dim)
-                .tooltip(move |_, cx| TextTooltip::view(direction.clone(), cx))
+                .cursor_pointer()
+                .hover(move |style| style.bg(expand_hover).text_color(expand_text))
+                .tooltip(move |_, cx| TextTooltip::view(expand_tip.clone(), cx))
                 .on_click({
                     let toggle =
                         self.queue_command(SftpTabCommand::ToggleQueueEntry { id: id as u64 });
@@ -435,47 +529,144 @@ impl SftpTab {
                     }
                 })
                 .child(
-                    div().relative().top(ICON_NUDGE).child(
-                        Icon::new(if expanded {
-                            IconName::ChevronDown
-                        } else {
-                            IconName::ChevronRight
-                        })
-                        .size(CHEVRON),
-                    ),
+                    Icon::new(if expanded {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .size(px(11.)),
                 ),
         )
-        .child(text_cell(columns, SOURCE, source_text(entry)))
-        .child(text_cell(columns, TARGET, entry.job().target().to_string()).text_color(dim))
         .child(
-            cell(columns, SIZE)
-                .id(("queue-size", id))
+            div()
+                .id(("queue-direction", id))
                 .test_support()
-                .aria_label(size.clone().unwrap_or_default())
-                .text_color(dim)
-                .children(size),
+                .aria_label(direction_tip.clone())
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(px(18.))
+                .rounded(size::RADIUS_SM)
+                .bg(badge_bg)
+                .text_color(badge_fg)
+                .tooltip(move |_, cx| TextTooltip::view(direction_tip.clone(), cx))
+                .child(
+                    Icon::new(if is_upload {
+                        CatalogIcon::Upload
+                    } else {
+                        CatalogIcon::Download
+                    })
+                    .size(px(11.)),
+                ),
         )
-        .child(cell(columns, REMAINING).text_color(dim).children(remaining))
-        .child(cell(columns, SPEED).text_color(dim).children(speed))
         .child(
-            progress_cell(columns, fraction, bar_color, status.clone().into(), tokens)
-                .id(status_id)
-                .aria_label(status)
-                .test_support(),
+            div()
+                .id(("queue-flow", id))
+                .test_support()
+                .aria_label(SharedString::from(format!(
+                    "{full_source} \u{2192} {}",
+                    entry.job().target()
+                )))
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .gap(space::SPACE_6)
+                .tooltip(move |_, cx| {
+                    TextTooltip::view(SharedString::from(full_source.clone()), cx)
+                })
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(WEIGHT_NORMAL)
+                        .text_color(if state == QueueState::Removed {
+                            tokens.st_dim
+                        } else {
+                            tokens.text
+                        })
+                        .child(source_label),
+                )
+                .when(item_count > 1, |flow| {
+                    flow.child(count_badge(item_count, &tokens, scale))
+                })
+                .child(
+                    Icon::new(IconName::ArrowRight)
+                        .size(px(11.))
+                        .flex_none()
+                        .text_color(tokens.faint),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_shrink(1.)
+                        .truncate()
+                        .text_size(scale.sm)
+                        .text_color(tokens.st_dim)
+                        .child(entry.job().target().to_string()),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(space::SPACE_10)
+                .pl(space::SPACE_6)
+                .text_size(scale.sm)
+                .whitespace_nowrap()
+                .when_some(speed, |meta, speed| {
+                    meta.child(div().text_color(tokens.text2).child(speed))
+                })
+                .when_some(remaining, |meta, remaining| {
+                    meta.child(div().text_color(tokens.st_dim).child(remaining))
+                })
+                .child(
+                    div()
+                        .id(("queue-size", id))
+                        .test_support()
+                        .aria_label(size_str.clone().unwrap_or_default())
+                        .flex()
+                        .justify_end()
+                        .min_w(px(48.))
+                        .text_color(tokens.text2)
+                        .children(size_str),
+                ),
+        )
+        .child(
+            progress_cell(
+                fraction,
+                BAR_HEIGHT,
+                bar_color,
+                dot_color,
+                status_color,
+                status.clone().into(),
+                scale,
+                tokens,
+            )
+            .id(status_id)
+            // 悬停看完整状态：像「无法开始：<原因>」这种放不下的文案也能读全。
+            .tooltip({
+                let tip = status.clone();
+                move |_, cx| TextTooltip::view(tip.clone().into(), cx)
+            })
+            .aria_label(status)
+            .test_support(),
         )
         .test_support()
         .into_any_element()
     }
 }
 
-/// 一批正在传的文件的进度：只有在跑、知道是哪个文件时有。
+/// Active per-file progress when the batch is currently transferring a known file.
 fn file_progress(entry: &QueueEntry) -> Option<&crate::backend::sftp::TransferProgress> {
     let progress = entry.progress()?;
     (entry.state() == QueueState::Active && !progress.current_source().is_empty())
         .then_some(progress)
 }
 
-/// 来源列：一项写它自己，多项写共同的目录和项数（`/etc/nginx/（3 项）`）。
+/// Full source description including item count for tooltips.
 fn source_text(entry: &QueueEntry) -> String {
     let label = entry.job().source_label();
     match entry.job().count() {
@@ -489,8 +680,8 @@ fn source_text(entry: &QueueEntry) -> String {
     }
 }
 
-/// 正在传的文件，在它那批下面缩进一级，有自己的大小和进度条。
-fn render_file_row(entry: &QueueEntry, columns: &[TableColumn], tokens: &Tokens) -> AnyElement {
+/// Indented sub-row showing the individual file currently being transferred.
+fn render_file_row(entry: &QueueEntry, scale: TypeScale, tokens: &Tokens) -> AnyElement {
     let Some(progress) = file_progress(entry) else {
         return div().into_any_element();
     };
@@ -507,23 +698,34 @@ fn render_file_row(entry: &QueueEntry, columns: &[TableColumn], tokens: &Tokens)
     table::row(("queue-file", id), RowState::default(), tokens)
         .test_support()
         .aria_label(source)
-        .text_color(tokens.st_dim)
-        .child(cell(columns, EXPAND))
-        .child(text_cell(columns, SOURCE, name).pl(SUB_INDENT))
-        .child(cell(columns, TARGET))
+        .items_center()
+        .gap(space::SPACE_6)
+        .pl(SUB_INDENT)
+        .text_size(scale.sm)
+        .text_color(tokens.text2)
         .child(
-            cell(columns, SIZE)
-                .text_color(tokens.text2)
+            Icon::new(IconName::File)
+                .size(px(11.))
+                .flex_none()
+                .text_color(tokens.faint),
+        )
+        .child(div().flex_1().min_w_0().truncate().child(name))
+        .child(
+            div()
+                .flex_none()
+                .pl(space::SPACE_6)
+                .text_color(tokens.st_dim)
                 .child(format_size(progress.current_total())),
         )
-        .child(cell(columns, REMAINING))
-        .child(cell(columns, SPEED))
         .child(
             progress_cell(
-                columns,
                 Some(fraction),
-                tokens.icon,
+                FILE_BAR_HEIGHT,
+                tokens.brand_progress,
+                None,
+                tokens.st_dim,
                 text.clone().into(),
+                scale,
                 tokens,
             )
             .id(("queue-file-status", id))
@@ -533,8 +735,13 @@ fn render_file_row(entry: &QueueEntry, columns: &[TableColumn], tokens: &Tokens)
         .into_any_element()
 }
 
-/// 展开的一批里一项怎么结束的（最新的在上面）：图标、路径，失败的后面红字写原因。
-fn render_detail(entry: &QueueEntry, index: usize, tokens: &Tokens) -> AnyElement {
+/// Indented sub-row showing how an item ended (newest first), with an error pill on failure.
+fn render_detail(
+    entry: &QueueEntry,
+    index: usize,
+    scale: TypeScale,
+    tokens: &Tokens,
+) -> AnyElement {
     let details = entry
         .progress()
         .map(|progress| progress.details())
@@ -566,38 +773,47 @@ fn render_detail(entry: &QueueEntry, index: usize, tokens: &Tokens) -> AnyElemen
     )
     .aria_label(format!("{outcome} {}", detail.path()))
     .items_center()
-    .gap(px(6.))
-    .pl(px(32.) + px(8.) + SUB_INDENT)
-    .pr(px(8.))
+    .gap(space::SPACE_6)
+    .pl(SUB_INDENT)
+    .pr(space::SPACE_8)
+    .text_size(scale.sm)
     .text_color(tokens.text2)
+    .child(icon.size(size::ICON_SM).flex_none().text_color(color))
     .child(
         div()
-            .flex_none()
-            .relative()
-            .top(ICON_NUDGE)
-            .child(icon.size(CHEVRON).text_color(color)),
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .child(detail.path().to_string()),
     )
-    .child(div().min_w_0().truncate().child(detail.path().to_string()))
     .when_some(detail.reason(), |row, reason| {
         row.child(
             div()
-                .min_w_0()
-                .truncate()
+                .flex()
+                .flex_none()
+                .items_center()
+                .max_w(relative(0.45))
+                .px(space::SPACE_6)
+                .h(px(16.))
+                .rounded(size::RADIUS_SM)
+                .bg(tokens.err_soft)
                 .text_color(tokens.err)
-                .child(describe_reason(reason)),
+                .child(div().min_w_0().truncate().child(describe_reason(reason))),
         )
     })
     .test_support()
     .into_any_element()
 }
 
-/// 展开的一批还没有结果：还没开始，或者什么都没传。
-fn render_no_detail(entry: &QueueEntry, tokens: &Tokens) -> AnyElement {
+/// Indented sub-row when an expanded batch has no completed items yet.
+fn render_no_detail(entry: &QueueEntry, scale: TypeScale, tokens: &Tokens) -> AnyElement {
     let upload = entry.job().direction() == TransferDirection::Upload;
     table::row("transfer-detail-empty", RowState::default(), tokens)
         .test_support()
         .items_center()
-        .pl(px(32.) + px(8.) + SUB_INDENT)
+        .pl(SUB_INDENT)
+        .pr(space::SPACE_8)
+        .text_size(scale.sm)
         .text_color(tokens.st_dim)
         .child(if entry.state() == QueueState::Pending {
             t!("sftp_transfer.queue.not_started")

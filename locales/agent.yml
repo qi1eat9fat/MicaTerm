@@ -1,85 +1,127 @@
 _version: 2
 agent.panel.title:
+  en: Agent
   zh-CN: Agent
 agent.panel.restart:
+  en: Restart
   zh-CN: 重新开始
 agent.panel.close:
+  en: Close
   zh-CN: 关闭
 agent.start.folder:
+  en: Folder
   zh-CN: 文件夹
 agent.start.folder_choose:
+  en: Choose…
   zh-CN: 选择…
 agent.start.folder_prompt:
+  en: Choose the Agent's working folder
   zh-CN: 选择 Agent 的工作文件夹
 agent.start.folder_home:
+  en: Home Folder
   zh-CN: 主目录
 agent.start.conversation:
+  en: Conversation
   zh-CN: 对话
 agent.start.new:
+  en: New Conversation
   zh-CN: 新对话
 agent.start.selected:
+  en: "%{title} (selected)"
   zh-CN: "%{title}（已选）"
 agent.start.reading:
+  en: Reading past conversations in this folder…
   zh-CN: 正在读这个文件夹的历史对话…
 agent.start.no_resume_agent:
+  en: "%{agent} can only start a new conversation"
   zh-CN: "%{agent} 只能开新对话"
 agent.start.start:
+  en: Start
   zh-CN: 启动
 agent.panel.handed:
+  en: "%{card} has been handed to the Agent. The instruction is in the input box; press Enter to send"
   zh-CN: 已把 %{card} 交给 Agent，说明填在输入框里，按 Enter 发送
 agent.prompt.handoff:
+  en: "The user handed the remote card %{name} to you in MicaTerm. The card ID is %{card} and the host ID is %{host}. To run a command in that card, use micaterm exec --card %{card} followed by the command. To see its screen, use micaterm cards read %{card}. Look at the screen first, then wait for the user to say what to do."
   zh-CN: 用户在 MicaTerm 里把远程卡片 %{name} 交给了你，卡片 ID 是 %{card}，主机 ID 是 %{host}。在那张卡片里执行命令用 micaterm exec --card %{card} 加上要执行的命令，看它的屏幕用 micaterm cards read %{card}。先看一眼屏幕，再等用户说要做什么。
 agent.prep.question:
+  en: "%{agent} operates MicaTerm through the micaterm command. Before starting, set up these:"
   zh-CN: "%{agent} 经 micaterm 命令操作 MicaTerm，启动前先做好这几件事："
 agent.prep.question_update:
+  en: "MicaTerm has updated; the instructions %{agent} uses are out of date. Update them first:"
   zh-CN: MicaTerm 更新过，%{agent} 用的说明还是旧的，先更新：
 agent.prep.enable_cli:
+  en: Enable External Agents
   zh-CN: 启用外部 Agent
 agent.prep.enable_cli_where:
+  en: Settings › Agent master switch
   zh-CN: 设置 › Agent 的总开关
 agent.prep.install_command:
+  en: Install the command-line tool
   zh-CN: 安装命令行工具
 agent.prep.update_command:
+  en: Update the command-line tool
   zh-CN: 更新命令行工具
 agent.prep.install_skill:
+  en: Install the %{agent} Skill
   zh-CN: 安装 %{agent} 的 Skill
 agent.prep.update_skill:
+  en: Update the %{agent} Skill
   zh-CN: 更新 %{agent} 的 Skill
 agent.prep.note:
+  en: Change these later in Settings › Agent
   zh-CN: 以后在 设置 › Agent 里改
 agent.prep.handing:
+  en: Handing %{card} to it
   zh-CN: 交给它 %{card}
 agent.prep.cancel:
+  en: Cancel
   zh-CN: 取消
 agent.prep.confirm:
+  en: Set Up and Start
   zh-CN: 准备好并启动
 agent.prep.confirm_update:
+  en: Update and Start
   zh-CN: 更新并启动
 agent.no_command.title:
+  en: Agent Command Not Found
   zh-CN: 找不到 Agent 命令
 agent.no_command.text:
+  en: "Neither claude nor codex is on PATH. Install Claude Code or Codex and try again, or set the command to run in Settings."
   zh-CN: PATH 里没有 claude 或 codex。装好 Claude Code 或 Codex 后再试，或者在设置里填要运行的命令。
 agent.no_command.cancel:
+  en: Cancel
   zh-CN: 取消
 agent.no_command.settings:
+  en: Open Settings
   zh-CN: 打开设置
 agent.handoff.no_agent:
+  en: "%{card} was handed over, but no Agent command was found and the Agent panel did not open. Run micaterm cards list in any terminal to see this card"
   zh-CN: 已把 %{card} 交出去。没找到 Agent 命令，Agent 面板没有打开；在任意终端里用 micaterm cards list 能看到这张卡片
 agent.handoff.no_agent_cli_off:
+  en: "%{card} was handed over, but \"Enable External Agents\" is off, so the Agent cannot use it yet (Settings › Agent)"
   zh-CN: 已把 %{card} 交出去，但「启用外部 Agent」没开，Agent 还用不了它（设置 › Agent）
 agent.state.idle:
+  en: Idle
   zh-CN: 空闲
 agent.state.running:
+  en: Running
   zh-CN: 运行中
 agent.state.waiting:
+  en: Waiting for You
   zh-CN: 等你确认
 agent.state.turn_ended:
+  en: Turn Ended
   zh-CN: 回合结束
 agent.state.notice_title:
+  en: "%{agent} is waiting for your confirmation"
   zh-CN: "%{agent} 等你确认"
 agent.state.card_notice_title:
+  en: "%{card} · %{agent} is waiting for your confirmation"
   zh-CN: "%{card} · %{agent} 等你确认"
 agent.state.notice_body:
+  en: It needs your confirmation to continue
   zh-CN: 要你确认才能继续
 agent.rail.state:
+  en: "Agent · %{state}"
   zh-CN: Agent · %{state}

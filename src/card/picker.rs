@@ -1,17 +1,17 @@
-//! 刚分出来的新卡片（2026-11-14 分屏重做，26 号「分屏 › 选择」）：一个小号的新标签页，选了才开。
+//! 刚分出来的新卡片（分屏 › 选择）：嵌入分屏槽位里的扁平紧凑终端选择器。
 //!
-//! - 卡片上按「向右分屏」「向下分屏」（顶行按钮、Ctrl+Shift+D / Ctrl+Shift+E），这张卡片让出一半，
-//!   新卡片立刻出现在要去的位置，焦点在它的搜索框里；
-//! - 顶上搜索框，下面第一项「再开一个 web-01」默认高亮（直接回车 = 复制当前卡片：远程复用同一条连接开
-//!   新 shell 通道，本地在同一个目录开新终端），第二项本地终端；细线下面是全部主机，右边淡字 `用户@地址`；
-//! - 打字只按主机过滤（名称、地址、用户名，和主机栏搜索同一套），↑↓ 移动，回车或点一行打开；
-//! - Esc、顶行的 ×、或者焦点去了别处（点了别的卡片、切了标签）= 撤销，新卡片收回；
-//! - 和卡片一样有顶行（「新卡片」，正中淡字「选择要打开的终端」，右边 ×）和状态栏（右边「Esc 取消」）。
-//!
-//! 它只是个占位：选好以后由窗口壳撤掉它，再把真卡片分到同一个位置。
+//! - 卡片上按「向右分屏」「向下分屏」（顶行按钮、Ctrl+Shift+D / Ctrl+Shift+E），原卡片让出一半，
+//!   新卡片出现在目标槽位，焦点直接落在面板顶部的搜索框里；
+//! - 居中一块扁平紧凑的选择器面板（宽 320、`RADIUS_LG` 圆角、`tokens.popup` 底 + `1px` 细边、无阴影）：
+//!   顶部 28px 搜索栏，未输入时前两项是快捷操作（「再开一个 …」+ 淡字说明、「本地终端」实心图块），
+//!   细线下面是全部主机（右侧淡字 `用户@地址`）；
+//! - 打字只按主机过滤（名称、地址、用户名，与主机栏搜索同一套），右侧带一键清空按钮；
+//!   ↑↓ 移动高亮，回车或单击打开；
+//! - Esc、顶行 ×、状态栏「Esc 取消」或焦点移去别处 = 撤销，新卡片收回；
+//! - 外框与同级终端分屏保持一致的 22px 顶行与 22px 分段式状态栏。
 
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use micaterm_hosts::{Host, HostId, host_matches};
@@ -19,20 +19,29 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use super::CardId;
-use super::fit::{centered_fits, measure_width, text_width};
-use super::title_row::{ICON_GAP, ROW_ICON, ROW_LEFT, TITLE_ROW, row_icon};
+use super::fit::{measure_width, text_width};
+use super::render_tab_tile;
+use super::title_row::{ROW_LEFT, ROW_RIGHT, TITLE_ROW};
 use crate::app::CatalogIcon;
 use crate::host::{HostMark, HostStore};
 use crate::i18n::t;
+use crate::programs::shell_program;
 use crate::split::Axis;
-use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, size};
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, size, space};
+use crate::ui::empty::{EmptyPlacement, EmptyState};
+use crate::ui::search::{SearchBar, SearchChrome};
+use crate::ui::icon_button::TextTooltip;
 
-/// 一列最宽多少（卡片窄时跟着变窄）。
-const COLUMN: Pixels = px(360.);
-/// 一行的高（行和行之间再空 2）。用户：字号小一档、间距收紧（2026-11-14）。
-const ROW: Pixels = px(30.);
-/// 行前面那一块（徽章、终端图标）的边长。
-const LEAD: Pixels = px(14.);
+/// 选择器面板最大宽度（窄分屏下随容器自适应收缩）。
+const PANEL_WIDTH: Pixels = px(320.);
+/// 列表行高（紧凑 26px，对齐 `TABLE_ROW`）。
+const ROW: Pixels = size::TABLE_ROW;
+/// 行首彩色图标/系统徽章图块的统一边长（与标签、卡片标题行的图块同尺寸）。
+const LEAD: Pixels = size::TAB_BADGE;
+/// 状态栏分段左右内边距（对齐 `card::status_bar`）。
+const SEGMENT_PAD: f32 = 7.;
+/// 顶行右边距（和终端卡片顶行一致，关闭按钮对齐顶栏的窗口关闭圆点）。
+const TITLE_RIGHT: f32 = ROW_RIGHT;
 
 /// 占位新卡片的 id 从这里往上数，和真卡片（从 1 起）错开：真卡片的 id 不因为开过新卡片而跳号。
 const PICKER_IDS: u64 = 1 << 40;
@@ -59,7 +68,7 @@ pub enum PickerChoice {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PickerEvent {
     Chosen(PickerChoice),
-    /// 撤销了。`refocus`：按了 Esc，焦点该回到分屏的那张卡片；焦点自己去了别处时是 `false`，不抢回来。
+    /// 撤销了。`refocus`：按了 Esc 或点了取消，焦点该回到分屏的那张卡片；焦点自己去了别处时是 `false`，不抢回来。
     Dismissed {
         refocus: bool,
     },
@@ -70,7 +79,7 @@ pub enum PickerEvent {
 pub struct PickerSource {
     /// 卡片的名称：主机名，或者 shell 名。
     pub name: SharedString,
-    /// 远程卡片的徽章；本地卡片是 `None`（画终端图标）。
+    /// 远程卡片的徽章；本地卡片是 `None`（按 shell 名画统一的终端图块）。
     pub mark: Option<HostMark>,
 }
 
@@ -84,7 +93,7 @@ pub struct CardPicker {
     highlighted: usize,
     scroll: ScrollHandle,
     focus_handle: FocusHandle,
-    /// 上一帧量到的宽度：顶行正中的提示放不放得下看它。
+    /// 上一帧量到的卡片宽度：顶行副标题放不放得下看它。
     width: Rc<Cell<f32>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -174,6 +183,17 @@ impl CardPicker {
             .collect()
     }
 
+    fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |search, cx| {
+            search.set_value("", window, cx);
+            search.focus(window, cx);
+        });
+        self.query.clear();
+        self.highlighted = 0;
+        self.scroll.scroll_to_item(0);
+        cx.notify();
+    }
+
     fn choose(&mut self, index: usize, cx: &mut Context<Self>) {
         if let Some(choice) = self.items(cx).get(index).copied() {
             cx.emit(PickerEvent::Chosen(choice));
@@ -193,34 +213,34 @@ impl CardPicker {
         }
     }
 
-    /// 搜索框（和主机栏的同一个样子，边深一档：焦点总在它里面）。
-    fn render_search(&self, tokens: &Tokens, scale: TypeScale) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(8.))
-            .h(size::INPUT)
-            .mb(px(8.))
-            .px(px(10.))
-            .rounded(size::RADIUS)
-            .bg(tokens.input)
-            .border_1()
-            .border_color(tokens.line_strong)
-            .text_size(scale.ui)
-            .text_color(tokens.st_dim)
-            .child(Icon::new(IconName::Search).size(px(14.)))
-            .child(
-                div().flex_1().min_w_0().child(
-                    Input::new(&self.search)
-                        .id("card-picker-search")
-                        .aria_label(t!("card.picker.search"))
-                        .appearance(false)
-                        .small()
-                        .px_0()
-                        .text_size(scale.ui),
-                ),
-            )
+    fn axis_icon(&self) -> CatalogIcon {
+        match self.axis {
+            Axis::Horizontal => CatalogIcon::Columns2,
+            Axis::Vertical => CatalogIcon::Rows2,
+        }
+    }
+
+    /// 面板顶部紧凑一体化搜索栏（28px 高、无内框、底部分隔细线）。
+    fn render_search(
+        &self,
+        tokens: &Tokens,
+        scale: TypeScale,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        SearchBar::new(
+            "card-picker-search-box",
+            &self.search,
+            "card-picker-search",
+            t!("card.picker.search"),
+            "card-picker-clear",
+            t!("host.list.clear_search"),
+            SearchChrome::Underline,
+            tokens,
+            scale,
+            cx.listener(|this, _, window, cx| this.clear_search(window, cx)),
+        )
+        .query(!self.query.is_empty())
+        .render()
     }
 
     fn render_row(
@@ -229,18 +249,19 @@ impl CardPicker {
         choice: PickerChoice,
         tokens: &Tokens,
         scale: TypeScale,
-        dark: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let highlighted = index == self.highlighted;
         let hover = tokens.hover;
+        let text = tokens.text;
+        let badge_id: ElementId = ("card-picker-badge", index).into();
         let (lead, name, sub): (AnyElement, SharedString, Option<SharedString>) = match choice {
             PickerChoice::Duplicate => (
                 match &self.source.mark {
                     Some(mark) => mark
-                        .render(("card-picker-badge", index).into(), LEAD, dark)
+                        .render(badge_id, LEAD, size::TAB_BADGE_GLYPH)
                         .into_any_element(),
-                    None => terminal_icon(tokens),
+                    None => shell_badge(badge_id, &self.source.name, tokens),
                 },
                 t!("card.picker.duplicate", name = self.source.name),
                 Some(if self.source.mark.is_some() {
@@ -249,14 +270,18 @@ impl CardPicker {
                     t!("card.picker.same_directory")
                 }),
             ),
-            PickerChoice::Local => (terminal_icon(tokens), t!("card.local.title"), None),
+            PickerChoice::Local => (
+                shell_badge(badge_id, t!("card.local.title").as_ref(), tokens),
+                t!("card.local.title"),
+                None,
+            ),
             PickerChoice::Host(id) => {
                 let Some(host) = self.hosts.read(cx).host(id).cloned() else {
                     return div().into_any_element();
                 };
                 (
                     HostMark::of(&host)
-                        .render(("card-picker-badge", index).into(), LEAD, dark)
+                        .render(badge_id, LEAD, size::TAB_BADGE_GLYPH)
                         .into_any_element(),
                     host.name.clone(),
                     Some(format!("{}@{}", host.user, host.address).into()),
@@ -271,11 +296,11 @@ impl CardPicker {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(10.))
+            .gap(space::SPACE_7)
             .h(ROW)
-            .px(px(10.))
-            .rounded(size::RADIUS)
-            .text_size(scale.ui)
+            .px(space::SPACE_6)
+            .rounded(size::RADIUS_SM)
+            .text_size(scale.sm)
             .text_color(tokens.label)
             .whitespace_nowrap()
             .cursor_pointer()
@@ -283,7 +308,7 @@ impl CardPicker {
                 if highlighted {
                     row.bg(tokens.sel).text_color(tokens.text)
                 } else {
-                    row.hover(move |style| style.bg(hover))
+                    row.hover(move |style| style.bg(hover).text_color(text))
                 }
             })
             .on_click(cx.listener(move |this, _, _, cx| this.choose(index, cx)))
@@ -296,25 +321,41 @@ impl CardPicker {
                     .size(LEAD)
                     .child(lead),
             )
-            .child(div().flex_none().child(name))
-            .when_some(sub, |row, sub| {
-                row.child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(scale.small)
-                        .text_color(tokens.st_dim)
-                        .child(sub),
-                )
-            })
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap(space::SPACE_6)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_weight(WEIGHT_NORMAL)
+                            .child(name),
+                    )
+                    .when_some(sub, |group, sub| {
+                        group.child(
+                            div()
+                                .flex_shrink(4.)
+                                .min_w_0()
+                                .truncate()
+                                .text_size(scale.xs)
+                                .font_weight(WEIGHT_NORMAL)
+                                .text_color(tokens.st_dim)
+                                .child(sub),
+                        )
+                    }),
+            )
             .when(highlighted, |row| {
                 row.child(
                     div()
                         .ml_auto()
-                        .pl(px(12.))
+                        .pl(space::SPACE_6)
                         .flex_none()
-                        .font_family(MONO_FONT_FAMILY)
-                        .text_size(scale.mono_small)
+                        .text_size(scale.sm)
+                        .font_weight(WEIGHT_NORMAL)
                         .text_color(tokens.st_dim)
                         .child("Enter"),
                 )
@@ -322,7 +363,7 @@ impl CardPicker {
             .into_any_element()
     }
 
-    /// 和卡片同样的顶行：左边「新卡片」，正中淡字「选择要打开的终端」（放不下就藏），右边 ×。
+    /// 与终端卡片一致的扁平 22px 顶行：左侧分屏图标 + 「新卡片」+ 紧随其后的淡色说明（窄时收起），右侧 20×20 关闭按钮。
     fn render_title(
         &self,
         window: &Window,
@@ -330,20 +371,20 @@ impl CardPicker {
         scale: TypeScale,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let icon = match self.axis {
-            Axis::Horizontal => CatalogIcon::Columns2,
-            Axis::Vertical => CatalogIcon::Rows2,
-        };
+        let icon = self.axis_icon();
         let title = t!("card.picker.title");
         let hint = t!("card.picker.hint");
-        let left = ROW_LEFT + ROW_ICON + ICON_GAP + text_width(window, &title, scale.ui);
-        let right = 6. + 22.;
-        let hint_fits = centered_fits(
-            self.width.get(),
-            left,
-            right,
-            text_width(window, &hint, scale.ui),
-        );
+        let width = self.width.get();
+        let required = ROW_LEFT
+            + f32::from(size::ICON_SM)
+            + 6.
+            + text_width(window, &title, scale.sm)
+            + 12.
+            + text_width(window, &hint, scale.sm)
+            + TITLE_RIGHT
+            + f32::from(size::CONTROL_SM)
+            + 12.;
+        let show_hint = width <= 0. || width >= required;
         let hover = tokens.hover;
         let text = tokens.text;
         div()
@@ -355,9 +396,10 @@ impl CardPicker {
             .items_center()
             .h(TITLE_ROW)
             .pl(px(ROW_LEFT))
-            .pr(px(6.))
-            .text_size(scale.ui)
-            .text_color(tokens.text2)
+            .pr(px(TITLE_RIGHT))
+            .text_size(scale.sm)
+            .font_weight(WEIGHT_NORMAL)
+            .text_color(tokens.text)
             .whitespace_nowrap()
             .overflow_hidden()
             .child(
@@ -366,33 +408,37 @@ impl CardPicker {
                     .flex_1()
                     .min_w_0()
                     .items_center()
-                    .gap(px(ICON_GAP))
-                    .child(row_icon(icon, tokens.icon))
-                    .child(div().min_w_0().truncate().child(title)),
+                    .gap(space::SPACE_6)
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(tokens.icon)
+                            .child(Icon::new(icon).size(size::ICON_SM)),
+                    )
+                    .child(div().min_w_0().truncate().child(title))
+                    .when(show_hint, |left| {
+                        left.child(div().flex_none().text_color(tokens.faint).child("·"))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(tokens.st_dim)
+                                    .child(hint),
+                            )
+                    }),
             )
-            .when(hint_fits, |row| {
-                row.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .flex()
-                        .justify_center()
-                        .items_center()
-                        .text_color(tokens.st_dim)
-                        .child(hint),
-                )
-            })
             .child(
                 div()
                     .id("card-picker-close")
                     .test_support()
                     .aria_label(t!("card.picker.cancel"))
+                    .tooltip(|_, cx| TextTooltip::view(t!("card.picker.cancel"), cx))
                     .flex()
                     .flex_none()
                     .items_center()
                     .justify_center()
-                    .size(px(22.))
-                    .rounded(px(5.))
+                    .size(size::CONTROL_SM)
+                    .rounded(size::RADIUS_SM)
                     .text_color(tokens.icon)
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover).text_color(text))
@@ -401,51 +447,84 @@ impl CardPicker {
                             cx.emit(PickerEvent::Dismissed { refocus: true })
                         }),
                     )
-                    .child(Icon::new(CatalogIcon::Close).size(px(14.))),
+                    .child(Icon::new(CatalogIcon::Close).size(size::ICON_SM)),
             )
     }
 
-    /// 和卡片同样的状态栏：右边「Esc 取消」。
-    fn render_status(&self, tokens: &Tokens, scale: TypeScale) -> impl IntoElement {
+    /// 与终端卡片一致的 22px 分段式状态栏：左段标示分屏方向，右段「Esc 取消」带贯通竖线且可点击取消。
+    fn render_status(
+        &self,
+        tokens: &Tokens,
+        scale: TypeScale,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let split_label = match self.axis {
+            Axis::Horizontal => t!("card.split_right"),
+            Axis::Vertical => t!("card.split_down"),
+        };
+        let hover = tokens.hover;
+        let text = tokens.text;
         div()
             .id(self.id.element("card-picker-status"))
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(6.))
             .h(size::STATUS_BAR)
-            .pl(px(ROW_LEFT))
-            .pr(px(10.))
             .border_t(size::LINE)
             .border_color(tokens.line)
             .bg(tokens.tabbar)
-            .text_size(scale.ui)
+            .text_size(scale.sm)
             .text_color(tokens.text2)
             .whitespace_nowrap()
             .overflow_hidden()
             .child(
                 div()
-                    .ml_auto()
+                    .flex()
+                    .flex_shrink(1.)
+                    .min_w_0()
+                    .items_center()
+                    .h_full()
+                    .gap(space::SPACE_5)
+                    .px(px(SEGMENT_PAD))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(tokens.st_dim)
+                            .child(Icon::new(self.axis_icon()).size(px(10.5))),
+                    )
+                    .child(div().min_w_0().truncate().child(split_label)),
+            )
+            .child(div().flex_1().min_w_0())
+            .child(
+                div()
+                    .id("card-picker-cancel")
+                    .test_support()
+                    .aria_label(t!("card.picker.cancel"))
                     .flex()
                     .flex_none()
                     .items_center()
-                    .gap(px(6.))
-                    .child(
-                        div()
-                            .font_family(MONO_FONT_FAMILY)
-                            .text_size(scale.mono_small)
-                            .child("Esc"),
+                    .h_full()
+                    .gap(space::SPACE_5)
+                    .px(px(SEGMENT_PAD))
+                    .border_l(size::LINE)
+                    .border_color(tokens.line)
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(hover).text_color(text))
+                    .on_click(
+                        cx.listener(|_, _, _, cx| {
+                            cx.emit(PickerEvent::Dismissed { refocus: true })
+                        }),
                     )
+                    .child(div().text_color(tokens.st_dim).child("Esc"))
                     .child(t!("card.picker.cancel")),
             )
     }
 }
 
-fn terminal_icon(tokens: &Tokens) -> AnyElement {
-    div()
-        .text_color(tokens.icon)
-        .child(Icon::new(CatalogIcon::SquareTerminal).size(px(13.)))
-        .into_any_element()
+/// 本地终端 / 本地复制项的实心圆角图块：和标签、卡片标题行上的同一个方块——终端图标 +
+/// 统一的中性底色，不随本机 shell 的品牌变色（`render_tab_tile`，边长 `LEAD`）。
+fn shell_badge(id: ElementId, shell_name: &str, tokens: &Tokens) -> AnyElement {
+    render_tab_tile(id, &shell_program(shell_name), tokens).into_any_element()
 }
 
 impl Focusable for CardPicker {
@@ -458,13 +537,12 @@ impl Render for CardPicker {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let scale = TypeScale::current(cx);
-        let dark = cx.theme().is_dark();
         let items = self.items(cx);
         let searching = !self.query.trim().is_empty();
         let mut rows: Vec<AnyElement> = Vec::new();
         for (index, choice) in items.iter().copied().enumerate() {
-            let row = self.render_row(index, choice, &tokens, scale, dark, cx);
-            // 「本地终端」下面一条细线，再是主机。细线和它包在一起：一项一个子元素，滚动按下标找得准。
+            let row = self.render_row(index, choice, &tokens, scale, cx);
+            // 「本地终端」下面一条紧凑 1px 细线，再接全部主机。细线和它包在一起：保证下标与 `items` 一一对应。
             rows.push(
                 if choice == PickerChoice::Local && items.len() > index + 1 {
                     div()
@@ -476,8 +554,8 @@ impl Render for CardPicker {
                             div()
                                 .flex_none()
                                 .h(size::LINE)
-                                .mx(px(10.))
-                                .my(px(4.))
+                                .mx(space::SPACE_4)
+                                .my(px(3.))
                                 .bg(tokens.line),
                         )
                         .into_any_element()
@@ -487,16 +565,10 @@ impl Render for CardPicker {
             );
         }
         if searching && items.is_empty() {
+            let empty_text = t!("host.list.no_match", query = self.query.trim());
             rows.push(
-                div()
-                    .id("card-picker-empty")
-                    .test_support()
-                    .pt(px(8.))
-                    .px(px(8.))
-                    .text_size(scale.ui)
-                    .text_color(tokens.st_dim)
-                    .child(t!("host.list.no_match", query = self.query.trim()))
-                    .into_any_element(),
+                EmptyState::new("card-picker-empty", empty_text, EmptyPlacement::Picker)
+                    .render(&tokens, scale),
             );
         }
         div()
@@ -529,26 +601,35 @@ impl Render for CardPicker {
             .child(
                 div()
                     .flex()
+                    .flex_col()
                     .flex_1()
                     .min_h_0()
-                    .justify_center()
-                    .pt(px(16.))
-                    .px(px(20.))
+                    .items_center()
+                    .pt(px(14.))
+                    .pb(space::SPACE_12)
+                    .px(space::SPACE_12)
                     .child(
                         div()
+                            .id("card-picker-surface")
+                            .test_support()
                             .flex()
                             .flex_col()
                             .w_full()
-                            .max_w(COLUMN)
+                            .max_w(PANEL_WIDTH)
                             .min_h_0()
-                            .child(self.render_search(&tokens, scale))
+                            .rounded(size::RADIUS_LG)
+                            .bg(tokens.popup)
+                            .border_1()
+                            .border_color(tokens.line)
+                            .overflow_hidden()
+                            .child(self.render_search(&tokens, scale, cx))
                             .child(
                                 div()
                                     .id("card-picker-list")
                                     .flex()
                                     .flex_col()
-                                    .gap(px(2.))
-                                    .flex_1()
+                                    .gap(px(1.))
+                                    .p(space::SPACE_4)
                                     .min_h_0()
                                     .overflow_y_scroll()
                                     .track_scroll(&self.scroll)
@@ -556,7 +637,7 @@ impl Render for CardPicker {
                             ),
                     ),
             )
-            .child(self.render_status(&tokens, scale))
+            .child(self.render_status(&tokens, scale, cx))
             .child(measure_width(self.width.clone(), cx.entity_id()))
     }
 }

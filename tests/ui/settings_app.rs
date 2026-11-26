@@ -49,7 +49,10 @@ fn the_settings_have_all_six_categories_in_order(cx: &mut TestAppContext) {
                     .to_string()
             })
             .collect();
-        assert_eq!(names, ["外观", "终端", "SFTP", "安全", "Agent", "应用"]);
+        assert_eq!(
+            names,
+            ["Appearance", "Terminal", "SFTP", "Security", "Agent", "App"]
+        );
         assert!(window.try_find(("settings-category", 6_usize)).is_none());
     });
 }
@@ -86,7 +89,7 @@ fn without_a_data_folder_the_app_category_says_so(cx: &mut TestAppContext) {
         let note = window.find("data-dir-path");
         assert!(
             note.label()
-                .is_some_and(|label| label.contains("没有数据目录"))
+                .is_some_and(|label| label.contains("No data folder"))
         );
         assert!(window.try_find("open-data-dir").is_none());
     });
@@ -263,6 +266,29 @@ fn without_a_data_folder_the_window_is_not_remembered(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_mica_switch_toggles_from_the_keyboard(cx: &mut TestAppContext) {
+    let (handle, workspace) = open_workspace(cx);
+    open_category(cx, handle, 0);
+
+    // 点一下先把焦点交给开关，再按空格、回车各切换一次。
+    in_frame(cx, handle, |window, cx| window.click("mica", cx));
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find("mica").checked(), Some(true));
+        assert_eq!(window.find("mica").focused(), Some(true));
+    });
+    in_frame(cx, handle, |window, cx| window.press("space", cx));
+    assert!(!stored(cx, &workspace).interface.mica);
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find("mica").checked(), Some(false));
+    });
+    in_frame(cx, handle, |window, cx| window.press("enter", cx));
+    in_frame(cx, handle, |window, _| {
+        assert_eq!(window.find("mica").checked(), Some(true));
+    });
+    assert!(stored(cx, &workspace).interface.mica);
+}
+
+#[gpui_kit::test]
 fn the_mica_switch_is_off_by_default_and_changes_the_backdrop(cx: &mut TestAppContext) {
     let (handle, workspace) = open_workspace(cx);
     open_category(cx, handle, 0);
@@ -290,3 +316,4 @@ fn the_mica_switch_is_off_by_default_and_changes_the_backdrop(cx: &mut TestAppCo
     assert!(!stored(cx, &workspace).interface.mica);
     assert_eq!(backdrop(cx), WindowBackdrop::Opaque);
 }
+

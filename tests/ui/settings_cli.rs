@@ -113,7 +113,7 @@ fn the_cli_page_has_the_switch_off_and_says_why_there_is_no_endpoint(cx: &mut Te
         // 测试里没有端点：说这次运行用不了。
         assert_eq!(
             window.find("cli-status").label(),
-            Some("这次运行没有数据目录，外部 CLI 不可用")
+            Some("No data folder this session; the external CLI is unavailable")
         );
         window.click("cli-enabled", cx);
     });
@@ -279,7 +279,7 @@ fn the_command_and_a_skill_are_installed_and_removed_from_the_page(cx: &mut Test
             .label()
             .unwrap_or_default()
             .to_string();
-        assert!(note.contains("未安装"), "{note}");
+        assert!(note.contains("Not installed"), "{note}");
         window.click("cli-binary", cx);
     });
     cx.run_until_parked();
@@ -290,7 +290,7 @@ fn the_command_and_a_skill_are_installed_and_removed_from_the_page(cx: &mut Test
             .label()
             .unwrap_or_default()
             .to_string();
-        assert!(note.contains("已安装"), "{note}");
+        assert!(note.contains("Installed"), "{note}");
         // Claude Code 的 Skill：装上，内容就是这一版的。
         window.click("cli-skill-claude-install", cx);
     });
@@ -308,7 +308,7 @@ fn the_command_and_a_skill_are_installed_and_removed_from_the_page(cx: &mut Test
     in_frame(cx, handle, |window, cx| {
         assert_eq!(
             window.find("cli-skill-claude-status").label(),
-            Some("已安装")
+            Some("Installed")
         );
         window.click("cli-skill-claude-remove", cx);
     });
@@ -319,10 +319,11 @@ fn the_command_and_a_skill_are_installed_and_removed_from_the_page(cx: &mut Test
     assert!(std::fs::symlink_metadata(&paths.bin_link).is_err());
 }
 
-/// WorkBuddy（2026-11-16 照 shell-rs 加）：只装 Skill，装到 `~/.workbuddy/skills`；
-/// 那一行说本机有没有 WorkBuddy（用户目录下有没有 `.workbuddy`）。
+/// Antigravity CLI（2026-11-24，取代 WorkBuddy）：只装 Skill，装到
+/// `~/.gemini/antigravity-cli/skills`；那一行说本机有没有它的命令行
+/// （安装脚本放在 `%LOCALAPPDATA%\agy\bin` / `~/.local/bin` 的 `agy`）。
 #[gpui_kit::test]
-fn the_workbuddy_skill_says_whether_workbuddy_is_here(cx: &mut TestAppContext) {
+fn the_antigravity_skill_says_whether_the_cli_is_here(cx: &mut TestAppContext) {
     let root = tempfile::tempdir().unwrap();
     let paths = install_paths(root.path());
     let services = WorkspaceServices {
@@ -335,25 +336,38 @@ fn the_workbuddy_skill_says_whether_workbuddy_is_here(cx: &mut TestAppContext) {
     let note = |cx: &mut TestAppContext| {
         in_frame(cx, handle, |window, _| {
             window
-                .find("cli-skill-workbuddy-status")
+                .find("cli-skill-antigravity-status")
                 .label()
                 .unwrap_or_default()
                 .to_string()
         })
     };
     let before = note(cx);
-    assert!(before.starts_with("未安装"), "{before}");
-    assert!(before.contains("没检测到 WorkBuddy"), "{before}");
+    assert!(before.starts_with("Not Installed"), "{before}");
+    assert!(before.contains("Antigravity CLI not detected"), "{before}");
 
-    // 装了 WorkBuddy 以后再装 Skill：写到它的 skills 目录，这一行说检测到了。
-    std::fs::create_dir_all(paths.home.join(".workbuddy")).unwrap();
+    // 装了 Antigravity CLI 以后再装 Skill：写到它的 skills 目录，这一行说检测到了。
+    let cli = if cfg!(windows) {
+        paths
+            .home
+            .join("AppData")
+            .join("Local")
+            .join("agy")
+            .join("bin")
+            .join("agy.exe")
+    } else {
+        paths.home.join(".local").join("bin").join("agy")
+    };
+    std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
+    std::fs::write(&cli, "").unwrap();
     in_frame(cx, handle, |window, cx| {
-        window.click("cli-skill-workbuddy-install", cx)
+        window.click("cli-skill-antigravity-install", cx)
     });
     cx.run_until_parked();
     let skill = paths
         .home
-        .join(".workbuddy")
+        .join(".gemini")
+        .join("antigravity-cli")
         .join("skills")
         .join("micaterm")
         .join("SKILL.md");
@@ -362,8 +376,8 @@ fn the_workbuddy_skill_says_whether_workbuddy_is_here(cx: &mut TestAppContext) {
         micaterm::cli::SKILL
     );
     let after = note(cx);
-    assert!(after.starts_with("已安装"), "{after}");
-    assert!(after.contains("已检测到 WorkBuddy"), "{after}");
+    assert!(after.starts_with("Installed"), "{after}");
+    assert!(after.contains("Antigravity CLI detected"), "{after}");
 }
 
 #[gpui_kit::test]

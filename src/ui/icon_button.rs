@@ -5,7 +5,7 @@ use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, size};
+use crate::theme::{Tokens, TypeScale, size};
 
 /// 图标按钮。`label` 是无障碍名称，测试也靠它断言。
 pub struct IconButton {
@@ -21,7 +21,7 @@ pub struct IconButton {
     primary: bool,
     /// 变灰：现在做不了，悬停说为什么。
     dimmed: bool,
-    /// 悬停时的提示。
+    /// 自定义悬停提示；未指定时使用按钮的无障碍名称。
     tooltip: Option<SharedString>,
     /// 提示后面淡色写这个 action 的快捷键（有绑定时）。
     tooltip_keys: Option<Box<dyn Action>>,
@@ -32,19 +32,47 @@ pub struct IconButton {
 /// 悬停时的一句提示（深底浅字、圆角 6）。图标按钮用它，列表行要悬停看全文时也用它。
 /// 后面可以淡色跟一个快捷键（`向右分屏  Ctrl+Shift+D`）。
 pub struct TextTooltip {
+    id: &'static str,
     text: SharedString,
+    detail: Option<SharedString>,
     keys: Option<SharedString>,
 }
 
 impl TextTooltip {
     /// 给 `.tooltip(…)` 用的视图。
     pub fn view(text: SharedString, cx: &mut App) -> AnyView {
-        Self::with_keys(text, None, cx)
+        Self::build("icon-button-tooltip", text, None, None, cx)
     }
 
     /// 带快捷键的提示。
     pub fn with_keys(text: SharedString, keys: Option<SharedString>, cx: &mut App) -> AnyView {
-        cx.new(|_| Self { text, keys }).into()
+        Self::build("icon-button-tooltip", text, None, keys, cx)
+    }
+
+    /// 两行提示：第一行地址/名称，第二行备注。`id` 给需要断言提示的调用方。
+    pub fn with_detail(
+        id: &'static str,
+        text: SharedString,
+        detail: Option<SharedString>,
+        cx: &mut App,
+    ) -> AnyView {
+        Self::build(id, text, detail, None, cx)
+    }
+
+    fn build(
+        id: &'static str,
+        text: SharedString,
+        detail: Option<SharedString>,
+        keys: Option<SharedString>,
+        cx: &mut App,
+    ) -> AnyView {
+        cx.new(|_| Self {
+            id,
+            text,
+            detail,
+            keys,
+        })
+        .into()
     }
 }
 
@@ -59,29 +87,44 @@ impl Render for TextTooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let scale = TypeScale::current(cx);
-        div()
-            .id("icon-button-tooltip")
+        let label = match &self.detail {
+            Some(detail) => format!("{}\n{detail}", self.text),
+            None => self.text.to_string(),
+        };
+        // 长文本（一整条命令、长路径）不能把提示条撑成横贯窗口的一条：限宽换行，最多四行。
+        let tip = div()
+            .id(self.id)
             .test_support()
-            .aria_label(self.text.clone())
-            .flex()
-            .items_baseline()
-            .gap(px(10.))
+            .aria_label(label)
+            .max_w(size::TOOLTIP_MAX_WIDTH)
+            .line_clamp(size::TOOLTIP_MAX_LINES)
             .px(px(8.))
             .py(px(4.))
-            .rounded(size::RADIUS)
+            .rounded(size::RADIUS_MD)
             .bg(tokens.tooltip)
             .text_color(tokens.tooltip_text)
-            .text_size(scale.ui)
-            .child(self.text.clone())
-            .when_some(self.keys.clone(), |tip, keys| {
-                tip.child(
-                    div()
-                        .font_family(MONO_FONT_FAMILY)
-                        .text_size(scale.mono_small)
-                        .text_color(tokens.faint)
-                        .child(keys),
-                )
-            })
+            .text_size(scale.body);
+        if self.detail.is_some() {
+            tip.flex()
+                .flex_col()
+                .line_height(relative(1.45))
+                .child(self.text.clone())
+                .children(self.detail.clone())
+        } else {
+            tip.flex()
+                .items_baseline()
+                .gap(px(10.))
+                .child(self.text.clone())
+                .when_some(self.keys.clone(), |tip, keys| {
+                    tip.child(
+                        div()
+                            .flex_none()
+                            .text_size(scale.body)
+                            .text_color(tokens.faint)
+                            .child(keys),
+                    )
+                })
+        }
     }
 }
 
@@ -91,9 +134,9 @@ impl IconButton {
             id: id.into(),
             icon: icon.into(),
             label,
-            size: size::BUTTON,
-            icon_size: size::ICON,
-            radius: size::RADIUS,
+            size: size::CONTROL_MD,
+            icon_size: size::ICON_MD,
+            radius: size::RADIUS_SM,
             pressed: false,
             primary: false,
             dimmed: false,
@@ -103,16 +146,25 @@ impl IconButton {
         }
     }
 
-    /// 按钮边长和图标边长，默认 28 / 16。
-    pub fn size(mut self, size: Pixels, icon_size: Pixels) -> Self {
-        self.size = size;
-        self.icon_size = icon_size;
+    /// Compact 20×20 icon button (12px icon, 4px radius).
+    pub fn sm(mut self) -> Self {
+        self.size = size::CONTROL_SM;
+        self.icon_size = size::ICON_SM;
+        self.radius = size::RADIUS_SM;
         self
     }
 
-    /// 圆角，默认 6。
-    pub fn radius(mut self, radius: Pixels) -> Self {
-        self.radius = radius;
+    /// Default 24×24 icon button (14px icon, 4px radius).
+    pub fn md(mut self) -> Self {
+        self.size = size::CONTROL_MD;
+        self.icon_size = size::ICON_MD;
+        self.radius = size::RADIUS_SM;
+        self
+    }
+
+    /// 图标本身的边长（默认跟着 `sm` / `md` 走）。个别图标画出来偏大（刷新、转圈）时单独调小一号。
+    pub fn icon_size(mut self, icon_size: Pixels) -> Self {
+        self.icon_size = icon_size;
         self
     }
 
@@ -158,11 +210,33 @@ impl IconButton {
         action: Box<dyn Action>,
         target: &FocusHandle,
         tokens: &Tokens,
-    ) -> impl IntoElement + use<> {
+    ) -> AnyElement {
         let target = target.clone();
+        self.render(
+            move |_, window, cx| target.dispatch_action(action.as_ref(), window, cx),
+            tokens,
+        )
+    }
+
+    /// 点了直接调用本地回调，不依赖窗口壳、不派发 action（预览头部的缩放、关闭这类）。
+    /// 尺寸、悬停、提示、置灰、按下、常驻底、图标颜色都和 [`dispatch`](Self::dispatch) 一致。
+    pub fn on_click<F>(self, on_click: F, tokens: &Tokens) -> AnyElement
+    where
+        F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    {
+        self.render(on_click, tokens)
+    }
+
+    /// 两种点击出口共用同一段渲染，保证样子完全相同。
+    fn render<F>(self, on_click: F, tokens: &Tokens) -> AnyElement
+    where
+        F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    {
         let hover = tokens.hover;
         let text = tokens.text;
         let dimmed = self.dimmed;
+        let tooltip = self.tooltip.unwrap_or_else(|| self.label.clone());
+        let keys = self.tooltip_keys;
         div()
             .id(self.id)
             .test_support()
@@ -190,16 +264,14 @@ impl IconButton {
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover).text_color(text))
             })
-            .when_some(self.tooltip, |button, tooltip| {
-                let keys = self.tooltip_keys;
-                button.tooltip(move |window, cx| {
-                    let keys = keys
-                        .as_ref()
-                        .and_then(|action| keys_of(action.as_ref(), window));
-                    TextTooltip::with_keys(tooltip.clone(), keys, cx)
-                })
+            .tooltip(move |window, cx| {
+                let keys = keys
+                    .as_ref()
+                    .and_then(|action| keys_of(action.as_ref(), window));
+                TextTooltip::with_keys(tooltip.clone(), keys, cx)
             })
-            .on_click(move |_, window, cx| target.dispatch_action(action.as_ref(), window, cx))
+            .on_click(on_click)
             .child(self.icon.size(self.icon_size))
+            .into_any_element()
     }
 }

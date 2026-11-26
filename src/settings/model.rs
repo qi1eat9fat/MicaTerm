@@ -19,12 +19,14 @@ use micaterm_ssh::sftp::{DEFAULT_PARALLEL_TRANSFERS, PARALLEL_TRANSFERS_RANGE};
 use micaterm_terminal::TerminalTheme;
 pub use micaterm_terminal::{RightClick, TerminalCursorStyle, TerminalInteraction};
 
-use crate::sftp_tab::ShowHiddenFiles;
+use crate::i18n::Language;
 
 /// 全部设置。
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
+    /// 应用 → 语言：界面语言（默认英文）。
+    pub language: Language,
     /// 外观 → 应用外观。
     pub appearance: Appearance,
     /// 外观 → Mica 背景。
@@ -92,8 +94,9 @@ impl AppSettings {
     }
 }
 
-/// SFTP：同时传输数量、本地默认打开目录、显示隐藏文件。
-/// 旧文件里的 `file_icon_style`（图标风格，工单 12 去掉了）读的时候忽略。
+/// SFTP：同时传输数量、本地默认打开目录。
+/// 旧文件里的 `file_icon_style`（图标风格，工单 12 去掉了）和 `show_hidden`（隐藏文件开关，
+/// 现在默认显示、只在标签里临时切换）读的时候忽略。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SftpSettings {
@@ -101,8 +104,6 @@ pub struct SftpSettings {
     pub parallel: usize,
     /// 本地一侧从哪里开始；`None` 是「下载」文件夹，不把本机的路径写进文件（数据目录能拷到别的电脑）。
     pub local_directory: Option<PathBuf>,
-    /// 显示隐藏文件，本地和远程各一个开关。
-    pub show_hidden: ShowHiddenFiles,
 }
 
 impl Default for SftpSettings {
@@ -110,7 +111,6 @@ impl Default for SftpSettings {
         Self {
             parallel: DEFAULT_PARALLEL_TRANSFERS,
             local_directory: None,
-            show_hidden: ShowHiddenFiles::default(),
         }
     }
 }
@@ -160,9 +160,9 @@ pub struct InterfaceSettings {
 }
 
 /// 默认的浅色终端主题。主题 key 发布后不能改：它写进 `settings.json`。
-pub const DEFAULT_LIGHT_THEME: &str = "ayu-light";
+pub const DEFAULT_LIGHT_THEME: &str = "air-light";
 /// 默认的深色终端主题。
-pub const DEFAULT_DARK_THEME: &str = "ayu-dark";
+pub const DEFAULT_DARK_THEME: &str = "air-dark";
 
 /// 外观 → 终端主题：浅色和深色各选一套（从内置的 4 对里选），按 key 存。
 /// 这个版本不认识的 key 由使用方退回默认主题，不让整个文件读失败。
@@ -292,29 +292,42 @@ fn clamp_or(value: f32, range: RangeInclusive<f32>, default: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{AppSettings, Appearance, RightClick, TerminalCursorStyle};
+    use crate::i18n::Language;
 
     #[test]
     fn an_empty_file_gives_the_defaults() {
         let settings: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings, AppSettings::default());
+        assert_eq!(settings.language, Language::English);
         assert_eq!(settings.appearance, Appearance::System);
         assert_eq!(
             settings.terminal_font.family(),
             "Maple Mono Normal NL NF CN"
         );
         assert_eq!(settings.terminal_font.size, 13.);
-        assert_eq!(settings.terminal_theme.light, "ayu-light");
-        assert_eq!(settings.terminal_theme.dark, "ayu-dark");
+        assert_eq!(settings.terminal_theme.light, "air-light");
+        assert_eq!(settings.terminal_theme.dark, "air-dark");
         assert_eq!(settings.terminal_interaction.right_click, RightClick::Menu);
         assert!(!settings.terminal_interaction.copy_on_select);
         assert!(settings.terminal_interaction.cursor_blinking);
         assert_eq!(settings.local_terminal.shell, None);
         assert_eq!(settings.sftp.parallel, 3);
         assert_eq!(settings.sftp.local_directory, None);
-        assert!(!settings.sftp.show_hidden.local && !settings.sftp.show_hidden.remote);
         assert!(!settings.interface.mica);
         assert!(settings.window.remember);
         assert!(!settings.cli.enabled);
+    }
+
+    #[test]
+    fn the_language_keeps_its_keys() {
+        let settings: AppSettings =
+            serde_json::from_str(r#"{ "language": "chinese_simplified" }"#).unwrap();
+        assert_eq!(settings.language, Language::ChineseSimplified);
+        assert!(
+            serde_json::to_string(&settings)
+                .unwrap()
+                .contains(r#""language":"chinese_simplified""#)
+        );
     }
 
     #[test]
@@ -344,7 +357,12 @@ mod tests {
             settings.sftp.local_directory.as_deref(),
             Some(std::path::Path::new("D:/Work"))
         );
-        assert!(settings.sftp.show_hidden.local && !settings.sftp.show_hidden.remote);
+        // 旧文件里的隐藏文件开关（现在默认显示、只在标签里临时切换）读的时候不认，写回也没有它。
+        assert!(
+            !serde_json::to_string(&settings)
+                .unwrap()
+                .contains("show_hidden")
+        );
     }
 
     #[test]
@@ -396,18 +414,19 @@ mod tests {
     fn each_column_falls_back_to_its_default_theme() {
         use gpui_kit::component::ThemeMode;
         let mut themes = super::TerminalThemeSettings::default();
-        assert_eq!(themes.theme(ThemeMode::Light).name(), "Ayu Light");
-        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Ayu Dark");
-        themes.light = "solarized-light".into();
+        assert_eq!(themes.theme(ThemeMode::Light).name(), "Air Neutral Light");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Air Neutral Dark");
+        // 旧配置里已移除的 Ayu 或不认识的 key，以及跨栏 key，均自动落回默认 Air Neutral。
+        themes.light = "ayu-light".into();
         themes.dark = "tokyo-day".into();
-        assert_eq!(themes.theme(ThemeMode::Light).name(), "Ayu Light");
-        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Ayu Dark");
+        assert_eq!(themes.theme(ThemeMode::Light).name(), "Air Neutral Light");
+        assert_eq!(themes.theme(ThemeMode::Dark).name(), "Air Neutral Dark");
 
         let rose_pine = micaterm_terminal::TerminalTheme::find("rose-pine").unwrap();
         themes.choose(rose_pine);
         assert_eq!(themes.dark, "rose-pine");
         assert_eq!(themes.theme(ThemeMode::Dark).name(), "Rosé Pine Moon");
-        assert_eq!(themes.light, "solarized-light");
+        assert_eq!(themes.light, "ayu-light");
     }
 
     #[test]

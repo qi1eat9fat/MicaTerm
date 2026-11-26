@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn the_status_bar_counts_from_one_and_names_the_format() {
-        assert_eq!(cursor_label(11, 4), "第 12 行，第 5 列");
+        assert_eq!(cursor_label(11, 4), "Line 12, Column 5");
         assert_eq!(encoding_label(TextFormat::default()), "UTF-8");
         assert_eq!(line_end_label(TextFormat::default()), "LF");
         let windows = TextFormat::new(true, true);

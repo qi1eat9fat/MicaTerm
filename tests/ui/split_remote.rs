@@ -138,15 +138,6 @@ fn connect(
     wait_running(cx, handle, workspace, card);
 }
 
-fn open_cards(cx: &mut TestAppContext, workspace: &Entity<Workspace>, host: u64) -> usize {
-    cx.update(|cx| workspace.read(cx).open_cards_of(HostId(host), cx))
-}
-
-/// 主机栏那一行右侧的绿色数字；没有卡片时不显示。
-fn count_badge(cx: &mut TestAppContext, handle: WindowHandle<Root>, host: u64) -> Option<String> {
-    label(cx, handle, ("host-open-cards", host as usize))
-}
-
 fn settle(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     for _ in 0..3 {
         in_frame(cx, handle, |_, _| {});
@@ -243,9 +234,9 @@ fn the_new_card_opens_a_host_beside_the_focused_card_local_or_remote(cx: &mut Te
     dispatch(cx, handle, NewLocalTerminalTab);
 
     let labels = host_menu_labels(cx, handle, 2);
-    assert_eq!(labels[0].as_deref(), Some("连接"), "{labels:?}");
+    assert_eq!(labels[0].as_deref(), Some("Connect"), "{labels:?}");
     assert!(
-        labels.iter().flatten().all(|label| !label.contains("分屏")),
+        labels.iter().flatten().all(|label| !label.contains("Split")),
         "{labels:?}"
     );
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
@@ -300,36 +291,6 @@ fn splitting_without_a_terminal_tab_does_nothing(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, _| {
         assert!(window.try_find("card-picker-search").is_none());
     });
-}
-
-#[gpui_kit::test]
-fn the_host_sidebar_counts_a_hosts_open_cards_in_green(cx: &mut TestAppContext) {
-    let (handle, workspace, _) = open_remote(cx);
-    assert_eq!(count_badge(cx, handle, 1), None);
-
-    connect(cx, handle, &workspace, 1, 1);
-    split_again(cx, handle, SplitRight);
-    wait_running(cx, handle, &workspace, 2);
-    connect(cx, handle, &workspace, 1, 3);
-    connect(cx, handle, &workspace, 2, 4);
-    // 本地卡片不算。
-    dispatch(cx, handle, NewLocalTerminalTab);
-
-    assert_eq!(count_badge(cx, handle, 1).as_deref(), Some("3"));
-    assert_eq!(count_badge(cx, handle, 2).as_deref(), Some("1"));
-    assert_eq!(count_badge(cx, handle, 3), None);
-    assert_eq!(open_cards(cx, &workspace, 1), 3);
-
-    // 断开了的卡片还开着，照样算。
-    dispatch(cx, handle, micaterm::app::DisconnectCard(CardId(1)));
-    assert_eq!(count_badge(cx, handle, 1).as_deref(), Some("3"));
-
-    dispatch(cx, handle, CloseCard(CardId(2)));
-    assert_eq!(count_badge(cx, handle, 1).as_deref(), Some("2"));
-    dispatch(cx, handle, CloseCard(CardId(1)));
-    dispatch(cx, handle, CloseCard(CardId(3)));
-    assert_eq!(count_badge(cx, handle, 1), None);
-    assert_eq!(count_badge(cx, handle, 2).as_deref(), Some("1"));
 }
 
 /// 卡片 `card` 所在的连接（shell 通道开好、连接表发来 `Attached` 之后才有）。
@@ -475,10 +436,10 @@ fn log_in(
             lifecycle(cx, workspace, card)
         );
         match prompt_label(cx, handle) {
-            Some(text) if text.starts_with("确认主机密钥") => {
+            Some(text) if text.starts_with("Verify Host Key") => {
                 in_frame(cx, handle, |window, cx| window.click("prompt-confirm", cx));
             }
-            Some(text) if text.starts_with("输入密码") => {
+            Some(text) if text.starts_with("Enter Password") => {
                 passwords += 1;
                 in_frame(cx, handle, |window, cx| window.input(TEST_PASSWORD, cx));
                 in_frame(cx, handle, |window, cx| window.press("enter", cx));

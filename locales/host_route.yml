@@ -1,42 +1,62 @@
 _version: 2
 # 主机对话框的「连接方式」：SSH 跳板和代理（工单 15）
 host.dialog.route_jump:
+  en: SSH Jump Host
   zh-CN: SSH 跳板
 host.dialog.route_proxy:
+  en: Proxy
   zh-CN: 代理
 host.dialog.route_chain:
+  en: Route
   zh-CN: 路线
 host.dialog.jump_hosts:
+  en: Jump Hosts
   zh-CN: 跳板
 host.dialog.this_computer:
+  en: This Computer
   zh-CN: 本机
 host.dialog.this_host:
+  en: Current Host
   zh-CN: 当前主机
 host.dialog.deleted_host:
+  en: Deleted Host
   zh-CN: 已删除的主机
 host.dialog.jump_up:
+  en: Move Up
   zh-CN: 上移
 host.dialog.jump_down:
+  en: Move Down
   zh-CN: 下移
 host.dialog.jump_remove:
+  en: Remove
   zh-CN: 移除
 host.dialog.add_jump_host:
+  en: Add Jump Host
   zh-CN: 添加跳板主机
 host.dialog.no_other_hosts:
+  en: No other hosts can be used as a jump host
   zh-CN: 没有别的主机可以当跳板
 host.dialog.all_hosts_added:
+  en: All other hosts are already jump hosts
   zh-CN: 别的主机都已加为跳板
 host.dialog.proxy_kind:
+  en: Type
   zh-CN: 类型
 host.dialog.proxy_address:
+  en: Proxy Address
   zh-CN: 代理地址
 host.dialog.proxy_port:
+  en: Proxy Port
   zh-CN: 代理端口
 host.dialog.proxy_user:
+  en: Proxy Username
   zh-CN: 代理用户名
 host.dialog.proxy_password:
+  en: Proxy Password
   zh-CN: 代理密码
 host.dialog.optional:
+  en: Optional
   zh-CN: 可选
 host.dialog.proxy_password_needs_user:
+  en: A proxy password requires a username
   zh-CN: 填了代理密码就要填用户名

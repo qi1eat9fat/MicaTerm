@@ -1,6 +1,7 @@
-//! 主区域顶部的标题栏，也就是 26 号的标签栏（高 32、比内容暗一档、下边一条细线）：从左到右是
+//! 主区域顶部的标签栏（高 36、和内容同底、下边一条细线）：从左到右是
 //! 「展开主机栏」（主机栏收起时）、标签、「+」（新建本地终端标签）、拖动区、
-//! 深浅切换、保险库锁（设了主密码时）、设置，最后是窗口按钮。分屏按钮在每张卡片自己的状态栏上（2026-11-14 分屏重做）。
+//! 右侧面板的入口（文件、片段、凭据、Agent），最后是三色窗口圆点。
+//! 深浅切换、设置和保险库的锁在主机栏底部。
 //!
 //! 不用 gpui-component 的 `TitleBar`：它把子元素整块当作拖动区。这里只给 `title-drag`
 //! 那块空白标 `WindowControlArea::Drag`，标签轨道和按钮都不在拖动区里。
@@ -9,21 +10,15 @@
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::right_sidebar::{AgentRail, FilesButton, RightPanel, render_panel_tools};
 use super::window_buttons::render_window_buttons;
 use crate::ui::icon_button::IconButton;
-use gpui_kit::component::ActiveTheme as _;
 
-use crate::app::{
-    CatalogIcon, LockVault, NewLocalTerminalTab, OpenSettings, ToggleAppearance, ToggleHostSidebar,
-    UnlockVault,
-};
+use crate::app::{CatalogIcon, NewLocalTerminalTab, ToggleHostSidebar};
 use crate::i18n::t;
 use crate::tabs::{TabRail, TabSnapshot};
+use crate::theme::space;
 use crate::theme::{Tokens, size};
-use crate::vault::VaultStatus;
-
-/// macOS 上主机栏收起时，给红绿灯让出的宽度。
-const TRAFFIC_LIGHTS_WIDTH: Pixels = px(72.);
 
 /// 画标题栏要的窗口壳状态。
 pub(super) struct TitleBarState<'a> {
@@ -32,8 +27,12 @@ pub(super) struct TitleBarState<'a> {
     /// 标签轨道：画 `tabs`，也接住拖着的标签（工单 29）。
     pub rail: &'a TabRail,
     pub tabs: Vec<TabSnapshot>,
-    /// 保险库的状态（没有保险库时是 `None`），决定画不画锁、画哪一把。
-    pub vault: Option<VaultStatus>,
+    /// 右侧展开的面板，决定入口图标按下的样子。
+    pub right_panel: Option<RightPanel>,
+    /// 「文件」入口现在能不能点。
+    pub files: FilesButton,
+    /// Agent 入口上的点和悬停提示。
+    pub agent: AgentRail,
 }
 
 /// 点击和菜单都经 `target`（窗口壳的焦点）派发。
@@ -50,13 +49,14 @@ pub(super) fn render_title_bar(
         host_sidebar_open,
         rail,
         tabs,
-        vault,
+        right_panel,
+        files,
+        agent,
     } = state;
-    let dark = cx.theme().is_dark();
     let tabs = rail.render(tabs, target, tokens, window, cx);
     let bar_button = |id: &'static str, icon: CatalogIcon, label: SharedString| {
         IconButton::new(id, icon, label.clone())
-            .size(size::BAR_BUTTON, size::BAR_ICON)
+            .sm()
             .tooltip(label)
     };
     div()
@@ -69,7 +69,7 @@ pub(super) fn render_title_bar(
         .items_center()
         .h(size::TAB_BAR)
         .bg(tokens.tabbar)
-        // 下边线画在最底下：在前的标签有内容底色，盖住它，和下面的内容连成一片（26 号 `.tab` 的 margin-bottom: -1px）。
+        // 下边线画在最底下，和下面的内容分开。
         .child(
             div()
                 .absolute()
@@ -79,18 +79,17 @@ pub(super) fn render_title_bar(
                 .h(size::LINE)
                 .bg(tokens.line),
         )
-        .when(!host_sidebar_open, |bar| {
-            bar.when(cfg!(target_os = "macos"), |bar| {
-                bar.pl(TRAFFIC_LIGHTS_WIDTH)
-            })
-            .child(
-                div().flex_none().px(px(4.)).child(
+        // macOS 上主机栏收起时整条侧栏都不画，给红绿灯让位，展开按钮放在标签轨道左边；
+        // Windows、Linux 收起后还留 40 宽的侧栏，展开按钮在它底部。
+        .when(!host_sidebar_open && cfg!(target_os = "macos"), |bar| {
+            bar.pl(size::TRAFFIC_LIGHTS_WIDTH).child(
+                div().flex_none().px(space::SPACE_4).child(
                     IconButton::new(
                         "expand-host-sidebar",
-                        CatalogIcon::PanelLeftOpen,
+                        CatalogIcon::PanelRight,
                         t!("workspace.host_sidebar.expand"),
                     )
-                    .size(size::BAR_BUTTON, size::BAR_ICON)
+                    .sm()
                     .dispatch(Box::new(ToggleHostSidebar), target, tokens),
                 ),
             )
@@ -111,7 +110,8 @@ pub(super) fn render_title_bar(
                 .flex()
                 .flex_none()
                 .items_center()
-                .ml(px(6.))
+                // 可见空隙取钥匙和 Agent 之间（约 11）的一半：6 里去掉按钮自己的 4 内边距。
+                .ml(space::SPACE_2)
                 .child(
                     bar_button(
                         "new-tab",
@@ -131,66 +131,12 @@ pub(super) fn render_title_bar(
                 .h_full()
                 .window_control_area(WindowControlArea::Drag),
         )
-        .child(
-            // 26 号 `.tools`：深浅切换、保险库锁、设置。
-            div()
-                .id("title-tools")
-                .test_support()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap(px(2.))
-                .px(px(6.))
-                .child(
-                    // 浅色时显示月亮（点了切到深色），深色时显示太阳。
-                    if dark {
-                        bar_button(
-                            "toggle-appearance",
-                            CatalogIcon::Sun,
-                            t!("workspace.title_bar.to_light"),
-                        )
-                    } else {
-                        bar_button(
-                            "toggle-appearance",
-                            CatalogIcon::Moon,
-                            t!("workspace.title_bar.to_dark"),
-                        )
-                    }
-                    .dispatch(Box::new(ToggleAppearance), target, tokens),
-                )
-                .children(vault_button(vault).map(|(id, icon, label, action)| {
-                    bar_button(id, icon, label).dispatch(action, target, tokens)
-                }))
-                .child(
-                    bar_button(
-                        "open-settings",
-                        CatalogIcon::Settings,
-                        t!("workspace.title_bar.settings"),
-                    )
-                    .dispatch(Box::new(OpenSettings), target, tokens),
-                ),
-        )
+        .child(render_panel_tools(
+            right_panel,
+            files,
+            agent,
+            target,
+            tokens,
+        ))
         .child(render_window_buttons(tokens, window))
-}
-
-/// 保险库锁：解锁着显示打开的锁，点了立即锁定；锁着显示锁，点了弹解锁框。
-/// 没设主密码（或者没有保险库）时不画：没有锁定这回事。
-fn vault_button(
-    vault: Option<VaultStatus>,
-) -> Option<(&'static str, CatalogIcon, SharedString, Box<dyn Action>)> {
-    match vault? {
-        VaultStatus::Unlocked { .. } => Some((
-            "lock-vault",
-            CatalogIcon::LockOpen,
-            t!("vault.title_bar.lock"),
-            Box::new(LockVault),
-        )),
-        VaultStatus::Locked => Some((
-            "unlock-vault",
-            CatalogIcon::Lock,
-            t!("vault.title_bar.unlock"),
-            Box::new(UnlockVault),
-        )),
-        _ => None,
-    }
 }

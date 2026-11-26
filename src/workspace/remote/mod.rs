@@ -5,7 +5,6 @@
 //!   （连接表在 backend）；`open_remote_card_as(host, target, ..)` 按给定的快照和登录建；
 //! - 分屏（工单 16）：`split_remote_card` 用源卡片的快照和登录（复用它的连接），`split_open_host`
 //!   是主机右键「在右侧 / 下方分屏打开」，都经 `place_beside_focused_card` 放进标签；
-//!   `open_cards_by_host` 是主机栏那一行的状态（绿点、转圈、红 ×）；
 //! - `connect_host(host, ..)`：在新标签里连接一台主机，工单 18 的快速连接、最近连接直接调它
 //!   （或派发 `ConnectHost`）；
 //! - `remote_target(host, ..)`：主机怎么连（含凭据和跳板、代理的路线，`HostData::login_of`），工单 15 不用改这里；
@@ -17,16 +16,14 @@ mod probe;
 mod prompts;
 mod secrets;
 
-use std::collections::HashMap;
-
 use gpui_kit::*;
 use micaterm_terminal::SharedTerminalTransportFactory;
 
 pub(in crate::workspace) use prompts::PromptQueue;
 
 use crate::backend::{RemoteEvent, RemoteTarget, RemoteTerminalId};
-use crate::card::{CardId, RemoteLaunch, RemoteState, RemoteUpdate, TerminalCard, VaultHold};
-use crate::host::{Host, HostCards, HostId, HostLink};
+use crate::card::{CardId, RemoteLaunch, RemoteUpdate, TerminalCard, VaultHold};
+use crate::host::{Host, HostId};
 use crate::split::Axis;
 use crate::tabs::{Tab, TabId, TerminalTab};
 use crate::workspace::Workspace;
@@ -179,35 +176,6 @@ impl Workspace {
         };
         let card = self.open_remote_card_as(host, target, window, cx);
         self.place_beside_focused_card(tab, axis, card, window, cx);
-    }
-
-    /// 每台主机开着几张远程卡片（不管连没连着、走哪条连接），主机栏右侧的绿色数字。
-    pub(in crate::workspace) fn open_cards_by_host(&self, cx: &App) -> HashMap<HostId, HostCards> {
-        let mut hosts: HashMap<HostId, HostCards> = HashMap::new();
-        for tab in self.terminal_tabs() {
-            for card in tab.cards() {
-                let card = card.read(cx);
-                if let Some(host) = card.remote_host() {
-                    let link = card.remote_state(cx).and_then(|state| match state {
-                        RemoteState::Connected => Some(HostLink::Connected),
-                        RemoteState::Connecting => Some(HostLink::Connecting),
-                        RemoteState::Disconnected(_) => Some(HostLink::Failed),
-                        // 等保险库解锁：还没开始连，徽章照常。
-                        RemoteState::WaitingForVault => None,
-                    });
-                    hosts.entry(host).or_default().add(link);
-                }
-            }
-        }
-        hosts
-    }
-
-    /// 主机 `host` 开着几张远程卡片，测试用。
-    pub fn open_cards_of(&self, host: HostId, cx: &App) -> usize {
-        self.open_cards_by_host(cx)
-            .get(&host)
-            .map(|cards| cards.count)
-            .unwrap_or_default()
     }
 
     /// 在新标签里连接主机 `host`，标签里只有这一张远程卡片（双击、回车、右键菜单「连接」）。

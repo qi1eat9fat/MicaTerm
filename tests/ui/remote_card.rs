@@ -156,7 +156,7 @@ fn double_clicking_a_host_opens_a_new_tab_with_only_its_remote_card(cx: &mut Tes
     // 主机自己的密码按主机 id 从保险库读；没存过时连接现场询问。
     assert_eq!(target.login.password, Some(SecretRef::password(1)));
     assert!(
-        status(cx, handle, 1).starts_with("已连接 · ~ · "),
+        status(cx, handle, 1).starts_with("Connected · ~"),
         "{}",
         status(cx, handle, 1)
     );
@@ -177,7 +177,7 @@ fn enter_on_the_selected_host_and_the_menus_connect_item_connect_too(cx: &mut Te
     in_frame(cx, handle, |window, cx| window.right_click(host_row(3), cx));
     in_frame(cx, handle, |window, cx| {
         let mut popup = window.within("popup-menu");
-        assert_eq!(popup.find(0usize).label(), Some("连接"));
+        assert_eq!(popup.find(0usize).label(), Some("Connect"));
         popup.click(0usize, cx);
     });
     wait_running(cx, handle, &workspace, 2);
@@ -239,7 +239,7 @@ fn the_status_bar_shows_latency_and_the_probed_system_which_becomes_the_badge(
     cx.run_until_parked();
 
     assert!(
-        status(cx, handle, 1).starts_with("已连接 12 ms · ~ · Ubuntu · "),
+        status(cx, handle, 1).starts_with("Connected 12 ms · ~ · Ubuntu"),
         "{}",
         status(cx, handle, 1)
     );
@@ -280,7 +280,7 @@ fn the_first_connection_asks_to_trust_the_host_key(cx: &mut TestAppContext) {
 
     let text = prompt_label(cx, handle).expect("确认框打开了");
     assert!(
-        text.starts_with("确认主机密钥\n第一次连接这台主机"),
+        text.starts_with("Verify Host Key\nFirst connection to this host"),
         "{text}"
     );
     assert!(text.contains("ssh-ed25519 SHA256:abc"), "{text}");
@@ -312,9 +312,9 @@ fn a_changed_host_key_warns_and_escape_cancels(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     let text = prompt_label(cx, handle).expect("告警框打开了");
-    assert!(text.starts_with("主机密钥变了"), "{text}");
-    assert!(text.contains("记下的：SHA256:old"), "{text}");
-    assert!(text.contains("现在的：SHA256:new"), "{text}");
+    assert!(text.starts_with("Host Key Changed"), "{text}");
+    assert!(text.contains("Saved: SHA256:old"), "{text}");
+    assert!(text.contains("Current: SHA256:new"), "{text}");
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
 
     assert_eq!(remote.replies(), [(prompt, Answered::Cancel)]);
@@ -349,7 +349,10 @@ fn an_empty_password_is_asked_for_and_so_are_the_servers_other_questions(cx: &mu
     cx.run_until_parked();
 
     let text = prompt_label(cx, handle).expect("密码框打开了");
-    assert!(text.starts_with("输入密码\n请输入登录密码\n密码"), "{text}");
+    assert!(
+        text.starts_with("Enter Password\nEnter the login password\nPassword"),
+        "{text}"
+    );
     in_frame(cx, handle, |window, _| {
         assert_eq!(window.find(("prompt-field", 0usize)).focused(), Some(true));
     });
@@ -358,7 +361,9 @@ fn an_empty_password_is_asked_for_and_so_are_the_servers_other_questions(cx: &mu
 
     let text = prompt_label(cx, handle).expect("验证码框接着打开");
     assert!(
-        text.starts_with("输入验证码\n服务器要求键盘交互认证（密码已自动回答）："),
+        text.starts_with(
+            "Enter Verification Code\nThe server requires keyboard-interactive authentication (passwords are answered automatically):"
+        ),
         "{text}"
     );
     in_frame(cx, handle, |window, cx| window.input("4821", cx));
@@ -425,7 +430,7 @@ fn a_withdrawn_question_closes_its_dialog_and_the_next_one_is_asked(cx: &mut Tes
 
     cx.update(|cx| assert_eq!(workspace.read(cx).shown_prompt(), Some(second)));
     let text = prompt_label(cx, handle).expect("下一个问题接着问");
-    assert!(text.starts_with("输入密码"), "{text}");
+    assert!(text.starts_with("Enter Password"), "{text}");
     // 作废的问题不再回答。
     assert_eq!(remote.replies(), []);
     in_frame(cx, handle, |window, cx| window.click("prompt-cancel", cx));
@@ -448,10 +453,10 @@ fn a_lost_connection_greys_the_card_and_enter_reconnects_in_place(cx: &mut TestA
     )));
     assert_eq!(
         ended_notice(cx, &workspace, 1).as_deref(),
-        Some("[连接已断开] 测试启动失败")
+        Some("[Connection closed] 测试启动失败")
     );
     assert!(
-        status(cx, handle, 1).starts_with("已断开 测试启动失败 · "),
+        status(cx, handle, 1).starts_with("Disconnected 测试启动失败 · "),
         "{}",
         status(cx, handle, 1)
     );
@@ -467,7 +472,7 @@ fn a_lost_connection_greys_the_card_and_enter_reconnects_in_place(cx: &mut TestA
     assert_eq!(card_names(cx, &workspace), [["web-01"]]);
     assert_eq!(remote.targets().len(), 2);
     assert_eq!(ended_notice(cx, &workspace, 1), None);
-    assert!(status(cx, handle, 1).starts_with("已连接"));
+    assert!(status(cx, handle, 1).starts_with("Connected"));
     cx.update(|cx| assert_eq!(workspace.read(cx).card_tile_off(CardId(1), cx), Some(false)));
 }
 
@@ -485,7 +490,7 @@ fn space_on_a_disconnected_card_closes_it(cx: &mut TestAppContext) {
     )));
     assert_eq!(
         ended_notice(cx, &workspace, 1).as_deref(),
-        Some("[连接已断开] shell 已退出（退出码 9）")
+        Some("[Connection closed] Shell exited (code 9)")
     );
 
     in_frame(cx, handle, |window, cx| window.press("space", cx));
@@ -513,11 +518,11 @@ fn the_remote_terminal_menu_reconnects_disconnects_and_copies_the_ip(cx: &mut Te
             .collect::<Vec<_>>()
     });
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
-    assert_eq!(labels[1], "复制 IP", "{labels:?}");
-    // 最后两组：连接的操作，卡片的操作（卡片没有头部，放大、移到新标签、关闭在这里）。
+    assert_eq!(labels[1], "Copy IP", "{labels:?}");
+    // 最后两组：连接的操作，卡片的操作（卡片没有头部，移到新标签、关闭在这里）。
     assert_eq!(
-        labels[labels.len() - 5..],
-        ["重新连接", "断开连接", "放大卡片", "移到新标签", "关闭卡片"],
+        labels[labels.len() - 4..],
+        ["Reconnect", "Disconnect", "Move to New Tab", "Close Card"],
         "{labels:?}"
     );
 
@@ -537,7 +542,7 @@ fn the_remote_terminal_menu_reconnects_disconnects_and_copies_the_ip(cx: &mut Te
     );
     assert_eq!(
         ended_notice(cx, &workspace, 1).as_deref(),
-        Some("[连接已断开] 已断开连接")
+        Some("[Connection closed] Disconnected")
     );
 
     dispatch(cx, handle, ReconnectCard(CardId(1)));
@@ -618,7 +623,10 @@ fn test_connection_logs_in_with_what_the_form_holds(cx: &mut TestAppContext) {
             Some("pw-typed".to_string())
         )]
     );
-    assert_eq!(test_result(cx, handle).as_deref(), Some("连接成功"));
+    assert_eq!(
+        test_result(cx, handle).as_deref(),
+        Some("Connected successfully")
+    );
 }
 
 #[gpui_kit::test]
@@ -636,7 +644,7 @@ fn a_failed_connection_test_says_why(cx: &mut TestAppContext) {
 
     assert_eq!(
         test_result(cx, handle).as_deref(),
-        Some("连接失败：用户名或密码错误")
+        Some("Connection failed: 用户名或密码错误")
     );
 }
 
@@ -653,11 +661,11 @@ fn a_connection_test_asks_to_trust_a_new_host_key_over_the_host_dialog(cx: &mut 
         window.click("host-test-connection", cx)
     });
     let text = prompt_label(cx, handle).expect("确认框叠在主机对话框上");
-    assert!(text.starts_with("确认主机密钥"), "{text}");
+    assert!(text.starts_with("Verify Host Key"), "{text}");
     in_frame(cx, handle, |window, cx| window.click("prompt-confirm", cx));
 
     assert_eq!(tester.trust_answers(), [true]);
-    assert_eq!(test_result(cx, handle).as_deref(), Some("连接成功"));
+    assert_eq!(test_result(cx, handle).as_deref(), Some("Connected successfully"));
     // 主机对话框还开着。
     assert!(in_frame(cx, handle, |window, _| window
         .try_find("host-dialog")

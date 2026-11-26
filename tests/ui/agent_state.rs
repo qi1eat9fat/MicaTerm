@@ -152,7 +152,7 @@ fn hooks_light_the_rail_while_the_panel_is_closed_and_name_the_state_when_open(
     );
     assert_eq!(
         label(cx, handle, "right-sidebar-agent-dot").as_deref(),
-        Some("Agent · 等你确认")
+        Some("Agent · Waiting for You")
     );
 
     // 展开：没有点，标题行写状态。
@@ -160,14 +160,14 @@ fn hooks_light_the_rail_while_the_panel_is_closed_and_name_the_state_when_open(
     assert_eq!(label(cx, handle, "right-sidebar-agent-dot"), None);
     assert_eq!(
         label(cx, handle, "agent-panel-state").as_deref(),
-        Some("等你确认")
+        Some("Waiting for You")
     );
 
     // 展开着回合结束：看见了，收起后不亮点。
     hook(cx, handle, &endpoint, &me, HookEvent::TurnDone, None);
     assert_eq!(
         label(cx, handle, "agent-panel-state").as_deref(),
-        Some("回合结束")
+        Some("Turn Ended")
     );
     dispatch(cx, handle, ShowAgent);
     assert_eq!(label(cx, handle, "right-sidebar-agent-dot"), None);
@@ -176,7 +176,7 @@ fn hooks_light_the_rail_while_the_panel_is_closed_and_name_the_state_when_open(
     hook(cx, handle, &endpoint, &me, HookEvent::PromptSubmit, None);
     assert_eq!(
         label(cx, handle, "right-sidebar-agent-dot").as_deref(),
-        Some("Agent · 运行中")
+        Some("Agent · Running")
     );
     // 别的卡片 ID 报来的不算。
     hook(
@@ -189,7 +189,7 @@ fn hooks_light_the_rail_while_the_panel_is_closed_and_name_the_state_when_open(
     );
     assert_eq!(
         label(cx, handle, "right-sidebar-agent-dot").as_deref(),
-        Some("Agent · 运行中")
+        Some("Agent · Running")
     );
 }
 

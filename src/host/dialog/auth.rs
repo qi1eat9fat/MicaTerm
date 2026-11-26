@@ -26,7 +26,7 @@ use super::HostDialog;
 use crate::host::HostStore;
 use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
-use crate::theme::{Tokens, ui_text};
+use crate::theme::{Tokens, space, ui_text};
 use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, form_pair, locked_secret};
 use crate::ui::modal::{ModalInputKind, modal_input};
 use crate::vault::{SecretChange, SecretField, VaultStatus, VaultStore};
@@ -263,6 +263,7 @@ impl AuthSection {
                     .unwrap_or(0),
                 on_choose,
                 tokens,
+                crate::theme::TypeScale::current(cx),
             ),
             Vec::new(),
             tokens,
@@ -339,16 +340,18 @@ impl AuthSection {
             })
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .h(crate::theme::size::INPUT)
-            .px(px(8.))
-            .rounded(crate::theme::size::RADIUS)
-            .bg(tokens.content)
+            .px(space::SPACE_10)
+            .text_size(crate::theme::TypeScale::current(cx).sm)
+            .line_height(px(16.))
+            .rounded(crate::theme::size::RADIUS_MD)
+            .bg(tokens.input)
             .border_1()
             .border_color(if invalid {
                 tokens.err
             } else if self.picking {
-                tokens.icon
+                tokens.brand
             } else {
                 tokens.line
             })
@@ -403,9 +406,9 @@ impl AuthSection {
                 .id(id)
                 .test_support()
                 .aria_label(label.clone())
-                .px(px(8.))
-                .py(px(4.))
-                .rounded(px(6.))
+                .px(space::SPACE_8)
+                .py(space::SPACE_4)
+                .rounded(crate::theme::size::RADIUS_MD)
                 .text_size(ui_text())
                 .cursor_pointer()
                 .hover(move |style| style.bg(hover))
@@ -416,9 +419,9 @@ impl AuthSection {
             .test_support()
             .flex()
             .flex_col()
-            .mt(px(4.))
-            .p(px(4.))
-            .rounded(px(8.))
+            .mt(space::SPACE_4)
+            .p(space::SPACE_4)
+            .rounded(crate::theme::size::RADIUS_LG)
             .border_1()
             .border_color(tokens.line)
             .children(credentials.into_iter().map(|credential| {
@@ -449,7 +452,12 @@ impl AuthSection {
         if self.password.is_locked() {
             return form_field(
                 Some(t!("host.dialog.password")),
-                locked_secret(PASSWORD_LOCKED, PASSWORD_UNLOCK, tokens),
+                locked_secret(
+                    PASSWORD_LOCKED,
+                    PASSWORD_UNLOCK,
+                    tokens,
+                    crate::theme::TypeScale::current(cx),
+                ),
                 Vec::new(),
                 tokens,
             );

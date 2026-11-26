@@ -2,13 +2,11 @@
 // 裁剪：主机平铺，没有分组树（不用 gpui-component 的 TreeState）；行的样式按全部界面原型的 `.host`；
 // 右键菜单不用 gpui-component 的 `context_menu`（它会泄漏菜单实体，照 `TabRail` 自己开关）。
 
-//! 主机栏里的搜索框和平铺主机列表（26 号 `.dks`、`.hi`）。
+//! 主机栏里的搜索框和平铺主机列表。
 //!
-//! - 每台两行高（`ROW_HEIGHT` 48，用户定），行和行之间空 2：左边淡底系统徽章占两行（24 方块），
-//!   右边上一行名称（13px/400），下一行地址（IP 或主机名，次要小字、淡色）；连着的主机右边一个绿点；
-//!   在连接时徽章换成转圈、断开或连不上时换成红 ×（26 号 `.hi .slot`）。
-//!   窗口壳每次重画时经 `set_open_cards` 告诉列表每台主机的卡片（工单 16）；
-//!   悬停提示 `用户@地址:端口` 和备注；
+//! - 每台一行 36 高，行和行之间空 4：左边 28 的系统徽章，右边名称。徽章和状态标记都不随
+//!   连接状态变（2026-11-24 用户定：主机栏不再显示连接状态）。地址放进悬停提示
+//!   （`用户@地址:端口` 和备注）；
 //! - 单击选中，双击或选中后回车连接（派发 `ConnectHost`）；选中项是 `--sel` 底，悬停 `--hover` 底；
 //! - 搜索框常驻在列表上面，Ctrl+Shift+H 聚焦它。按名称、地址、用户名搜索，
 //!   空格隔开的几个词都要匹配；自动高亮第一个，↑↓ 移动，回车连接高亮的那台，Esc 清空，
@@ -19,65 +17,37 @@
 //! 主机数据在 `HostStore`，这里只持有界面状态（搜索词、选中、高亮、拖动、开着的菜单），
 //! 观察 store 变化：新建或复制出来的主机自动选上。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use gpui_kit::base::POPUP_PRIORITY;
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use micaterm_ui::Menu;
+use micaterm_ui::{Menu, WINDOW_MARGIN};
 
 use micaterm_hosts::{Host, HostDrop, HostId, host_matches};
 
 use super::mark::HostMark;
 use super::menu::build_host_menu;
 use super::store::HostStore;
-use crate::app::{ConnectHost, MoveHost};
+use crate::app::{ConnectHost, MoveHost, NewHost};
 use crate::i18n::t;
-use crate::theme::{Tokens, TypeScale, size};
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, size, space};
+use crate::ui::empty::{EmptyPlacement, EmptyState};
+use crate::ui::search::{SearchBar, SearchChrome};
 use crate::ui::drag::{DragSlot, DropEdge, fade_while_dragged, render_drop_line};
+use crate::ui::icon_button::TextTooltip;
 
-/// 一台主机一行的高：名称一行、空 2、地址一行，上下各留 6。
-const ROW_HEIGHT: Pixels = px(48.);
-/// 名称、地址两行各自的行高。
+/// 一台主机一行的高。
+const ROW_HEIGHT: Pixels = size::SIDEBAR_ROW;
+/// 名称一行的行高。
 const NAME_LINE: Pixels = px(18.);
-const ADDRESS_LINE: Pixels = px(16.);
-/// 徽章边长：占名称、地址两行（用户定）。转圈、红 × 也放在这么大的槽里。
-const BADGE: Pixels = px(24.);
-/// 转圈、红 × 的图标大小。
-const SLOT_ICON: Pixels = px(16.);
-/// 一台主机开着的远程卡片，窗口壳汇总后告诉列表。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct HostCards {
-    /// 开着几张远程卡片（断开的也算，卡片还在）。
-    pub count: usize,
-    /// 这些卡片合起来的连接状态。
-    pub link: Option<HostLink>,
-}
-
-/// 主机栏那一行显示的连接状态：几张卡片里有连着的就是连着，否则有在连的就是在连，否则是断开。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum HostLink {
-    /// 断开了或者连不上：徽章换成红 ×。
-    Failed,
-    /// 在连接：徽章换成转圈。
-    Connecting,
-    /// 连着：右边一个绿点。
-    Connected,
-}
-
-impl HostCards {
-    /// 再算上一张卡片；`link` 是它的状态（等保险库解锁的卡片是 `None`，不改变显示）。
-    pub fn add(&mut self, link: Option<HostLink>) {
-        self.count += 1;
-        self.link = self.link.max(link);
-    }
-}
-
-/// 转圈一圈的时间（26 号 `.spin`）。
-const SPIN: std::time::Duration = std::time::Duration::from_millis(1200);
-
+/// 徽章边长。
+const BADGE: Pixels = size::HOST_BADGE;
+/// 搜索行里「新建主机」的加号边长、图标边长。
+const SEARCH_ADD: Pixels = size::CONTROL_SM;
+const SEARCH_ADD_ICON: Pixels = size::ICON_SM;
 /// 列表的键上下文：选中一行后回车连接。
 const HOST_LIST_KEY_CONTEXT: &str = "HostList";
 
@@ -99,8 +69,6 @@ pub struct HostList {
     drag: DragSlot<DragState>,
     menu: Option<OpenMenu>,
     scroll: ScrollHandle,
-    /// 每台主机开着的远程卡片（工单 16）：窗口壳每次重画时告诉列表。
-    open_cards: HashMap<HostId, HostCards>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -162,20 +130,7 @@ impl HostList {
             drag: DragSlot::default(),
             menu: None,
             scroll: ScrollHandle::new(),
-            open_cards: HashMap::new(),
             _subscriptions: subscriptions,
-        }
-    }
-
-    /// 窗口壳告诉列表每台主机开着的远程卡片；变了才重画。
-    pub fn set_open_cards(
-        &mut self,
-        open_cards: HashMap<HostId, HostCards>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.open_cards != open_cards {
-            self.open_cards = open_cards;
-            cx.notify();
         }
     }
 
@@ -341,8 +296,8 @@ impl HostList {
         }
     }
 
-    /// 搜索框（26 号 `.dks`，照 Zed 面板顶部的过滤框）：高 28、细边、比侧栏深一档；
-    /// 字（连同提示文字）是界面字号。
+    /// 搜索框（空壳的侧栏搜索）：高 22、前景 6% 的底、圆角 6，没有描边；右边是新建主机的加号。
+    /// 加号和搜索框同高，方框再小一点，不显得比搜索框重。
     fn render_search(
         &self,
         tokens: &Tokens,
@@ -352,83 +307,76 @@ impl HostList {
     ) -> impl IntoElement {
         let focused = self.search.focus_handle(cx).is_focused(window);
         let searching = self.searching();
+        let target = self.target.clone();
+        let search = SearchBar::new(
+            "host-search-box",
+            &self.search,
+            "host-search",
+            t!("host.list.search"),
+            "host-search-clear",
+            t!("host.list.clear_search"),
+            SearchChrome::Filled,
+            tokens,
+            scale,
+            cx.listener(|this, _, window, cx| {
+                this.clear_search(window, cx);
+                this.focus_search(window, cx);
+            }),
+        )
+        .query(searching)
+        .focused(focused)
+        .grow(true)
+        .render()
+        // 搜索框里的 ↑↓、Esc 先到这里：移动高亮、清空或收起搜索，不交给输入框，也不冒泡到终端。
+        .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
+            if this.searching() {
+                this.move_highlight(-1, cx);
+                cx.stop_propagation();
+            }
+        }))
+        .capture_action(cx.listener(|this, _: &MoveDown, _, cx| {
+            if this.searching() {
+                this.move_highlight(1, cx);
+                cx.stop_propagation();
+            }
+        }))
+        .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+            if this.searching() {
+                this.clear_search(window, cx);
+            } else {
+                this.leave_search(window, cx);
+            }
+            cx.stop_propagation();
+        }));
         div()
-            .id("host-search-box")
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(8.))
-            .mt(px(2.))
-            .h(size::BUTTON)
-            .px(px(8.))
-            .rounded(size::RADIUS)
-            .bg(tokens.input)
-            .border_1()
-            .border_color(if focused {
-                tokens.line_strong
-            } else {
-                tokens.line
-            })
-            .text_size(scale.ui)
-            .text_color(tokens.st_dim)
-            // 搜索框里的 ↑↓、Esc 先到这里：移动高亮、清空或收起搜索，不交给输入框，也不冒泡到终端。
-            .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
-                if this.searching() {
-                    this.move_highlight(-1, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .capture_action(cx.listener(|this, _: &MoveDown, _, cx| {
-                if this.searching() {
-                    this.move_highlight(1, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
-                if this.searching() {
-                    this.clear_search(window, cx);
-                } else {
-                    this.leave_search(window, cx);
-                }
-                cx.stop_propagation();
-            }))
-            .child(Icon::new(IconName::Search).size(px(14.)))
+            .gap(space::SPACE_5)
+            .mt(space::SPACE_2)
+            .child(search)
             .child(
-                div().flex_1().min_w_0().child(
-                    Input::new(&self.search)
-                        .id("host-search")
-                        .aria_label(t!("host.list.search"))
-                        .appearance(false)
-                        .small()
-                        // 和图标的间距由外层的 gap 给；Input 自己的左右内边距清掉，不然隔得太开。
-                        .px_0()
-                        // `.small()` 的字是 0.875rem（约 10.5）；跟界面字号走。
-                        .text_size(scale.ui),
-                ),
+                div()
+                    .id("host-sidebar-new-host")
+                    .test_support()
+                    .aria_label(t!("workspace.host_sidebar.new_host"))
+                    .tooltip(|_, cx| TextTooltip::view(t!("workspace.host_sidebar.new_host"), cx))
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .size(SEARCH_ADD)
+                    .rounded(size::RADIUS_MD)
+                    .bg(tokens.hover)
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(tokens.sel))
+                    .on_click(move |_, window, cx| target.dispatch_action(&NewHost, window, cx))
+                    .child(
+                        Icon::new(IconName::Plus)
+                            .size(SEARCH_ADD_ICON)
+                            .text_color(tokens.st_dim),
+                    ),
             )
-            .when(searching, |search| {
-                let hover = tokens.hover;
-                let text = tokens.text;
-                search.child(
-                    div()
-                        .id("host-search-clear")
-                        .test_support()
-                        .aria_label(t!("host.list.clear_search"))
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .justify_center()
-                        .size(px(18.))
-                        .rounded(px(4.))
-                        .cursor_pointer()
-                        .hover(move |style| style.bg(hover).text_color(text))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.clear_search(window, cx);
-                            this.focus_search(window, cx);
-                        }))
-                        .child(Icon::new(IconName::Close).size(px(12.))),
-                )
-            })
     }
 
     fn render_row(
@@ -454,12 +402,8 @@ impl HostList {
         });
         let hover = tokens.hover;
         let mark = HostMark::of(host);
-        let dark = cx.theme().is_dark();
-        let cards = self.open_cards.get(&id).copied().unwrap_or_default();
-        let tooltip = HostTooltip {
-            endpoint: host.endpoint().into(),
-            notes: host.notes.clone(),
-        };
+        let endpoint: SharedString = host.endpoint().into();
+        let notes = host.notes.clone();
         let target = self.target.clone();
         let dragged_host = DraggedHost {
             id,
@@ -474,11 +418,16 @@ impl HostList {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(12.))
+            .gap(space::SPACE_8)
             .h(ROW_HEIGHT)
-            .px(px(8.))
-            .rounded(size::RADIUS_LG)
-            .text_size(scale.side)
+            .px(space::SPACE_4)
+            .rounded(size::RADIUS_MD)
+            .text_size(scale.body)
+            .font_weight(if selected || highlighted {
+                WEIGHT_NORMAL
+            } else {
+                WEIGHT_NORMAL
+            })
             .text_color(tokens.label)
             .cursor_pointer()
             .map(|row| {
@@ -495,7 +444,10 @@ impl HostList {
             .map(|row| fade_while_dragged(row, dragged))
             // 开着右键菜单时不出悬停提示，免得盖住菜单。
             .when(self.menu.is_none(), |row| {
-                row.tooltip(move |_, cx| cx.new(|_| tooltip.clone()).into())
+                row.tooltip(move |_, cx| {
+                    let detail = (!notes.is_empty()).then(|| notes.clone());
+                    TextTooltip::with_detail("host-tooltip", endpoint.clone(), detail, cx)
+                })
             })
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 window.focus(&this.focus_handle, cx);
@@ -559,53 +511,22 @@ impl HostList {
                     .items_center()
                     .justify_center()
                     .size(BADGE)
-                    .child(render_slot(&mark, id, cards.link, dark, tokens)),
+                    .child(mark.render(
+                        ("host-badge", id.0 as usize).into(),
+                        BADGE,
+                        size::HOST_BADGE_GLYPH,
+                    )),
             )
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
                     .flex_1()
                     .min_w_0()
                     .whitespace_nowrap()
-                    .child(
-                        div()
-                            .line_height(NAME_LINE)
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(host.name.clone()),
-                    )
-                    .child(
-                        div()
-                            .id(("host-address", id.0 as usize))
-                            .test_support()
-                            .aria_label(host.address.clone())
-                            .text_size(scale.small)
-                            .line_height(ADDRESS_LINE)
-                            .text_color(if selected || highlighted {
-                                tokens.text2
-                            } else {
-                                tokens.st_dim
-                            })
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(host.address.clone()),
-                    ),
+                    .line_height(NAME_LINE)
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(host.name.clone()),
             )
-            .when(cards.link == Some(HostLink::Connected), |row| {
-                // 已连接：右边一个绿点（26 号 `.dot.up`）。无障碍名称是开着几张卡片。
-                row.child(
-                    div()
-                        .id(("host-open-cards", id.0 as usize))
-                        .test_support()
-                        .aria_label(cards.count.to_string())
-                        .flex_none()
-                        .size(size::DOT)
-                        .rounded_full()
-                        .bg(tokens.ok),
-                )
-            })
             .children(line.map(|edge| {
                 let id = ("host-drop-line", id.0 as usize).into();
                 render_drop_line(id, edge, px(12.), px(0.), tokens)
@@ -661,7 +582,7 @@ impl Render for HostList {
                 .on_key_down(cx.listener(Self::on_list_key))
                 .flex()
                 .flex_col()
-                .gap(px(2.))
+                .gap(space::SPACE_2)
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -676,50 +597,20 @@ impl Render for HostList {
             .flex_col()
             .flex_1()
             .min_h_0()
+            .px(space::SPACE_6)
             .child(self.render_search(&tokens, scale, window, cx))
-            // 搜索框和第一台主机之间留 8（26 号 `.side-gap`）。
-            .child(div().flex_none().h(px(8.)))
+            // 搜索框和第一台主机之间留 6。
+            .child(div().flex_none().h(px(6.)))
             .child(list)
             .children(self.menu.as_ref().map(|menu| {
                 deferred(
                     anchored()
                         .position(menu.position)
-                        .snap_to_window_with_margin(px(8.))
+                        .snap_to_window_with_margin(WINDOW_MARGIN)
                         .child(menu.view.clone()),
                 )
                 .with_priority(POPUP_PRIORITY)
             }))
-    }
-}
-
-/// 行最前面的槽：平时是系统徽章；在连接时是转圈，断开或连不上时是红 ×（26 号 `.hi .slot`）。
-fn render_slot(
-    mark: &HostMark,
-    id: HostId,
-    link: Option<HostLink>,
-    dark: bool,
-    tokens: &Tokens,
-) -> AnyElement {
-    match link {
-        Some(HostLink::Connecting) => Icon::new(IconName::LoaderCircle)
-            .size(SLOT_ICON)
-            .text_color(tokens.text2)
-            .with_animation(
-                ("host-connecting", id.0 as usize),
-                Animation::new(SPIN).repeat(),
-                |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
-            )
-            .into_any_element(),
-        Some(HostLink::Failed) => div()
-            .id(("host-failed", id.0 as usize))
-            .test_support()
-            .flex()
-            .text_color(tokens.err)
-            .child(Icon::new(IconName::Close).size(SLOT_ICON))
-            .into_any_element(),
-        _ => mark
-            .render(("host-badge", id.0 as usize).into(), BADGE, dark)
-            .into_any_element(),
     }
 }
 
@@ -731,24 +622,12 @@ fn render_empty(
     tokens: &Tokens,
     scale: TypeScale,
 ) -> impl IntoElement {
-    div()
-        .id("host-list-empty")
-        .test_support()
-        .aria_label(text.clone())
-        .flex()
-        .flex_col()
-        .items_center()
-        .px(px(8.))
-        .text_size(scale.ui)
-        .text_color(tokens.st_dim)
-        .map(|empty| {
-            if centered {
-                empty.flex_1().justify_center().pb(px(40.))
-            } else {
-                empty.pt(px(16.))
-            }
-        })
-        .child(text)
+    let placement = if centered {
+        EmptyPlacement::HostCentered
+    } else {
+        EmptyPlacement::HostTop
+    };
+    EmptyState::new("host-list-empty", text, placement).render(tokens, scale)
 }
 
 /// 拖着的主机，和跟着鼠标的那块预览。
@@ -762,74 +641,15 @@ impl Render for DraggedHost {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         div()
-            .px(px(10.))
-            .py(px(4.))
-            .rounded(size::RADIUS_LG)
+            .px(space::SPACE_10)
+            .py(space::SPACE_4)
+            .rounded(size::RADIUS_MD)
             .bg(tokens.popup)
             .border_1()
             .border_color(tokens.line_strong)
-            .text_size(TypeScale::current(cx).side)
+            .text_size(TypeScale::current(cx).body)
             .text_color(tokens.text)
             .child(self.name.clone())
     }
 }
 
-/// 悬停主机时的提示（原型 `.tip`）：`用户@地址:端口`，有备注时下一行是备注。
-#[derive(Clone)]
-struct HostTooltip {
-    endpoint: SharedString,
-    notes: SharedString,
-}
-
-impl Render for HostTooltip {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tokens = Tokens::current(cx);
-        let label = if self.notes.is_empty() {
-            self.endpoint.to_string()
-        } else {
-            format!("{}\n{}", self.endpoint, self.notes)
-        };
-        div()
-            .id("host-tooltip")
-            .test_support()
-            .aria_label(label)
-            .flex()
-            .flex_col()
-            .px(px(8.))
-            .py(px(4.))
-            .rounded(size::RADIUS)
-            .bg(tokens.tooltip)
-            .text_color(tokens.tooltip_text)
-            .text_size(TypeScale::current(cx).ui)
-            .line_height(relative(1.45))
-            .child(self.endpoint.clone())
-            .when(!self.notes.is_empty(), |tip| tip.child(self.notes.clone()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{HostCards, HostLink};
-
-    #[test]
-    fn a_connected_card_wins_then_connecting_then_failed() {
-        let mut cards = HostCards::default();
-        cards.add(Some(HostLink::Failed));
-        assert_eq!(cards.link, Some(HostLink::Failed));
-        cards.add(Some(HostLink::Connecting));
-        assert_eq!(cards.link, Some(HostLink::Connecting));
-        cards.add(None);
-        cards.add(Some(HostLink::Connected));
-        cards.add(Some(HostLink::Failed));
-        assert_eq!(cards.link, Some(HostLink::Connected));
-        assert_eq!(cards.count, 5);
-    }
-
-    #[test]
-    fn a_card_waiting_for_the_vault_leaves_the_badge_alone() {
-        let mut cards = HostCards::default();
-        cards.add(None);
-        assert_eq!(cards.link, None);
-        assert_eq!(cards.count, 1);
-    }
-}

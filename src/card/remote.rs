@@ -13,7 +13,7 @@
 //!   图块用 `badge`。SFTP 标签和分屏回到原目录用 `RemoteActivity::start_directory`。
 
 use gpui_kit::SharedString;
-use micaterm_hosts::{Host, HostOs, mark_color};
+use micaterm_hosts::{Host, HostOs};
 use micaterm_ssh::{JumpLogin, LoginRoute};
 use micaterm_terminal::{
     ReportedDirectory, SharedTerminalTransportFactory, ShellActivity, ShellCommand,
@@ -351,13 +351,9 @@ fn route_label(route: &LoginRoute) -> Option<String> {
 /// 主机的系统徽章：`os` 不知道时是名称的首字，底色按地址取（和主机栏的徽章一样）。
 /// 远程卡片和 SFTP 标签的远程文件卡片共用。
 pub fn host_badge(host: &Host, os: Option<HostOs>) -> Program {
-    let own = mark_color(&host.address);
+    let (background, ink) = crate::host::badge_colors(os, &host.address);
     match os {
         Some(os) => {
-            let (background, ink) = os
-                .brand_color()
-                .zip(os.brand_foreground())
-                .unwrap_or((own, 0xffffff));
             Program {
                 name: os.label().to_string(),
                 glyph: os.icon_path(),
@@ -379,8 +375,8 @@ pub fn host_badge(host: &Host, os: Option<HostOs>) -> Program {
             Program {
                 name: letter.clone(),
                 glyph: TERMINAL_GLYPH,
-                tile_bg: own,
-                tile_fg: 0xffffff,
+                tile_bg: background,
+                tile_fg: ink,
                 border: false,
                 shell: true,
                 letter: Some(letter),
@@ -519,7 +515,7 @@ mod tests {
                 code: 3,
                 signal: None
             }),
-            RemoteState::Disconnected("shell 已退出（退出码 3）".into())
+            RemoteState::Disconnected("Shell exited (code 3)".into())
         );
         card.stopped();
         assert_eq!(
@@ -527,7 +523,7 @@ mod tests {
                 code: 0,
                 signal: None
             }),
-            RemoteState::Disconnected("已断开连接".into())
+            RemoteState::Disconnected("Disconnected".into())
         );
         assert_eq!(card.endpoint().as_ref(), "ubuntu@10.0.1.21:22");
     }
@@ -546,7 +542,7 @@ mod tests {
                 code: 0,
                 signal: None
             }),
-            RemoteState::Disconnected("保险库没有解锁".into())
+            RemoteState::Disconnected("Vault Is Locked".into())
         );
         let (host, target) = (card.host().clone(), card.target().clone());
         card.reconnecting(host, target);
@@ -564,7 +560,7 @@ mod tests {
         let mut card = card(None);
         assert_eq!(
             card.connecting_line().as_ref(),
-            "正在连接 ubuntu@10.0.1.21:22…"
+            "Connecting to ubuntu@10.0.1.21:22…"
         );
         let jump = |name: &str| JumpLogin::Host {
             name: name.into(),
@@ -582,7 +578,7 @@ mod tests {
         ]);
         assert_eq!(
             card.connecting_line().as_ref(),
-            "正在连接 ubuntu@10.0.1.21:22（经 jp-gateway → hk-bastion）…"
+            "Connecting to ubuntu@10.0.1.21:22 via jp-gateway → hk-bastion…"
         );
         card.target.login.route = LoginRoute::Proxy(ProxyLogin {
             kind: ProxyKind::Socks5,
@@ -592,7 +588,7 @@ mod tests {
         });
         assert_eq!(
             card.connecting_line().as_ref(),
-            "正在连接 ubuntu@10.0.1.21:22（经 SOCKS5 127.0.0.1:1080）…"
+            "Connecting to ubuntu@10.0.1.21:22 via SOCKS5 127.0.0.1:1080…"
         );
     }
 }

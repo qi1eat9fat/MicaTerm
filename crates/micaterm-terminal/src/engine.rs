@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
+#[cfg(test)]
+use std::time::Duration;
 
 use alacritty_terminal::Term;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
@@ -33,7 +35,7 @@ use crate::run::{BusyReason, RunFailure, RunHandle};
 use crate::search::{MatchMarker, SearchDirection, SearchMark, SearchPosition, TerminalSearch};
 use crate::{
     SharedTerminalTransportFactory, TerminalColors, TerminalInteraction, TerminalLifecycle,
-    TerminalSize, TerminalStatus, TerminalTheme, TerminalTransportCommand, TerminalTransportEvent,
+    TerminalSize, TerminalStatus, TerminalTransportCommand, TerminalTransportEvent,
 };
 
 pub type AlacrittyTerm = Term<TerminalEventProxy>;
@@ -43,6 +45,7 @@ pub struct TerminalCell {
     pub character: String,
     pub foreground: Color,
     pub background: Color,
+    pub underline_color: Option<Color>,
     pub flags: Flags,
     pub selected: bool,
     pub search: SearchMark,
@@ -116,7 +119,7 @@ impl TerminalEngine {
         // threads therefore never wake GPUI's local executor directly, and a
         // burst of terminal bytes results in a single render notification.
         let (event_sender, event_receiver) = mpsc::channel();
-        let theme = Arc::new(Mutex::new(TerminalColors::current(cx)));
+        let theme = Arc::new(Mutex::new(TerminalColors::active(cx)));
         let runtime = TerminalRuntime::start(
             generation,
             size,
@@ -127,7 +130,7 @@ impl TerminalEngine {
         );
         let theme_observer = cx.observe_global::<TerminalColors>(|this, cx| {
             *this.theme.lock().unwrap_or_else(|error| error.into_inner()) =
-                TerminalColors::current(cx);
+                TerminalColors::active(cx);
         });
         let interaction_observer = cx.observe_global::<TerminalInteraction>(|this, cx| {
             this.runtime
@@ -168,7 +171,7 @@ impl TerminalEngine {
             let mut undrawn = false;
             loop {
                 cx.background_executor()
-                    .timer(Duration::from_millis(16))
+                    .timer(crate::rendering::FRAME_INTERVAL)
                     .await;
                 let batch: Vec<_> = events.try_iter().collect();
                 if batch.is_empty() && !undrawn {
@@ -652,6 +655,7 @@ impl TerminalEngine {
                     character,
                     foreground: indexed.cell.fg,
                     background: indexed.cell.bg,
+                    underline_color: indexed.cell.underline_color(),
                     flags: indexed.cell.flags,
                     selected: selection.is_some_and(|range| {
                         range.contains_cell(&indexed, cursor_point, cursor_shape)
@@ -980,9 +984,9 @@ pub struct TerminalEventProxy {
     theme: SharedTheme,
 }
 
-/// The theme a terminal's parser thread answers color queries from,
-/// swapped by the engine when `TerminalColors` changes.
-type SharedTheme = Arc<Mutex<&'static TerminalTheme>>;
+/// The theme and optional background override a terminal's parser thread answers
+/// color queries from, swapped by the engine when `TerminalColors` changes.
+type SharedTheme = Arc<Mutex<TerminalColors>>;
 
 /// An answer to a query in the output.
 enum Reply {
@@ -1513,6 +1517,7 @@ fn prepare_term_for_user_input(term: &mut AlacrittyTerm) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TerminalTheme;
     use alacritty_terminal::index::{Column, Line};
     use alacritty_terminal::vte::ansi::NamedColor;
 
@@ -1559,8 +1564,8 @@ mod tests {
             wakeup_pending: Arc::new(AtomicBool::new(false)),
             output_pending: Arc::new(AtomicBool::new(false)),
             replies: Arc::default(),
-            theme: Arc::new(Mutex::new(TerminalTheme::default_for(
-                gpui_kit::component::ThemeMode::Light,
+            theme: Arc::new(Mutex::new(TerminalColors::new(
+                TerminalTheme::default_for(gpui_kit::component::ThemeMode::Light),
             ))),
         };
         (proxy, command_receiver, ui_receiver)
@@ -1590,7 +1595,7 @@ mod tests {
             .collect();
         assert_eq!(
             written,
-            ["\x1b]11;rgb:fcfc/fcfc/fcfc\x1b\\\x1b[1;3R\x1b]4;1;rgb:d4d4/5555/5555\x07"]
+            ["\x1b]11;rgb:ffff/ffff/ffff\x1b\\\x1b[1;3R\x1b]4;1;rgb:cfcf/3030/3c3c\x07"]
         );
 
         // A color the program set is the one it hears back.
@@ -1835,7 +1840,7 @@ mod tests {
         assert_eq!(position(&search).1, 1);
         search.set_query("e.r", &mut term);
         assert_eq!(position(&search).1, 0);
-        assert_eq!(search.position().unwrap().label(), "无结果");
+        assert_eq!(search.position().unwrap().label(), "No Results");
         search.set_query("", &mut term);
         assert!(search.position().is_none());
     }
@@ -2089,6 +2094,7 @@ mod tests {
             character: " ".into(),
             foreground: Color::Named(NamedColor::Foreground),
             background: Color::Named(NamedColor::Background),
+            underline_color: None,
             flags,
             selected,
             search: if selected {
@@ -2218,8 +2224,8 @@ mod tests {
             TerminalSize::new(40, 4, 8, 16),
             Box::new(ScriptedTransport(script)),
             ui_events,
-            Arc::new(Mutex::new(TerminalTheme::default_for(
-                gpui_kit::component::ThemeMode::Light,
+            Arc::new(Mutex::new(TerminalColors::new(
+                TerminalTheme::default_for(gpui_kit::component::ThemeMode::Light),
             ))),
             TerminalInteraction::default(),
         )
@@ -2285,7 +2291,10 @@ mod tests {
         ]);
         let screen = screen_once_it_shows(&runtime, "退出码 137");
         assert!(screen.contains("frame"), "{screen}");
-        assert!(screen.contains("[进程已退出，退出码 137]"), "{screen}");
+        assert!(
+            screen.contains("[Process exited with code 137]"),
+            "{screen}"
+        );
     }
 
     #[test]
@@ -2443,6 +2452,23 @@ mod tests {
         assert_eq!(
             named_key_bytes(&NamedKey::Char('y'), TermMode::empty()).unwrap(),
             b"y"
+        );
+    }
+
+    #[test]
+    fn sgr_58_underline_color_is_preserved_in_grid_cells() {
+        let mut term = test_term(20, 4);
+        let mut parser: alacritty_terminal::vte::ansi::Processor = Default::default();
+        parser.advance(&mut term, b"\x1b[4:3;58:2::255:80:90mX\x1b[0m");
+        let cell = &term.grid()[Line(0)][Column(0)];
+        assert!(cell.flags.contains(Flags::UNDERCURL));
+        assert_eq!(
+            cell.underline_color(),
+            Some(Color::Spec(Rgb {
+                r: 255,
+                g: 80,
+                b: 90,
+            }))
         );
     }
 }

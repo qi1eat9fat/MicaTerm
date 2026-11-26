@@ -36,6 +36,7 @@ use crate::host::{
 };
 use crate::i18n::t;
 use crate::settings::{OnChoose, segmented};
+use crate::theme::space;
 use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, size, ui_text};
 use crate::ui::DialogLayer;
 use crate::ui::form::{FieldErrors, FieldNote, form_field, form_group, locked_secret};
@@ -59,10 +60,9 @@ const ALGORITHM_CHOICE: &str = "credential-key-algorithm";
 /// 「生成新密钥」还在生成、生成失败、保存时加密失败：写在公钥那一行。
 const KEY_PROBLEM: &str = "credential-key-problem";
 
-/// 正文最高能多高：窗口高扣掉弹窗距顶 72、头部 40、底部 44，下面再留 48；再高就在里面滚动。
-/// 窗口再矮也至少 240（宽是弹窗统一的 448）。
+/// 凭据表单保留底部留白；短窗口里正文仍有足够的滚动区域。
 fn max_body_height(window: &Window) -> Pixels {
-    (window.viewport_size().height - px(72. + 40. + 44. + 48.)).max(px(240.))
+    crate::ui::modal::modal_body_max_height(window.viewport_size().height, px(48.), px(240.))
 }
 
 /// 保存了一条凭据：叠在主机对话框上新建时，主机对话框据此自动选上它。
@@ -629,7 +629,13 @@ impl CredentialDialog {
 
     /// 编辑的凭据有主机在用时的那句话。
     fn usage_note(&self) -> Option<SharedString> {
-        (self.hosts > 0).then(|| t!("credential.dialog.usage", count = self.hosts))
+        (self.hosts > 0).then(|| {
+            if self.hosts == 1 {
+                t!("credential.dialog.usage_one", count = self.hosts)
+            } else {
+                t!("credential.dialog.usage", count = self.hosts)
+            }
+        })
     }
 
     /// 头部（26 号 `.cp-h`）：钥匙图标 + 「新建凭据」「编辑凭据」，淡字是编辑的那条的名字，
@@ -692,6 +698,7 @@ impl CredentialDialog {
                         .unwrap_or(0),
                     choose_kind,
                     tokens,
+                    TypeScale::current(cx),
                 ),
                 Vec::new(),
                 tokens,
@@ -769,7 +776,12 @@ impl CredentialDialog {
             Secret::Passphrase => (&self.passphrase, FIELD_PASSPHRASE),
         };
         let control = if field.is_locked() {
-            locked_secret(which.locked_id(), "credential-secret-unlock", tokens).into_any_element()
+            locked_secret(
+                which.locked_id(),
+                "credential-secret-unlock",
+                tokens,
+                TypeScale::current(cx),
+            ).into_any_element()
         } else {
             modal_input(
                 id,
@@ -819,6 +831,7 @@ impl CredentialDialog {
                     .unwrap_or(0),
                 choose_source,
                 tokens,
+                TypeScale::current(cx),
             ),
             Vec::new(),
             tokens,
@@ -849,7 +862,7 @@ impl CredentialDialog {
                     div()
                         .flex()
                         .items_center()
-                        .gap(px(8.))
+                        .gap(space::SPACE_8)
                         .child(div().flex_1().min_w_0().child(modal_input(
                             FIELD_FILE,
                             t!("credential.dialog.file"),
@@ -922,6 +935,7 @@ impl CredentialDialog {
                             .unwrap_or(0),
                         choose_algorithm,
                         tokens,
+                        TypeScale::current(cx),
                     ),
                     Vec::new(),
                     tokens,
@@ -981,20 +995,20 @@ impl CredentialDialog {
             div()
                 .flex()
                 .flex_col()
-                .gap(px(6.))
+                .gap(space::SPACE_6)
                 .child(
                     div()
                         .id(PUBLIC_KEY)
                         .test_support()
                         .aria_label(line.clone())
-                        .px(px(10.))
-                        .py(px(7.))
-                        .rounded(size::RADIUS)
+                        .px(space::SPACE_10)
+                        .py(space::SPACE_7)
+                        .rounded(size::RADIUS_MD)
                         .bg(tokens.content)
                         .border_1()
                         .border_color(tokens.line)
                         .text_color(tokens.text2)
-                        .text_size(TypeScale::current(cx).mono_small)
+                        .text_size(TypeScale::current(cx).sm)
                         .line_height(relative(1.5))
                         .font_family(MONO_FONT_FAMILY)
                         .child(line),
@@ -1003,7 +1017,7 @@ impl CredentialDialog {
                     div()
                         .flex()
                         .items_center()
-                        .gap(px(8.))
+                        .gap(space::SPACE_8)
                         .child(modal_button(
                             "credential-copy-public-key",
                             t!("credential.dialog.copy_public_key"),
@@ -1034,7 +1048,7 @@ impl CredentialDialog {
         let saving = self.saving.is_some();
         div()
             .flex()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(modal_button(
                 "credential-dialog-cancel",
                 t!("credential.dialog.cancel"),
@@ -1202,8 +1216,8 @@ pub fn open_credential_dialog(
     let layer = view.read(cx).layer.clone();
     let dismissed = view.downgrade();
     layer.open_dismissable(
-        move |dialog, _, _| {
-            modal_dialog(dialog)
+        move |dialog, _, cx| {
+            modal_dialog(dialog, &Tokens::current(cx))
                 // 回车由单行框自己处理（保存，读私钥在后台）：gpui-component 的 `Confirm` 不关框。
                 .on_ok(|_, _, _| false)
                 .child(view.clone())

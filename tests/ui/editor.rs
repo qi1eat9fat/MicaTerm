@@ -208,7 +208,7 @@ fn opening_a_remote_file_shows_it_and_opening_it_again_switches_to_it(cx: &mut T
     // 没有头部了（26 号）：状态栏写「主机 / 完整路径」。
     assert_eq!(
         label(cx, &fixture, "editor-status"),
-        "web-01 / /home/tester/文件 甲.txt · 第 1 行，第 1 列 · UTF-8 · LF · 纯文本"
+        "web-01 / /home/tester/文件 甲.txt · Line 1, Column 1 · UTF-8 · LF · Plain Text"
     );
 
     // 再打开同一个：切过去，不再读一遍，不多开标签。
@@ -400,7 +400,7 @@ fn the_editor_takes_its_colors_and_font_from_the_prototype_in_both_modes(cx: &mu
                 theme.mono_font_family.as_ref(),
                 "Maple Mono Normal NL NF CN"
             );
-            assert_eq!(theme.font_family.as_ref(), "HarmonyOS Sans SC");
+            assert_eq!(theme.font_family.as_ref(), "Instrument Sans");
             let style = &theme.highlight_theme.style;
             assert_eq!(style.editor_background, Some(tokens.content));
             assert_eq!(style.editor_gutter_background, Some(tokens.content));
@@ -437,7 +437,7 @@ fn the_rail_and_the_status_bar_name_the_file_and_its_connection(cx: &mut TestApp
     assert_eq!(rail_label(cx, &fixture), "compose.yml web-01");
     assert_eq!(
         label(cx, &fixture, "editor-status"),
-        "web-01 / /home/tester/compose.yml · 第 1 行，第 1 列 · UTF-8 · LF · YAML"
+        "web-01 / /home/tester/compose.yml · Line 1, Column 1 · UTF-8 · LF · YAML"
     );
 }
 
@@ -448,7 +448,7 @@ fn the_status_bar_follows_the_cursor(cx: &mut TestAppContext) {
     press(cx, &fixture, "down");
     press(cx, &fixture, "right");
     assert!(
-        label(cx, &fixture, "editor-status").contains("第 2 行，第 2 列"),
+        label(cx, &fixture, "editor-status").contains("Line 2, Column 2"),
         "{}",
         label(cx, &fixture, "editor-status")
     );
@@ -487,13 +487,13 @@ fn the_status_bar_says_when_there_are_unsaved_changes(cx: &mut TestAppContext) {
     assert!(!visible(cx, &fixture, "editor-save"));
     type_text(cx, &fixture, "1");
     assert!(
-        label(cx, &fixture, "editor-status").contains("文件 甲.txt · 未保存 · 第 1 行，第 2 列"),
+        label(cx, &fixture, "editor-status").contains("文件 甲.txt · Unsaved · Line 1, Column 2"),
         "{}",
         label(cx, &fixture, "editor-status")
     );
     press(cx, &fixture, "ctrl-s");
     wait_for_writes(cx, &fixture, 1);
-    assert!(!label(cx, &fixture, "editor-status").contains("未保存"));
+    assert!(!label(cx, &fixture, "editor-status").contains("Unsaved"));
 }
 
 #[gpui_kit::test]
@@ -548,10 +548,16 @@ fn a_file_changed_on_the_server_asks_and_shows_both_stamps(cx: &mut TestAppConte
     // 什么都没写。打开时和现在都写出来。
     assert_eq!(fixture.sftp.file(REMOTE_FILE), b"someone else's\n");
     let text = label(cx, &fixture, "editor-changed-text");
-    assert!(text.contains("打开之后，远程的这个文件被改过"), "{text}");
-    assert!(text.contains("打开时 5 B"), "{text}");
-    assert!(text.contains("现在 15 B"), "{text}");
-    assert!(text.contains("覆盖会丢掉别人的修改"), "{text}");
+    assert!(
+        text.contains("This remote file was changed after it was opened"),
+        "{text}"
+    );
+    assert!(text.contains("When Opened 5 B"), "{text}");
+    assert!(text.contains("Now 15 B"), "{text}");
+    assert!(
+        text.contains("Overwriting will discard someone else's changes"),
+        "{text}"
+    );
 
     // 取消：修改还在，还是未保存。
     click(cx, &fixture, "editor-changed-cancel");
@@ -762,8 +768,8 @@ fn a_binary_file_is_explained_not_opened_and_offers_the_download(cx: &mut TestAp
     wait_visible(cx, &fixture, "editor-refused");
     assert_eq!(tab_count(cx, &fixture), 1);
     let text = label(cx, &fixture, "editor-refused-text");
-    assert!(text.contains("不是 UTF-8 文本文件"), "{text}");
-    assert!(text.contains("可以先下载到本机"), "{text}");
+    assert!(text.contains("is not a UTF-8 text file"), "{text}");
+    assert!(text.contains("Download it to this computer first"), "{text}");
     assert!(visible(cx, &fixture, "editor-refused-download"));
     click(cx, &fixture, "editor-refused-close");
     assert!(!visible(cx, &fixture, "editor-refused"));
@@ -785,7 +791,7 @@ fn a_file_over_the_limit_says_how_large_it_is(cx: &mut TestAppContext) {
     wait_visible(cx, &fixture, "editor-refused");
     let text = label(cx, &fixture, "editor-refused-text");
     assert!(
-        text.contains("编辑器只打开 5.0 MB 以内的 UTF-8 文本文件"),
+        text.contains("the editor only opens UTF-8 text files up to 5.0 MB"),
         "{text}"
     );
     assert_eq!(tab_count(cx, &fixture), 1);
@@ -828,10 +834,10 @@ fn a_local_file_is_edited_on_this_computer(cx: &mut TestAppContext) {
     assert_eq!(text_of(cx, &fixture), "local\n");
     assert_eq!(
         label(cx, &fixture, "editor-status"),
-        format!("本机 / {LOCAL_FILE} · 第 1 行，第 1 列 · UTF-8 · LF · 纯文本")
+        format!("This Computer / {LOCAL_FILE} · Line 1, Column 1 · UTF-8 · LF · Plain Text")
     );
     // 标签上灰字写「本机」，「文件」是灰的。
-    assert_eq!(rail_label(cx, &fixture), "文件 甲.txt 本机");
+    assert_eq!(rail_label(cx, &fixture), "文件 甲.txt This Computer");
     assert!(matches!(
         cx.update(|cx| fixture.workspace.read(cx).files_button(cx)),
         micaterm::workspace::FilesButton::Unavailable(_)
@@ -984,8 +990,14 @@ fn quitting_with_unsaved_changes_and_unfinished_transfers_asks_once(cx: &mut Tes
     cx.run_until_parked();
     assert!(visible(cx, &fixture, "quit-confirm"));
     let text = label(cx, &fixture, "quit-confirm-text");
-    assert!(text.contains("web-01 还有 1 批传输没完成"), "{text}");
-    assert!(text.contains("「文件 甲.txt」有未保存的修改"), "{text}");
+    assert!(
+        text.contains("web-01 still has 1 unfinished transfer batches"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\"文件 甲.txt\" has unsaved changes"),
+        "{text}"
+    );
 
     // 再来一次：还是拦着，也不多叠一个框。
     assert!(in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
@@ -1121,8 +1133,8 @@ fn quitting_during_a_save_waits_and_then_asks_about_the_rest(cx: &mut TestAppCon
     assert!(!visible(cx, &fixture, "save-wait"));
     assert!(visible(cx, &fixture, "quit-confirm"));
     let text = label(cx, &fixture, "quit-confirm-text");
-    assert!(text.contains("还有 1 批传输没完成"), "{text}");
-    assert!(!text.contains("未保存"), "{text}");
+    assert!(text.contains("still has 1 unfinished transfer batches"), "{text}");
+    assert!(!text.contains("Unsaved"), "{text}");
 }
 
 /// 退出时写回失败：不退出。
@@ -1201,7 +1213,7 @@ fn the_file_menu_opens_the_editor(cx: &mut TestAppContext) {
     });
     in_frame(cx, fixture.handle, |window, cx| {
         let mut popup = window.within("popup-menu");
-        assert_eq!(popup.find(0_usize).label(), Some("编辑"));
+        assert_eq!(popup.find(0_usize).label(), Some("Edit"));
         popup.click(0_usize, cx);
     });
     let workspace = fixture.workspace.clone();

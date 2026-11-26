@@ -50,6 +50,9 @@ pub async fn open_shell(
         )
         .await
         .map_err(|_| anyhow!(ChannelError::PtyRefused))?;
+    // 告知远端终端支持 24-bit 真彩色（与本地 PTY 一致）；部分 sshd 未配置 AcceptEnv COLORTERM，
+    // 使用 want_reply = false 静默尝试，不因服务端拒收而阻塞 shell 启动。
+    let _ = channel.set_env(false, "COLORTERM", "truecolor").await;
     channel
         .request_shell(true)
         .await

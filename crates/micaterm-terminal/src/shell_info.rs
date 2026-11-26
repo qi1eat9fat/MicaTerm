@@ -1,14 +1,15 @@
 //! 本地卡片显示的 shell 名称和版本（新写，shell-rs 没有「shell 版本」）。
 //!
-//! 名称是程序的文件名（`pwsh`），卡片头部用；版本给卡片状态栏（「PowerShell 7.5.2」）。
-//! Windows 上读 exe 的版本资源；读不到、或者别的平台，就没有版本，状态栏只写名称。
+//! 名称是用户认得的名字（`PowerShell`、`cmd`），卡片头部用；版本给卡片状态栏
+//!（「PowerShell 7.5.2」）。Windows 上读 exe 的版本资源；读不到、或者别的平台，
+//! 就没有版本，状态栏只写名称。
 
 use crate::LocalShell;
 
 /// 一个本地 shell 叫什么、是哪个版本。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LocalShellInfo {
-    /// 卡片头部显示的名字：程序文件名去掉 `.exe`。
+    /// 卡片头部显示的名字：程序文件名去掉 `.exe`，PowerShell 写成 `PowerShell`。
     pub name: String,
     /// 状态栏显示的版本，带产品名（「PowerShell 7.5.2」）；不知道时是 `None`。
     pub version: Option<String>,

@@ -1,32 +1,24 @@
-//! 右侧停靠面板（26 号 `.dk`，照 Zed 停靠面板）：默认宽 280（左边线可拖）、左右留 8、内容底、左边一条细线，
-//! 从右侧图标栏展开；凭据、片段两个面板共用这里的外框、标题行、分组标题和搜索框。
+//! 右侧停靠面板（宽 380，左边线可拖）：内容底、左边一条细线，照官网原型的右侧源码管理/文件面板。
+//! 凭据、片段两个面板共用这里的外框、标题行、折叠分组头和空状态提示。
 //!
-//! - 标题行（`.dk-h`）：高 32、左留 8；标题是正文色界面字，后面可跟「→ 焦点卡片名」（13 的线条箭头 +
-//!   淡色名字，三段同一个间距 4）；最右一个 24 的「+」（图标 14）。
-//! - 分组标题（`.gh`）：高 28、左右留 8，次要色小一号的字，后面一个实心小三角（展开朝下、收起朝右），
-//!   点它收起 / 展开这一组；紧跟标题行的第一组上面留 4，其余留 14。
-//! - 搜索框（`.dks`）：高 28、比面板深一档的底、细边，聚焦时边深一档；淡色放大镜。
+//! - 标题行：高 24（与顶栏同高），贯通全宽的下边线；左边 12 图标 + 11 SemiBold 标题（可跟 `→ 卡片名`），
+//!   最右两个 20×20 图标按钮（「+」和「×」关闭）。
+//! - 分组头（`dock_group`）：高 22、左右内缩 4px 微圆角悬停，左边是折叠箭头 + 11 SemiBold 次要色标题 + 胶囊计数徽章。
 
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
+use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::app::{TRIANGLE_DOWN_ICON, TRIANGLE_RIGHT_ICON};
-use crate::theme::{Tokens, TypeScale, size};
+use crate::app::CatalogIcon;
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, WEIGHT_SEMIBOLD, size};
+use crate::ui::count::count_badge;
+use crate::ui::empty::{EmptyPlacement, EmptyState};
 use crate::ui::icon_button::IconButton;
 
-/// 标题行的高。
-const HEADER: Pixels = px(32.);
-/// 标题行「+」的边长和图标边长。
-const HEADER_BUTTON: Pixels = px(24.);
-const HEADER_ICON: Pixels = px(14.);
-/// 分组标题的高。
-const GROUP: Pixels = px(28.);
-/// 搜索框的高。
-const SEARCH: Pixels = px(28.);
+/// 分组行的高（与树节点行同高 22px）。
+const GROUP: Pixels = size::DOCK_ROW;
 
-/// 面板外框：子元素从上往下排。调用方加完自己的东西后再调 `.test_support()`（测试构建里它换类型）。
+/// 面板外框：不设左右内边距，保证标题行下边线和树列表悬停条贯通整个面板宽度。
 pub fn dock_panel(id: &'static str, tokens: &Tokens) -> Stateful<Div> {
     div()
         .id(id)
@@ -37,7 +29,6 @@ pub fn dock_panel(id: &'static str, tokens: &Tokens) -> Stateful<Div> {
         .flex_1()
         .min_w_0()
         .min_h_0()
-        .px(px(8.))
         .bg(tokens.content)
         .border_l(size::LINE)
         .border_color(tokens.line)
@@ -57,11 +48,20 @@ pub struct DockTarget {
     pub name: SharedString,
 }
 
-/// 标题行（`.dk-h`）。
+/// 标题行右边的「收起」：元素 id、无障碍名称（也是悬停提示）、点了经 `target` 派发的 action。
+pub struct DockClose {
+    pub id: &'static str,
+    pub label: SharedString,
+    pub action: Box<dyn Action>,
+}
+
+/// 标题行（照官网原型的 `Source Control` / `Files` 面板顶栏）。
 pub fn dock_header(
+    icon: CatalogIcon,
     title: SharedString,
     to: Option<DockTarget>,
     new: DockNew,
+    close: DockClose,
     target: &FocusHandle,
     tokens: &Tokens,
     cx: &App,
@@ -71,18 +71,30 @@ pub fn dock_header(
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(4.))
-        .h(HEADER)
-        .pl(px(8.))
-        .text_size(scale.ui)
-        .line_height(HEADER)
+        .gap(px(6.))
+        .h(size::DOCK_HEADER)
+        .pl(px(10.))
+        // 右边只留 1：20 宽按钮的中心正好落在顶栏 22 宽窗口按钮的圆点中心上
+        // （「×」对关闭、「+」对最大化）。
+        .pr(px(1.))
+        .border_b(size::LINE)
+        .border_color(tokens.line)
+        .text_size(scale.sm)
+        .line_height(size::DOCK_HEADER)
         .text_color(tokens.text)
+        .font_weight(WEIGHT_SEMIBOLD)
         .whitespace_nowrap()
+        .child(
+            div()
+                .flex_none()
+                .text_color(tokens.icon)
+                .child(Icon::new(icon).size(size::ICON_SM)),
+        )
         .child(div().flex_none().child(title))
         .when_some(to, |row, to| {
             row.child(
                 Icon::new(IconName::ArrowRight)
-                    .size(px(13.))
+                    .size(px(11.))
                     .flex_none()
                     .text_color(tokens.st_dim),
             )
@@ -93,24 +105,40 @@ pub fn dock_header(
                     .aria_label(to.label)
                     .min_w_0()
                     .truncate()
+                    .text_size(scale.sm)
+                    .font_weight(WEIGHT_NORMAL)
                     .text_color(tokens.st_dim)
                     .child(to.name),
             )
         })
         .child(
-            div().ml_auto().flex_none().child(
-                IconButton::new(new.id, IconName::Plus, new.label.clone())
-                    .size(HEADER_BUTTON, HEADER_ICON)
-                    .tooltip(new.label)
-                    .dispatch(new.action, target, tokens),
-            ),
+            div()
+                .ml_auto()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(2.))
+                .child(
+                    IconButton::new(new.id, IconName::Plus, new.label.clone())
+                        .sm()
+                        .tooltip(new.label)
+                        .dispatch(new.action, target, tokens),
+                )
+                .child(
+                    IconButton::new(close.id, IconName::Close, close.label.clone())
+                        .sm()
+                        .tooltip(close.label)
+                        .dispatch(close.action, target, tokens),
+                ),
         )
 }
 
-/// 分组标题（`.gh`）：`first` 是紧跟标题行的那组。点了调 `on_toggle`（收起 / 展开）。
+/// 分组标题行（对标官网 `Source Control › Changes 80`）：折叠箭头 + 次要色 SemiBold 分组名 + 胶囊计数徽章，微圆角内缩悬停。
+#[allow(clippy::too_many_arguments)]
 pub fn dock_group(
     id: impl Into<ElementId>,
     label: SharedString,
+    count: usize,
     collapsed: bool,
     first: bool,
     on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -118,13 +146,8 @@ pub fn dock_group(
     cx: &App,
 ) -> AnyElement {
     let scale = TypeScale::current(cx);
-    // 26 号 `--fs-gh`：界面字号 14 时 13，13、12 时都是 12。
-    let text_size = scale.small;
-    let color = if cx.theme().is_dark() {
-        tokens.st_dim
-    } else {
-        tokens.text2
-    };
+    let hover = tokens.hover;
+    let text = tokens.text;
     div()
         .id(id.into())
         .test_support()
@@ -133,77 +156,36 @@ pub fn dock_group(
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(6.))
+        .gap(px(4.))
         .h(GROUP)
-        .mt(if first { px(4.) } else { px(14.) })
-        .px(px(8.))
-        .text_size(text_size)
+        .mx(px(4.))
+        .mt(if first { px(4.) } else { px(6.) })
+        .pl(px(6.))
+        .pr(px(8.))
+        .rounded(size::RADIUS_SM)
+        .text_size(scale.sm)
         .line_height(GROUP)
-        .text_color(color)
+        .font_weight(WEIGHT_SEMIBOLD)
+        .text_color(tokens.text2)
         .cursor_pointer()
+        .hover(move |style| style.bg(hover).text_color(text))
         .on_click(on_toggle)
-        .child(label)
         .child(
-            Icon::default()
-                .path(if collapsed {
-                    TRIANGLE_RIGHT_ICON
-                } else {
-                    TRIANGLE_DOWN_ICON
-                })
-                .size(px(7.))
-                .opacity(0.8),
+            Icon::new(if collapsed {
+                IconName::ChevronRight
+            } else {
+                IconName::ChevronDown
+            })
+            .size(px(11.))
+            .flex_none()
+            .text_color(tokens.st_dim),
         )
+        .child(div().child(label))
+        .child(count_badge(count, tokens, scale).ml(px(2.)))
         .into_any_element()
 }
 
-/// 搜索框（`.dks`）：`id` 给输入框，`label` 是它的无障碍名称。
-pub fn dock_search(
-    id: &'static str,
-    label: SharedString,
-    input: &Entity<InputState>,
-    tokens: &Tokens,
-    window: &Window,
-    cx: &App,
-) -> Div {
-    let scale = TypeScale::current(cx);
-    let focused = input.read(cx).focus_handle(cx).is_focused(window);
-    div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(8.))
-        .h(SEARCH)
-        .mt(px(2.))
-        .mb(px(8.))
-        .px(px(8.))
-        .rounded(size::RADIUS)
-        .bg(tokens.input)
-        .border_1()
-        .border_color(if focused {
-            tokens.line_strong
-        } else {
-            tokens.line
-        })
-        .child(
-            Icon::new(IconName::Search)
-                .size(px(14.))
-                .flex_none()
-                .text_color(tokens.st_dim),
-        )
-        .child(
-            div().flex_1().min_w_0().child(
-                Input::new(input)
-                    .id(id)
-                    .aria_label(label)
-                    .appearance(false)
-                    .small()
-                    .px_0()
-                    .text_size(scale.ui),
-            ),
-        )
-}
-
-/// 列表里的一句话：还没有东西、搜不到、现在用不了。`hint` 是下面小一号的第二行。
+/// 列表里的一句话：还没有东西、现在用不了。`hint` 是下面小一号的第二行。
 pub fn dock_empty(
     id: &'static str,
     text: SharedString,
@@ -211,26 +193,9 @@ pub fn dock_empty(
     tokens: &Tokens,
     cx: &App,
 ) -> AnyElement {
-    let scale = TypeScale::current(cx);
-    div()
-        .id(id)
-        .test_support()
-        .aria_label(text.clone())
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap(px(4.))
-        .px(px(16.))
-        .py(px(30.))
-        .text_size(scale.ui)
-        .text_color(tokens.st_dim)
-        .child(text)
-        .children(hint.map(|hint| {
-            div()
-                .text_size(scale.mono_small)
-                .text_color(tokens.faint)
-                .text_center()
-                .child(hint)
-        }))
-        .into_any_element()
+    let mut empty = EmptyState::new(id, text, EmptyPlacement::Dock);
+    if let Some(hint) = hint {
+        empty = empty.hint(hint);
+    }
+    empty.render(tokens, TypeScale::current(cx))
 }

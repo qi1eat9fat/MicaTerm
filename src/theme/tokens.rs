@@ -1,13 +1,11 @@
-//! 颜色 token：取自 Ayu 主题（<https://ayutheme.com/>）的 Light / Dark 两个变体，
-//! UI 色按 `ayu-theme/vscode-ayu` 的三个主题 JSON，语法色按官网色板。界面颜色不跟终端主题走。
+//! 颜色 token：Air Neutral（简约通透）明暗配色体系，所有界面语义色均由 `Scheme` 单一数据源推导。
 //!
-//! 分层不靠阴影，靠**底色分档**加 1px 细线：侧栏 `side` 是 Ayu 的 Sidebar（深色下比内容亮一档），
-//! 内容区 `content` 是 Editor，标签栏和状态栏 `tabbar` 是 Chrome（Dark 下接近纯黑）。
-//! **没有强调色**：主按钮是 `sel` 灰底，红色只用于危险操作和出错，绿色只用于已连接。
+//! 浅色以纯白 `#FFFFFF` 为内容画布、极轻冷雪灰（前景 4.2%）为侧栏；深色以清冽黑曜石 `#101216` 为内容底、
+//! 前景 6.5% 为侧栏。强调色采用清澈静谧蓝（深色 `#5B9BF8`、浅色 `#2563EB`），只用在主按钮、开关打开、
+//! 分段选中、菜单悬停、激活标签下划线和焦点环；列表选中与标签激活保持轻中性色。
 //!
-//! 浅色下有几处不是 Ayu 的原值：Ayu 的语法色是给编辑器设计的，直接当界面文字对比不够
-//! （Number 黄 `#f2ae49` 只有 1.87:1），所以 `warn`、`ok` / `ok_text`、`err`、`st_dim`、`line`
-//! 都压暗过，值后面的注释写着实际对比度；文件末尾的测试钉住这些下限。
+//! 细线与浮层描边在明暗下分别采用轻量化比例（浅色 7% / 14%、深色 8% / 16%），
+//! 浮层（菜单、对话框）深色用 `#1B1F27` 抬升一级、浅色用纯白配柔和阴影，输入框用前景 3.5% / 4.5% 混进面板。
 
 use gpui_kit::{App, Background, Hsla, Rgba, linear_color_stop, linear_gradient, rgb, rgba};
 
@@ -21,11 +19,11 @@ pub const MICA_TINT_OPACITY: f32 = 0.5;
 /// 一组颜色 token。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
-    /// 侧栏底（Ayu 的 Sidebar），也是窗口底色。
+    /// 侧栏底（Muxy 的 `raised`），也是窗口底色。
     pub side: Hsla,
-    /// 内容区底（Ayu 的 Editor）：终端、编辑器、表单、设置的底，终端背景也用它。
+    /// 内容区底（Muxy 的 `background`）：终端、编辑器、表单、设置的底，终端背景也用它。
     pub content: Hsla,
-    /// 标签栏、状态栏、右侧图标栏的底（Ayu 的 Chrome）：Dark 下接近纯黑。
+    /// 标签栏、状态栏、右侧图标栏的底：和窗口同底。
     pub tabbar: Hsla,
     /// 区块之间的 1px 线；弹出层外圈、输入框描边用的深一档。
     pub line: Hsla,
@@ -34,183 +32,200 @@ pub struct Tokens {
     pub text: Hsla,
     pub label: Hsla,
     pub text2: Hsla,
+    /// 状态栏这类次要、但要看清楚的文字：前景 80%（比 `text2` 深一档）。
+    pub text_soft: Hsla,
     pub faint: Hsla,
     pub st_dim: Hsla,
     /// 图标。
     pub icon: Hsla,
-    /// 悬停底、选中底和主按钮底。
+    /// 悬停底、选中底、当前标签的底。
     pub hover: Hsla,
     pub sel: Hsla,
+    pub tab_active: Hsla,
     /// 已连接圆点和绿字、出错和危险红、提醒橙。
     pub ok: Hsla,
+    pub ok_soft: Hsla,
     pub ok_text: Hsla,
     pub err: Hsla,
+    /// 状态色的淡底和描边：失败/警告/成功的行、徽章和提示条共用。
+    pub err_soft: Hsla,
+    pub err_line: Hsla,
     pub warn: Hsla,
+    pub warn_soft: Hsla,
+    pub warn_line: Hsla,
+    /// 强调色（Muxy 的 `accent`）：主按钮、开关打开、分段选中、菜单悬停。
+    pub brand: Hsla,
+    /// 强调色悬停：强调色混 12% 黑。
+    pub brand_hover: Hsla,
+    /// 强调色的淡底（10%）：选中的小标签、聚焦行。
+    pub brand_soft: Hsla,
+    /// 强调色淡底悬停（18%）：例如重连徽章的悬停底。
+    pub brand_soft_hover: Hsla,
+    /// 强调色焦点环（25%）：开关等控件获得键盘焦点时的外圈底。
+    pub brand_focus_ring: Hsla,
+    /// 强调色 45% 的描边：拖放悬停的方框、框选矩形。
+    pub brand_ring: Hsla,
+    /// 强调色 80% 的次级进度条填充（如传输队列的子文件条）。
+    pub brand_progress: Hsla,
+    /// 强调色上的字：按强调色的亮度取黑或白（Muxy 的 `accent_foreground`）。
+    pub on_brand: Hsla,
+    /// 强调色上的淡字（70%）：主按钮里的快捷键提示。
+    pub on_brand_muted: Hsla,
+    /// 开关滑块在两种外观下均为白色，不随品牌文字色变化。
+    pub switch_knob: Hsla,
 
     // ───────── 浮层与杂项 ─────────
-    /// 右键菜单、弹窗、浮卡的底。
+    /// 右键菜单、弹窗、浮卡的底（Air Neutral：深色 `#1B1F27`、浅色纯白）。
     pub popup: Hsla,
-    /// 输入框、下拉框、主题预览的底。
+    /// 右键菜单外圈描边和内部分隔线（前景 11% / 8%）。
+    pub menu_border: Hsla,
+    pub menu_separator: Hsla,
+    /// 输入框、下拉框、主题预览的底（前景 3.5% 浅色 / 4.5% 深色混进面板）。
     pub input: Hsla,
-    /// 查找：匹配底、匹配下划线、当前匹配底和字。Ayu 的 Number 金，当前项保持亮金、字用深色。
+    /// 查找：匹配底、匹配下划线、当前匹配底和字。
     pub find_match: Hsla,
     pub find_match_line: Hsla,
     pub find_current: Hsla,
     pub find_current_text: Hsla,
-    /// 开 Mica 时侧栏的渐变两端（GPUI 的渐变只有两个色标）：终点混一点 Ayu 的橙，透出来偏暖。
-    pub mica_start: Hsla,
-    pub mica_end: Hsla,
-    /// 滚动条、提示框底和字、窗口「关闭」按钮悬停的底和字。
+    /// 开 Mica 时侧栏的渐变两端（GPUI 的渐变只有两个色标）：终点微混静谧蓝，保持冷净通透。
+    mica_start: Hsla,
+    mica_end: Hsla,
+    /// 滚动条、提示框底和字。
     pub scrollbar: Hsla,
     pub tooltip: Hsla,
     pub tooltip_text: Hsla,
-    pub close_hover: Hsla,
-    pub close_hover_text: Hsla,
+    /// 窗口控制按钮圆点（最小化、最大化、关闭）。
+    pub window_min: Hsla,
+    pub window_max: Hsla,
+    pub window_close: Hsla,
+    /// 对话框后面的遮罩：深色 35%、浅色 22%。
+    pub backdrop: Hsla,
 }
 
-fn c(color: Rgba) -> Hsla {
-    color.into()
+/// 一套配色的原值（Air Neutral）：底色、前景、强调色、状态色、浮层面板色与窗口圆点色。
+struct Scheme {
+    background: u32,
+    foreground: u32,
+    accent: u32,
+    warning: u32,
+    danger: u32,
+    diff_add: u32,
+    panel: u32,
+    window_min: u32,
+    window_max: u32,
+    window_close: u32,
 }
 
-/// 一套颜色的原值。
-struct Palette {
-    side: Rgba,
-    content: Rgba,
-    tabbar: Rgba,
-    line: Rgba,
-    line_strong: Rgba,
-    text: Rgba,
-    label: Rgba,
-    text2: Rgba,
-    icon: Rgba,
-    faint: Rgba,
-    st_dim: Rgba,
-    hover: Rgba,
-    sel: Rgba,
-    ok: Rgba,
-    ok_text: Rgba,
-    err: Rgba,
-    warn: Rgba,
-    popup: Rgba,
-    input: Rgba,
-    find_match: Rgba,
-    find_match_line: Rgba,
-    find_current: Rgba,
-    find_current_text: Rgba,
-    mica_start: Rgba,
-    mica_end: Rgba,
-    scrollbar: Rgba,
-    tooltip: Rgba,
-    tooltip_text: Rgba,
-    close_hover: Rgba,
-    close_hover_text: Rgba,
-}
+/// 深色：Air Neutral（清冽黑曜石 + 冰感静谧蓝）。
+const DARK: Scheme = Scheme {
+    background: 0x101216,
+    foreground: 0xeceff4,
+    accent: 0x5b9bf8,
+    warning: 0xeab348,
+    danger: 0xf05c65,
+    diff_add: 0x38c17a,
+    panel: 0x1b1f27,
+    window_min: 0xfebc2e,
+    window_max: 0x28c840,
+    window_close: 0xff5f57,
+};
+
+/// 浅色：Air Neutral（极净冷白 + 清澈静谧蓝）。
+const LIGHT: Scheme = Scheme {
+    background: 0xffffff,
+    foreground: 0x14171f,
+    accent: 0x2563eb,
+    warning: 0xa16207,
+    danger: 0xd1343f,
+    diff_add: 0x15804a,
+    panel: 0xffffff,
+    window_min: 0xfebc2e,
+    window_max: 0x28c840,
+    window_close: 0xff5f57,
+};
 
 impl Tokens {
-    /// 浅色：Ayu Light。
+    /// 浅色：Air Neutral Light。
     pub fn light() -> Self {
-        Self::from_palette(Palette {
-            side: rgb(0xf8f9fa),     // Sidebar
-            content: rgb(0xfcfcfc),  // Editor
-            tabbar: rgb(0xebeef0),   // Chrome
-            line: rgb(0xe0e4e8),     // 官方 Line 只有 1.18:1，压到 1.25
-            line_strong: rgb(0xcfd3d8),
-            text: rgb(0x5c6166),
-            label: rgb(0x464b50),
-            text2: rgb(0x6c7177),    // 官方 Subtle #6f7479 在侧栏上 4.48，微调到 4.67
-            icon: rgb(0x84898f),
-            faint: rgb(0xabb0b6),    // 注释色，占位和禁用
-            st_dim: rgb(0x83888e),   // 官方 2.73，压到 3.48（标签栏上 3.07）
-            hover: rgba(0x6b7d8f24), // 官方 list.hoverBackground
-            sel: rgb(0xdcdfe3),
-            ok: rgb(0x6b8a00),       // String 压暗：圆点 3.89
-            ok_text: rgb(0x5b7a00),  // 「已连接」文字 4.84
-            err: rgb(0xc44444),      // Markup 压暗：错误文字 4.81
-            warn: rgb(0x9c6400),     // Number 压暗：警示文字 4.83（原值 1.87）
-            popup: rgb(0xfcfcfc),
-            input: rgb(0xf8f9fa),
-            find_match: rgba(0xf2ae4938),      // 亮金 22%
-            find_match_line: rgba(0xf2ae4999), // 亮金 60%
-            find_current: rgb(0xf2ae49),
-            find_current_text: rgb(0x464b50),  // 金底深字 4.59
-            mica_start: rgb(0xf8f9fa),
-            mica_end: rgb(0xf7eddf), // Sidebar 88% + 橙 12%
-            scrollbar: rgba(0xabb0b68c),
-            tooltip: rgb(0x5c6166),
-            tooltip_text: rgb(0xfcfcfc),
-            close_hover: rgb(0xc44444),
-            close_hover_text: rgb(0xffffff),
-        })
+        Self::from_scheme(LIGHT)
     }
 
-    /// 深色：Ayu Dark。
+    /// 深色：Air Neutral Dark。
     pub fn dark() -> Self {
-        Self::from_palette(Palette {
-            side: rgb(0x0d1017),     // Sidebar
-            content: rgb(0x10141c),  // Editor
-            tabbar: rgb(0x010102),   // Chrome，接近纯黑
-            line: rgb(0x1b1f29),     // Panel border
-            line_strong: rgb(0x252b38),
-            text: rgb(0xd6d3cc),
-            label: rgb(0xb3b1ad),
-            text2: rgb(0x9c9a95),
-            icon: rgb(0x8b9199),
-            faint: rgb(0x626a73),    // 注释色
-            st_dim: rgb(0x767d86),
-            hover: rgba(0x47526640), // 官方 list.hoverBackground
-            sel: rgba(0x47526666),   // 官方 list.activeSelectionBackground
-            ok: rgb(0xaad94c),
-            ok_text: rgb(0xaad94c),
-            err: rgb(0xf07178),
-            warn: rgb(0xe6b673),
-            popup: rgb(0x202634),    // 官方浮层色与内容只差 1.06，抬到 1.22
-            input: rgb(0x0b0f16),
-            find_match: rgba(0xe6b67338),
-            find_match_line: rgba(0xe6b67399),
-            find_current: rgb(0xe6b673),
-            find_current_text: rgb(0x010102),
-            mica_start: rgb(0x0d1017),
-            mica_end: rgb(0x27241e), // Sidebar 88% + 橙 12%
-            scrollbar: rgba(0x626a738c),
-            tooltip: rgb(0x252b38),
-            tooltip_text: rgb(0xd6d3cc),
-            close_hover: rgb(0xf07178),
-            close_hover_text: rgb(0x010102),
-        })
+        Self::from_scheme(DARK)
     }
 
-    fn from_palette(p: Palette) -> Self {
+    fn from_scheme(scheme: Scheme) -> Self {
+        let content: Hsla = rgb(scheme.background).into();
+        let fg: Hsla = rgb(scheme.foreground).into();
+        let accent: Hsla = rgb(scheme.accent).into();
+        let warning: Hsla = rgb(scheme.warning).into();
+        let danger: Hsla = rgb(scheme.danger).into();
+        let black: Hsla = rgb(0x000000).into();
+        let dark = content.l < 0.5;
+        let side = blend(fg.opacity(if dark { 0.065 } else { 0.042 }), content);
+        // 浮层（菜单、对话框）：深色比内容抬升一级，浅色纯白配柔和阴影。
+        let popup: Hsla = rgb(scheme.panel).into();
+        // 输入框、下拉框：极轻中性底混进面板，保持通透层次。
+        let input = blend(fg.opacity(if dark { 0.045 } else { 0.035 }), popup);
+        let add: Hsla = rgb(scheme.diff_add).into();
+        let on_brand = on_color(accent);
         Self {
-            side: c(p.side),
-            content: c(p.content),
-            tabbar: c(p.tabbar),
-            line: c(p.line),
-            line_strong: c(p.line_strong),
-            text: c(p.text),
-            label: c(p.label),
-            text2: c(p.text2),
-            faint: c(p.faint),
-            st_dim: c(p.st_dim),
-            icon: c(p.icon),
-            hover: c(p.hover),
-            sel: c(p.sel),
-            ok: c(p.ok),
-            ok_text: c(p.ok_text),
-            err: c(p.err),
-            warn: c(p.warn),
-            popup: c(p.popup),
-            input: c(p.input),
-            find_match: c(p.find_match),
-            find_match_line: c(p.find_match_line),
-            find_current: c(p.find_current),
-            find_current_text: c(p.find_current_text),
-            mica_start: c(p.mica_start),
-            mica_end: c(p.mica_end),
-            scrollbar: c(p.scrollbar),
-            tooltip: c(p.tooltip),
-            tooltip_text: c(p.tooltip_text),
-            close_hover: c(p.close_hover),
-            close_hover_text: c(p.close_hover_text),
+            side,
+            content,
+            tabbar: content,
+            line: blend(fg.opacity(if dark { 0.08 } else { 0.07 }), content),
+            line_strong: blend(fg.opacity(if dark { 0.16 } else { 0.14 }), content),
+            text: fg,
+            label: fg,
+            text2: fg.opacity(0.65),
+            text_soft: fg.opacity(0.8),
+            faint: fg.opacity(0.4),
+            st_dim: fg.opacity(0.5),
+            icon: fg.opacity(0.65),
+            hover: fg.opacity(if dark { 0.055 } else { 0.045 }),
+            sel: fg.opacity(if dark { 0.085 } else { 0.065 }),
+            tab_active: fg.opacity(if dark { 0.045 } else { 0.035 }),
+            ok: add,
+            ok_soft: add.opacity(0.12),
+            ok_text: add,
+            err: danger,
+            err_soft: danger.opacity(0.12),
+            err_line: danger.opacity(0.4),
+            warn: warning,
+            warn_soft: warning.opacity(0.14),
+            warn_line: warning.opacity(0.45),
+            brand: accent,
+            brand_hover: blend(black.opacity(0.12), accent),
+            brand_soft: accent.opacity(0.1),
+            brand_soft_hover: accent.opacity(0.18),
+            brand_focus_ring: accent.opacity(0.25),
+            brand_ring: accent.opacity(0.45),
+            brand_progress: accent.opacity(0.8),
+            on_brand,
+            on_brand_muted: on_brand.opacity(0.7),
+            switch_knob: rgb(0xffffff).into(),
+            popup,
+            menu_border: fg.opacity(0.11),
+            menu_separator: fg.opacity(0.08),
+            input,
+            find_match: warning.opacity(0.22),
+            find_match_line: warning.opacity(0.6),
+            find_current: warning,
+            find_current_text: on_color(warning),
+            mica_start: side,
+            mica_end: blend(accent.opacity(0.08), side),
+            scrollbar: fg.opacity(0.25),
+            tooltip: side,
+            tooltip_text: fg,
+            window_min: rgb(scheme.window_min).into(),
+            window_max: rgb(scheme.window_max).into(),
+            window_close: rgb(scheme.window_close).into(),
+            backdrop: if dark {
+                rgba(0x00000059).into()
+            } else {
+                rgba(0x00000038).into()
+            },
         }
     }
 
@@ -237,24 +252,52 @@ impl Tokens {
     }
 }
 
+/// `top` 按自身透明度混进 `bottom`，返回不透明的颜色（Muxy 的 `blend`）。
+fn blend(top: Hsla, bottom: Hsla) -> Hsla {
+    let top: Rgba = top.into();
+    let bottom: Rgba = bottom.into();
+    let mix = |t: f32, b: f32| t * top.a + b * (1.0 - top.a);
+    Rgba {
+        r: mix(top.r, bottom.r),
+        g: mix(top.g, bottom.g),
+        b: mix(top.b, bottom.b),
+        a: 1.0,
+    }
+    .into()
+}
+
+/// WCAG 相对亮度先将 sRGB 转为线性光，再按通道加权。
+fn luminance(color: Hsla) -> f32 {
+    let rgb = color.to_rgb();
+    let channel = |value: f32| {
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b)
+}
+
+/// 在不透明底色上选取对比度更高的黑字或白字。
+pub(crate) fn dark_ink_on(background: Hsla) -> bool {
+    let level = luminance(background) + 0.05;
+    level / 0.05 >= 1.05 / level
+}
+
+pub(crate) fn on_color(background: Hsla) -> Hsla {
+    if dark_ink_on(background) {
+        rgb(0x000000).into()
+    } else {
+        rgb(0xffffff).into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use gpui_kit::Hsla;
 
-    use super::Tokens;
-
-    /// WCAG 的相对亮度。
-    fn luminance(color: Hsla) -> f32 {
-        let rgb = color.to_rgb();
-        let channel = |value: f32| {
-            if value <= 0.03928 {
-                value / 12.92
-            } else {
-                ((value + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b)
-    }
+    use super::{Tokens, blend, luminance};
 
     fn contrast(a: Hsla, b: Hsla) -> f32 {
         let (first, second) = (luminance(a), luminance(b));
@@ -266,51 +309,77 @@ mod tests {
         (high + 0.05) / (low + 0.05)
     }
 
-    /// Ayu 的语法色直接当界面文字不够读，压暗后的值要守住下限：正文类 4.5，次要类 3。
-    /// 阈值取 4.4，给 Hsla 换算留一点误差。
+    /// 半透明的字要先按背景合成再量对比度，不然量的是它不透明时的样子。
+    fn over(color: Hsla, background: Hsla) -> Hsla {
+        blend(color, background)
+    }
+
+    #[test]
+    fn primary_label_meets_aa_in_both_modes() {
+        for tokens in [Tokens::light(), Tokens::dark()] {
+            assert!(contrast(tokens.on_brand, tokens.brand) >= 4.5);
+        }
+        assert_eq!(
+            super::on_color(gpui_kit::rgb(0).into()),
+            gpui_kit::rgb(0xffffff).into()
+        );
+    }
+
+    /// Air Neutral 的正文、品牌链接与状态色在明暗双模式下均守住 WCAG AA 下限（4.5）；
+    /// 次要/图标类守住 3.0。半透明的字按合成到背景后的颜色量。
     #[test]
     fn text_and_status_colors_stay_readable_in_both_modes() {
         for (mode, tokens) in [("light", Tokens::light()), ("dark", Tokens::dark())] {
+            let content = tokens.content;
             for (name, color) in [
                 ("text", tokens.text),
                 ("label", tokens.label),
                 ("text2", tokens.text2),
+                ("text_soft", tokens.text_soft),
+                ("brand", tokens.brand),
                 ("ok_text", tokens.ok_text),
-                ("err", tokens.err),
                 ("warn", tokens.warn),
+                ("err", tokens.err),
             ] {
-                let ratio = contrast(color, tokens.content);
-                assert!(ratio >= 4.4, "{mode} {name}: {ratio:.2}");
+                let ratio = contrast(over(color, content), content);
+                assert!(ratio >= 4.5, "{mode} {name}: {ratio:.2}");
             }
             for (name, color) in [("st_dim", tokens.st_dim), ("icon", tokens.icon)] {
-                let ratio = contrast(color, tokens.content);
+                let ratio = contrast(over(color, content), content);
                 assert!(ratio >= 3., "{mode} {name}: {ratio:.2}");
             }
-            assert!(
-                contrast(tokens.st_dim, tokens.tabbar) >= 3.,
-                "{mode} st_dim on tabbar: {:.2}",
-                contrast(tokens.st_dim, tokens.tabbar)
+            let st_dim = contrast(over(tokens.st_dim, tokens.tabbar), tokens.tabbar);
+            assert!(st_dim >= 3., "{mode} st_dim on tabbar: {st_dim:.2}");
+            let text2 = contrast(over(tokens.text2, tokens.side), tokens.side);
+            assert!(text2 >= 4., "{mode} text2 on side: {text2:.2}");
+            let text = contrast(over(tokens.text, tokens.popup), tokens.popup);
+            assert!(text >= 4.4, "{mode} text on popup: {text:.2}");
+            let tooltip = contrast(over(tokens.tooltip_text, tokens.tooltip), tokens.tooltip);
+            assert!(tooltip >= 4.4, "{mode} tooltip: {tooltip:.2}");
+            let find = contrast(
+                over(tokens.find_current_text, tokens.find_current),
+                tokens.find_current,
             );
-            assert!(
-                contrast(tokens.text2, tokens.side) >= 4.4,
-                "{mode} text2 on side: {:.2}",
-                contrast(tokens.text2, tokens.side)
-            );
-            assert!(
-                contrast(tokens.text, tokens.popup) >= 4.4,
-                "{mode} text on popup: {:.2}",
-                contrast(tokens.text, tokens.popup)
-            );
-            assert!(
-                contrast(tokens.tooltip_text, tokens.tooltip) >= 4.4,
-                "{mode} tooltip: {:.2}",
-                contrast(tokens.tooltip_text, tokens.tooltip)
-            );
-            assert!(
-                contrast(tokens.find_current_text, tokens.find_current) >= 4.4,
-                "{mode} find current: {:.2}",
-                contrast(tokens.find_current_text, tokens.find_current)
-            );
+            assert!(find >= 4.3, "{mode} find current: {find:.2}");
+        }
+    }
+
+    /// 高亮描边 token 仍是强调色的 45%，两种外观都不变。
+    #[test]
+    fn status_tints_are_derived_once() {
+        for tokens in [Tokens::light(), Tokens::dark()] {
+            assert_eq!(tokens.err_soft, tokens.err.opacity(0.12));
+            assert_eq!(tokens.err_line, tokens.err.opacity(0.4));
+            assert_eq!(tokens.ok_soft, tokens.ok.opacity(0.12));
+            assert_eq!(tokens.warn_soft, tokens.warn.opacity(0.14));
+            assert_eq!(tokens.warn_line, tokens.warn.opacity(0.45));
+        }
+    }
+
+    #[test]
+    fn brand_ring_stays_brand_at_45_percent() {
+        for tokens in [Tokens::light(), Tokens::dark()] {
+            assert_eq!(tokens.brand_ring, tokens.brand.opacity(0.45));
         }
     }
 

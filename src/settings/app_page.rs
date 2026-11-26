@@ -1,5 +1,5 @@
-//! 设置 › 应用（26 号「设置 › 应用」）：窗口（记住窗口大小和位置）、
-//! 数据（数据目录在哪、里面有什么，「打开文件夹」）、关于（版本、许可证）。
+//! 设置 › 应用（26 号「设置 › 应用」）：
+//! 窗口（记住窗口大小和位置）、数据（数据目录在哪、里面有什么，「打开文件夹」）、关于（版本、许可证）。
 
 use gpui_kit::*;
 
@@ -8,7 +8,7 @@ use super::controls::{note, reset_if, row, row_with_note, section, setting_switc
 use super::tab::SettingsTab;
 use crate::app::PRODUCT_NAME;
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, TypeScale};
 use crate::ui::modal::{ModalButtonTone, OnClick, modal_button};
 
 /// MicaTerm 的版本，取自 `Cargo.toml`。
@@ -106,7 +106,13 @@ pub(super) fn app(
     let about_title: SharedString = format!("{PRODUCT_NAME} {VERSION}").into();
 
     vec![
-        section(t!("settings.app.window"), None, true, tokens),
+        section(
+            t!("settings.app.window"),
+            None,
+            true,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row(
             t!("settings.app.remember_window"),
             Some(t!("settings.app.remember_window_description")),
@@ -120,7 +126,13 @@ pub(super) fn app(
             remember,
             tokens,
         ),
-        section(t!("settings.app.data"), None, false, tokens),
+        section(
+            t!("settings.app.data"),
+            None,
+            false,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row_with_note(
             t!("settings.app.data_dir"),
             Some(data_note),
@@ -128,7 +140,13 @@ pub(super) fn app(
             div().children(open_folder),
             tokens,
         ),
-        section(t!("settings.app.about"), None, false, tokens),
+        section(
+            t!("settings.app.about"),
+            None,
+            false,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row(
             div()
                 .id("about-version")

@@ -404,11 +404,20 @@ fn print_summary(summary: &TransferSummary, sync: bool, console: &mut Console) -
     if console.json {
         print_json(summary, console)?;
     } else {
-        let mut line = t!(
-            "cli.summary.transferred",
-            count = summary.files,
-            size = format_bytes(summary.bytes)
-        );
+        let size = format_bytes(summary.bytes);
+        let mut line = if summary.files == 1 {
+            t!(
+                "cli.summary.transferred_one",
+                count = summary.files,
+                size = size
+            )
+        } else {
+            t!(
+                "cli.summary.transferred",
+                count = summary.files,
+                size = size
+            )
+        };
         if summary.skipped > 0 {
             line = if sync {
                 t!(
@@ -443,14 +452,28 @@ fn print_summary(summary: &TransferSummary, sync: bool, console: &mut Console) -
 }
 
 fn progress_line(counters: TransferCounters) -> String {
-    t!(
-        "cli.progress",
-        files = counters.files,
-        total_files = counters.total_files,
-        bytes = format_bytes(counters.bytes),
-        total_bytes = format_bytes(counters.total_bytes)
-    )
-    .to_string()
+    let (bytes, total_bytes) = (
+        format_bytes(counters.bytes),
+        format_bytes(counters.total_bytes),
+    );
+    let line = if counters.total_files == 1 {
+        t!(
+            "cli.progress_one",
+            files = counters.files,
+            total_files = counters.total_files,
+            bytes = bytes,
+            total_bytes = total_bytes
+        )
+    } else {
+        t!(
+            "cli.progress",
+            files = counters.files,
+            total_files = counters.total_files,
+            bytes = bytes,
+            total_bytes = total_bytes
+        )
+    };
+    line.to_string()
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -676,7 +699,13 @@ fn print_host_deleted(deleted: &HostDeleted, console: &mut Console) -> io::Resul
         return print_json(deleted, console);
     }
     let name = &deleted.host.name;
-    let line = if deleted.jump_users > 0 {
+    let line = if deleted.jump_users == 1 {
+        t!(
+            "cli.host.deleted_jump_users_one",
+            name = name,
+            count = deleted.jump_users
+        )
+    } else if deleted.jump_users > 1 {
         t!(
             "cli.host.deleted_jump_users",
             name = name,

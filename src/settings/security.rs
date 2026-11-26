@@ -4,16 +4,15 @@
 //!
 //! 按钮派发保险库的 action（由窗口壳交给 `crate::vault`）；「在本机记住」开关直接改保险库。
 
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{Disableable as _, FocusableExt as _, Sizable as _};
 use gpui_kit::*;
 
 use super::controls::{page_note, row, section};
 use super::tab::SettingsTab;
 use crate::app::{LockVault, ResetVault, SetMasterPassword, UnlockVault};
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, TypeScale};
 use crate::ui::modal::{ModalButtonTone, OnClick, modal_button};
+use crate::ui::toggle::Toggle;
 use crate::vault::{VaultStatus, VaultStore};
 
 /// 点了派发 `action` 的按钮（26 号 `.hbtn.line`；危险操作是 `.hbtn.danger`）；`enabled` 为假时淡掉。
@@ -51,7 +50,14 @@ pub(super) fn security(
     };
     let busy = store.is_busy();
 
-    let mut page = vec![section(t!("settings.security.vault"), None, true, tokens)];
+    let scale = TypeScale::current(cx);
+    let mut page = vec![section(
+        t!("settings.security.vault"),
+        None,
+        true,
+        tokens,
+        scale,
+    )];
     match status {
         VaultStatus::Absent | VaultStatus::Unprotected => page.push(row(
             t!("settings.security.master"),
@@ -97,17 +103,16 @@ pub(super) fn security(
             ));
             let remember = {
                 let vault = vault.clone();
-                Switch::new("security-remember")
-                    .small()
-                    .focus_ring(false)
-                    .checked(remembered)
-                    // 锁着时不知道数据密钥，存不进钥匙串：先解锁。
-                    .disabled(busy || locked)
-                    .accessibility_label(t!("settings.security.remember"))
-                    .on_click(move |checked: &bool, _, cx| {
-                        let checked = *checked;
-                        vault.update(cx, |vault, cx| vault.remember_here(checked, cx));
-                    })
+                Toggle::new(
+                    "security-remember",
+                    t!("settings.security.remember"),
+                    remembered,
+                )
+                // 锁着时不知道数据密钥，存不进钥匙串：先解锁。
+                .disabled(busy || locked)
+                .on_click(move |checked, _, cx| {
+                    vault.update(cx, |vault, cx| vault.remember_here(checked, cx));
+                })
             };
             page.push(row(
                 t!("settings.security.remember"),
@@ -159,7 +164,13 @@ pub(super) fn security(
         window,
         cx,
     );
-    page.push(section(t!("settings.security.danger"), None, false, tokens));
+    page.push(section(
+        t!("settings.security.danger"),
+        None,
+        false,
+        tokens,
+        scale,
+    ));
     page.push(row(
         t!("settings.security.reset"),
         Some(t!("settings.security.reset_note")),

@@ -1,10 +1,9 @@
-//! 唯一的一种弹窗（26 号「连接提示」「主机密钥变了」「解锁保险库」，照 Zed `RemoteConnectionModal`）：
-//! 窗口上方居中、距顶 72、宽 448、圆角 8、外圈 `--line-strong` + 阴影，不压暗背景。
+//! 唯一的一种弹窗：窗口上方居中、距顶 64、宽 400、圆角 12、外圈细线 + 阴影，背后压暗。
 //!
-//! - 头部（可选）高 40：图标 + 标题（13/500）+ 淡色说明，文字按基线对齐、图标单独居中。连接的问答框是
+//! - 头部（可选）高 36：图标 + 标题（500）+ 淡色说明，文字按基线对齐、图标单独居中。连接的问答框是
 //!   服务器图标 + 主机名 + `user@地址:端口`；新建凭据、命令片段是各自的图标 + 「新建凭据」+ 名字这类；
 //! - 正文四周 12 / 14 / 14、上下各一条细线，项之间 8；
-//! - 底部高 44、没有底色：按钮靠右，主按钮浅灰底，按钮上带快捷键（`连接 Enter`）。
+//! - 底部高 40、没有底色：按钮靠右，主按钮强调色，按钮上带快捷键（`连接 Enter`）。
 //!
 //! 弹窗的开关、叠放仍走 [`DialogLayer`](super::DialogLayer)；这里只管样子：[`modal_dialog`] 把
 //! gpui-component 的 `Dialog` 收成这个外框，[`render_modal`] 画里面三段，其余是正文里常用的几样。
@@ -17,21 +16,69 @@ use gpui_kit::*;
 
 use crate::app::CatalogIcon;
 use crate::theme::{
-    MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY, WEIGHT_MEDIUM, baseline_shift, size,
+    Elevation, MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY, WEIGHT_NORMAL, WEIGHT_SEMIBOLD,
+    baseline_shift, opacity, size, ui_font,
 };
+use crate::ui::checkbox::{CheckBox, CheckState};
+use crate::ui::form::{FieldNote, form_field};
 
-/// 头部、底部的高度（26 号 `.cp-h`、`.cp-f`）。
+/// 头部、底部的高度。
 const HEAD: Pixels = px(40.);
 const FOOT: Pixels = px(44.);
 
-/// 把 `Dialog` 收成 26 号的弹窗外框：宽 448、距顶 72、没有内边距（里面三段自己留）、没有右上角 ×、
-/// 不点遮罩关闭。背景、外圈、圆角来自界面主题（`theme::component`）。
-pub fn modal_dialog(dialog: Dialog) -> Dialog {
+/// 带标题和页脚的弹窗，保留底部留白后的正文限高。
+pub(crate) fn modal_body_max_height(
+    viewport: Pixels,
+    bottom_gap: Pixels,
+    minimum: Pixels,
+) -> Pixels {
+    (viewport - size::MODAL_TOP - HEAD - FOOT - bottom_gap).max(minimum)
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use gpui_kit::px;
+
+    use super::{FOOT, HEAD, modal_body_max_height};
+    use crate::theme::size;
+
+    // 这里不能用 `use super::*`：它带进 `gpui_kit::*` 里的 `test` 宏，会盖住内建的 `#[test]`。
+    #[test]
+    fn body_height_reserves_the_rendered_frame_and_respects_the_minimum() {
+        let bottom = px(48.);
+        let minimum = px(240.);
+        let fixed = size::MODAL_TOP + HEAD + FOOT + bottom;
+        assert_eq!(
+            modal_body_max_height(fixed + px(300.), bottom, minimum),
+            px(300.)
+        );
+        assert_eq!(
+            modal_body_max_height(fixed + px(120.), bottom, minimum),
+            minimum
+        );
+    }
+}
+
+/// 紧凑模态弹窗外框（`MODAL_SM = 400px`）：确认、连接提示、主机密钥、保险库、凭据、片段、SFTP。
+pub fn modal_dialog(dialog: Dialog, tokens: &Tokens) -> Dialog {
+    dialog_frame(dialog, size::MODAL_SM, tokens)
+}
+
+/// 宽模态弹窗外框（`MODAL_MD = 480px`）：新增/编辑主机等复杂表单。
+pub fn modal_dialog_wide(dialog: Dialog, tokens: &Tokens) -> Dialog {
+    dialog_frame(dialog, size::MODAL_MD, tokens)
+}
+
+fn dialog_frame(dialog: Dialog, width: Pixels, tokens: &Tokens) -> Dialog {
     dialog
-        .w(size::MODAL_WIDTH)
+        .w(width)
         .margin_top(size::MODAL_TOP)
         .p_0()
-        .rounded(size::RADIUS_LG)
+        .rounded(size::RADIUS_MODAL)
+        // 底色和投影都画在外框上：外框是圆角的，阴影跟着圆角走；放在里面那层的话，
+        // 它会被弹出层的方框裁成直角阴影，面板角上就会露出一块方形的暗斑。
+        .bg(tokens.popup)
+        .shadow(Elevation::Modal.shadow(tokens.popup))
         .close_button(false)
         .overlay_closable(false)
 }
@@ -56,17 +103,22 @@ pub fn render_modal(
     cx: &App,
 ) -> Div {
     let scale = TypeScale::current(cx);
+    let has_head = head.is_some();
     div()
         .flex()
         .flex_col()
-        .text_size(scale.ui)
+        .overflow_hidden()
+        .font(ui_font())
+        .text_size(scale.body)
         .text_color(tokens.text)
+        .rounded(size::RADIUS_MODAL)
+        // 面板自己画底：内容层不透出下面的窗口，圆角也和外框一致。
+        .bg(tokens.popup)
         .children(head.map(|head| {
-            // 13 的主机名和 12 的地址字号不同：地址挪到主机名的基线上（盒子居中时两段的字底差约 1px）。
             let shift = baseline_shift(
                 window,
-                (UI_FONT_FAMILY, scale.side),
-                (UI_FONT_FAMILY, scale.ui),
+                (UI_FONT_FAMILY, scale.title),
+                (UI_FONT_FAMILY, scale.body),
                 HEAD,
             );
             div()
@@ -75,12 +127,12 @@ pub fn render_modal(
                 .items_center()
                 .gap(px(8.))
                 .h(HEAD)
-                .px(px(14.))
+                .px(px(20.))
                 .child(
                     div()
                         .flex_none()
                         .text_color(tokens.icon)
-                        .child(Icon::new(head.icon).size(px(14.))),
+                        .child(Icon::new(head.icon).size(size::ICON_LG)),
                 )
                 .child(
                     div()
@@ -89,8 +141,8 @@ pub fn render_modal(
                         .aria_label(head.title.clone())
                         .flex_none()
                         .line_height(HEAD)
-                        .text_size(scale.side)
-                        .font_weight(WEIGHT_MEDIUM)
+                        .text_size(scale.title)
+                        .font_weight(WEIGHT_SEMIBOLD)
                         .child(head.title),
                 )
                 .children(head.detail.map(|detail| {
@@ -112,10 +164,9 @@ pub fn render_modal(
                 .flex()
                 .flex_col()
                 .gap(px(8.))
-                .pt(px(12.))
-                .px(px(14.))
-                .pb(px(14.))
-                .border_t(size::LINE)
+                .py(px(12.))
+                .px(px(20.))
+                .when(has_head, |body| body.border_t(size::LINE))
                 .border_b(size::LINE)
                 .border_color(tokens.line)
                 .child(body),
@@ -126,9 +177,9 @@ pub fn render_modal(
                 .flex_none()
                 .items_center()
                 .justify_end()
-                .gap(px(6.))
+                .gap(px(8.))
                 .h(FOOT)
-                .px(px(10.))
+                .px(px(20.))
                 .child(footer),
         )
 }
@@ -159,22 +210,41 @@ pub fn modal_button<I: Into<ElementId>, L: Into<SharedString>>(
     tone: ModalButtonTone,
     on_click: Option<OnClick>,
     tokens: &Tokens,
-    window: &Window,
+    _window: &Window,
     cx: &App,
 ) -> impl IntoElement + use<I, L> {
     let disabled = on_click.is_none();
     let scale = TypeScale::current(cx);
     let label = label.into();
-    let shift = baseline_shift(
-        window,
-        (UI_FONT_FAMILY, scale.ui),
-        (MONO_FONT_FAMILY, scale.mono_small),
-        size::BUTTON,
-    ) - px(0.5);
     let hover = match tone {
-        ModalButtonTone::Danger => tokens.err.opacity(0.08),
-        _ => tokens.hover,
+        ModalButtonTone::Danger => tokens.err_soft,
+        ModalButtonTone::Primary => tokens.brand_hover,
+        ModalButtonTone::Line => tokens.sel,
+        ModalButtonTone::Plain => tokens.hover,
     };
+    let keys_color = match tone {
+        ModalButtonTone::Primary => tokens.on_brand_muted,
+        _ => tokens.st_dim,
+    };
+    // 文案和快捷键合成一段文本：中文字形来自回退字体，和拉丁字形的基线位置不同，
+    // 分成两个元素各自排版会差一两个像素；同一行文本里的字共用一条基线。
+    let (text, keys_range) = match keys {
+        Some(keys) => {
+            let start = label.len();
+            let text: SharedString = format!("{label}  {keys}").into();
+            (text, Some(start..start + 2 + keys.len()))
+        }
+        None => (label.clone(), None),
+    };
+    let highlights = keys_range.into_iter().map(|range| {
+        (
+            range,
+            HighlightStyle {
+                color: Some(keys_color),
+                ..Default::default()
+            },
+        )
+    });
     div()
         .id(id.into())
         .test_support()
@@ -183,38 +253,38 @@ pub fn modal_button<I: Into<ElementId>, L: Into<SharedString>>(
         .flex_none()
         .items_center()
         .gap(px(8.))
-        .h(size::BUTTON)
+        .h(size::CONTROL_LG)
         .px(px(12.))
-        .rounded(size::RADIUS)
+        .rounded(size::RADIUS_MD)
+        .text_size(scale.sm)
+        .line_height(px(16.))
+        .font_weight(WEIGHT_NORMAL)
         .text_color(tokens.label)
         .whitespace_nowrap()
         .map(|button| match tone {
             ModalButtonTone::Plain => button,
-            ModalButtonTone::Primary => button.bg(tokens.sel).text_color(tokens.text),
-            ModalButtonTone::Line => button.border_1().border_color(tokens.line_strong),
+            ModalButtonTone::Primary => button
+                .bg(tokens.brand)
+                .border_1()
+                .border_color(tokens.brand)
+                .text_color(tokens.on_brand),
+            ModalButtonTone::Line => button
+                .bg(tokens.tab_active)
+                .border_1()
+                .border_color(tokens.line_strong),
             ModalButtonTone::Danger => button
                 .text_color(tokens.err)
                 .border_1()
-                .border_color(tokens.err.opacity(0.45)),
+                .border_color(tokens.err_line),
         })
-        .when(disabled, |button| button.opacity(0.5))
+        .when(disabled, |button| button.opacity(opacity::DISABLED))
         .when_some(on_click, |button, on_click| {
             button
                 .cursor_pointer()
                 .hover(move |style| style.bg(hover))
                 .on_click(on_click)
         })
-        .child(div().line_height(size::BUTTON).child(label))
-        .children(keys.map(|keys| {
-            div()
-                .relative()
-                .top(shift)
-                .line_height(size::BUTTON)
-                .font_family(MONO_FONT_FAMILY)
-                .text_size(scale.mono_small)
-                .text_color(tokens.st_dim)
-                .child(keys)
-        }))
+        .child(StyledText::new(text).with_highlights(highlights))
 }
 
 /// 正文的那句问话（`.cp-q`）：次要色。
@@ -230,29 +300,41 @@ pub fn modal_note(text: impl Into<SharedString>, tokens: &Tokens) -> Div {
     div().text_color(tokens.st_dim).child(text.into())
 }
 
-/// 一行带图标的标题（`.cp-warn`）：`danger` 时红字 500，否则正文色、图标是图标色。
-/// 上轻下重的图标（锁）上移 0.5（`.cp-warn.plain svg`）。
+/// 一行带图标的标题（`.cp-warn`）：`danger` 时红字 500（在已有头部的对话框内作警示副标题），
+/// 非 `danger` 时作为无头部弹窗的主标题（15px Semibold + 16px 图标）。
 pub fn modal_warn(
     icon: CatalogIcon,
     text: impl Into<SharedString>,
     danger: bool,
     tokens: &Tokens,
+    cx: &App,
 ) -> Div {
+    let scale = TypeScale::current(cx);
     div()
         .flex()
         .items_center()
         .gap(px(8.))
-        .h(px(20.))
+        .h(px(if danger { 20. } else { 22. }))
         .text_color(if danger { tokens.err } else { tokens.text })
-        .when(danger, |row| row.font_weight(WEIGHT_MEDIUM))
+        .map(|row| {
+            if danger {
+                row.font_weight(WEIGHT_NORMAL)
+            } else {
+                row.text_size(scale.title).font_weight(WEIGHT_SEMIBOLD)
+            }
+        })
         .child(
             div()
                 .flex_none()
                 .relative()
                 .when(!danger, |icon| icon.top(px(-0.5)).text_color(tokens.icon))
-                .child(Icon::new(icon).size(px(if danger { 16. } else { 14. }))),
+                .child(Icon::new(icon).size(size::ICON_LG)),
         )
-        .child(div().line_height(px(20.)).child(text.into()))
+        .child(
+            div()
+                .line_height(px(if danger { 20. } else { 22. }))
+                .child(text.into()),
+        )
 }
 
 /// 指纹框里的一行：标签、内容，`old` 时内容淡掉（记下的旧密钥）。
@@ -270,7 +352,7 @@ pub fn modal_fingerprint(rows: Vec<FingerprintRow>, tokens: &Tokens, cx: &App) -
         .flex_col()
         .py(px(8.))
         .px(px(10.))
-        .rounded(size::RADIUS)
+        .rounded(size::RADIUS_MD)
         .bg(tokens.content)
         .border_1()
         .border_color(tokens.line)
@@ -293,7 +375,7 @@ pub fn modal_fingerprint(rows: Vec<FingerprintRow>, tokens: &Tokens, cx: &App) -
                         .min_w_0()
                         .overflow_hidden()
                         .font_family(MONO_FONT_FAMILY)
-                        .text_size(scale.ui)
+                        .text_size(scale.body)
                         .text_color(if row.old { tokens.st_dim } else { tokens.text })
                         .child(row.value),
                 )
@@ -352,23 +434,12 @@ fn input_box(
     cx: &App,
 ) -> Div {
     let focused = input.read(cx).focus_handle(cx).is_focused(window);
-    div()
-        .when(disabled, |field| field.opacity(0.5))
+    crate::ui::input::frame(div(), tokens, invalid, focused)
+        .when(disabled, |field| field.opacity(opacity::DISABLED))
         .flex()
         .items_center()
-        .h(size::INPUT)
-        .pl(px(8.))
-        .pr(px(4.))
-        .rounded(size::RADIUS)
-        .bg(tokens.content)
-        .border_1()
-        .border_color(if invalid {
-            tokens.err
-        } else if focused {
-            tokens.icon
-        } else {
-            tokens.line_strong
-        })
+        .pl(crate::ui::input::INSET)
+        .pr(crate::ui::input::TRAILING)
         .when(kind == ModalInputKind::Mono, |field| {
             field.font_family(MONO_FONT_FAMILY)
         })
@@ -379,18 +450,16 @@ fn input_box(
                     .aria_label(label)
                     .appearance(false)
                     .small()
-                    // 内边距由外面这层给（左 8）；Input 自己那层清掉，不然文字离边框差不多 16。
                     .px_0()
-                    // `.small()` 的字是 0.875rem（约 10.5）；26 的输入框跟界面字号走。
-                    .text_size(TypeScale::current(cx).ui)
+                    .text_size(TypeScale::current(cx).sm)
+                    .line_height(px(16.))
                     .disabled(disabled)
                     .when(kind == ModalInputKind::Secret, |input| input.mask_toggle()),
             ),
         )
 }
 
-/// 多行输入框：和 [`modal_input`] 一个样子（内容底、细边，聚焦时边深一档，`invalid` 时红边），
-/// 等宽字（命令片段的命令、贴进来的私钥）。元素 id 是 `id`，外面这层就是它，点哪儿都进到框里。
+/// 多行输入框：有内容时用等宽字（命令片段的命令、贴进来的私钥），为空显示占位提示时用界面字体。
 #[allow(clippy::too_many_arguments)]
 pub fn modal_textarea(
     id: &'static str,
@@ -401,35 +470,38 @@ pub fn modal_textarea(
     window: &Window,
     cx: &App,
 ) -> impl IntoElement + use<> {
-    let focused = state.read(cx).focus_handle(cx).is_focused(window);
+    let read = state.read(cx);
+    let focused = read.focus_handle(cx).is_focused(window);
+    let empty = read.value().is_empty();
     div()
         .id(id)
         .test_support()
         .aria_label(label)
         .w_full()
-        .rounded(size::RADIUS)
-        .bg(tokens.content)
+        .rounded(size::RADIUS_MD)
+        .bg(tokens.input)
         .border_1()
         .border_color(if invalid {
             tokens.err
         } else if focused {
-            tokens.icon
+            tokens.brand
         } else {
             tokens.line_strong
         })
         .child(
-            // Textarea 把中档的内边距（左右 10、上下 8）设进编辑区，外面写的内边距去不掉：
-            // 四周往外撑 2，字离边框就是左右 8、上下 6，和单行框的字对齐。
             Textarea::new(state)
                 .appearance(false)
                 .m(px(-2.))
-                .font_family(MONO_FONT_FAMILY)
-                .text_size(TypeScale::current(cx).mono_small),
+                .font_family(if empty {
+                    UI_FONT_FAMILY
+                } else {
+                    MONO_FONT_FAMILY
+                })
+                .text_size(TypeScale::current(cx).sm),
         )
 }
 
-/// 勾选框（`.cp-chk`）：12 的方块（100/125/150/200% 下都是整像素），勾上时是正文色底、白勾；
-/// 后面是文字和淡色说明。点整行切换（`on_toggle`）。
+/// 勾选框：12 的方块，勾上时是强调色底、对比色勾；后面是文字和淡色说明。
 pub fn modal_checkbox<I: Into<ElementId>, L: Into<SharedString>>(
     id: I,
     checked: bool,
@@ -452,39 +524,32 @@ pub fn modal_checkbox<I: Into<ElementId>, L: Into<SharedString>>(
         .flex()
         .items_center()
         .gap(px(8.))
-        .h(px(20.))
+        .h(size::CONTROL_SM)
         .cursor_pointer()
         .on_click(on_toggle)
+        // 方框本体和 SFTP 权限矩阵共用；整行的 id、无障碍、标签和点击留在这一行上。
         .child(
-            div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .justify_center()
-                .size(size::CHECKBOX)
-                .rounded(px(3.))
-                .map(|box_| {
-                    if checked {
-                        box_.bg(tokens.text)
-                            .text_color(tokens.content)
-                            .child(Icon::new(CatalogIcon::Check).size(px(10.)))
-                    } else {
-                        box_.border_1().border_color(tokens.line_strong)
-                    }
-                }),
+            CheckBox::new(if checked {
+                CheckState::Checked
+            } else {
+                CheckState::Unchecked
+            })
+            .render(tokens),
         )
-        .child(div().line_height(px(20.)).child(label))
+        .child(div().flex_none().line_height(size::CONTROL_SM).child(label))
         .children(note.map(|note| {
             div()
                 .ml(px(2.))
-                .line_height(px(20.))
+                .min_w_0()
+                .truncate()
+                .line_height(size::CONTROL_SM)
                 .text_color(tokens.st_dim)
                 .child(note)
         }))
 }
 
-/// 带名字的一栏（新建主机页、设主密码这类）：字段名在上（`.mf-l`）、输入框在下，出错时下面一行红字，
-/// 红字的元素 id 是 `<field>-error`（和 `form::FieldNote` 一样，测试靠它）。
+/// 带名字的一栏（新建主机页、设主密码这类）：和 `form::form_field` 同一套标签、间距和错误行，
+/// 输入框换成 `modal_input`；红字的元素 id 是 `<field>-error`（测试靠它）。
 #[allow(clippy::too_many_arguments)]
 pub fn modal_field(
     field: &'static str,
@@ -495,13 +560,10 @@ pub fn modal_field(
     tokens: &Tokens,
     window: &Window,
     cx: &App,
-) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(6.))
-        .child(div().text_color(tokens.label).child(label.clone()))
-        .child(modal_input(
+) -> AnyElement {
+    form_field(
+        Some(label.clone()),
+        modal_input(
             field,
             label,
             input,
@@ -510,13 +572,11 @@ pub fn modal_field(
             tokens,
             window,
             cx,
-        ))
-        .children(error.map(|message| {
-            div()
-                .id(SharedString::from(format!("{field}-error")))
-                .test_support()
-                .aria_label(message.clone())
-                .text_color(tokens.err)
-                .child(message)
-        }))
+        ),
+        error
+            .map(|message| FieldNote::Error { field, message })
+            .into_iter()
+            .collect(),
+        tokens,
+    )
 }

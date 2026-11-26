@@ -1,9 +1,13 @@
 _version: 2
 tabs.close:
+  en: Close Tab
   zh-CN: 关闭标签
 tabs.menu.close:
+  en: Close Tab
   zh-CN: 关闭标签
 tabs.menu.close_others:
+  en: Close Other Tabs
   zh-CN: 关闭其他标签
 tabs.menu.close_right:
+  en: Close Tabs to the Right
   zh-CN: 关闭右侧的标签

@@ -163,7 +163,7 @@ fn an_idle_connection_that_drops_is_reported_without_a_request() {
         loop {
             match next(&worker).await {
                 SftpEvent::Disconnected(reason) => {
-                    assert_eq!(reason, "SFTP 连接中断，请重新连接");
+                    assert_eq!(reason, "The SFTP connection dropped; reconnect to continue");
                     break;
                 }
                 SftpEvent::Connected { .. } => panic!("still connected"),

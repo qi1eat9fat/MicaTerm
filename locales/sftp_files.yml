@@ -4,100 +4,149 @@ _version: 2
 # 部分文案来自 since2006/shell-rs @ b2a307a: locales/explorer.yml
 
 sftp_files.cancel:
+  en: Cancel
   zh-CN: 取消
 sftp_files.new.folder_title:
+  en: New Folder
   zh-CN: 新建文件夹
 sftp_files.new.file_title:
+  en: New File
   zh-CN: 新建文件
 sftp_files.new.folder_name:
+  en: New Folder
   zh-CN: 新建文件夹
 sftp_files.new.file_name:
+  en: New File.txt
   zh-CN: 新建文件.txt
 sftp_files.new.label:
+  en: Name
   zh-CN: 名称
 sftp_files.new.commit:
+  en: Create
   zh-CN: 创建
 sftp_files.rename.title:
+  en: Rename
   zh-CN: 重命名
 sftp_files.rename.label:
+  en: New Name
   zh-CN: 新名称
 sftp_files.rename.commit:
+  en: Rename
   zh-CN: 重命名
 sftp_files.name.empty:
+  en: Name is required
   zh-CN: 名称不能为空
 sftp_files.name.dots:
+  en: 'The name cannot be "." or ".."'
   zh-CN: 名称不能是「.」或「..」
 sftp_files.name.slash:
+  en: 'The name cannot contain "/"'
   zh-CN: 名称不能包含「/」
 sftp_files.name.windows_chars:
+  en: 'The name cannot contain these characters: \ / : * ? " < > |'
   zh-CN: 名称不能包含这些字符：\ / ： * ? " < > |
 sftp_files.name.unchanged:
+  en: The name did not change
   zh-CN: 名称未改变
 sftp_files.name.exists:
+  en: 'An item named "%{name}" already exists'
   zh-CN: 已有名为「%{name}」的项目
 sftp_files.delete.title:
+  en: Delete
   zh-CN: 删除
 sftp_files.delete.question_one:
+  en: 'Delete "%{name}"?'
   zh-CN: 确定删除「%{name}」吗？
 sftp_files.delete.question_many:
+  en: "Delete the %{count} selected items?"
   zh-CN: 确定删除选中的 %{count} 项吗？
 sftp_files.delete.remote:
+  en: Remote files cannot be recovered; a folder is deleted with all of its contents.
   zh-CN: 远程文件无法恢复，目录会连同其中全部内容一起删除。
 sftp_files.delete.recycle_bin:
+  en: The items will be moved to the Recycle Bin.
   zh-CN: 项目会移到回收站。
 sftp_files.delete.trash:
+  en: The items will be moved to the Trash.
   zh-CN: 项目会移到废纸篓。
 sftp_files.delete.confirm:
+  en: Delete
   zh-CN: 删除
 sftp_files.operation.delete_failed:
+  en: Delete failed
   zh-CN: 删除失败
 sftp_files.operation.rename_failed:
+  en: Rename failed
   zh-CN: 重命名失败
 sftp_files.operation.create_failed:
+  en: Create failed
   zh-CN: 新建失败
 sftp_files.operation.permissions_failed:
+  en: Changing permissions failed
   zh-CN: 修改权限失败
 sftp_files.properties.title:
+  en: Properties
   zh-CN: 属性
 sftp_files.properties.subtitle_one:
+  en: "%{name} · %{place}"
   zh-CN: "%{name} · %{place}"
 sftp_files.properties.subtitle_many:
+  en: "%{count} items · %{place}"
   zh-CN: "%{count} 项 · %{place}"
 sftp_files.properties.location:
+  en: Location
   zh-CN: 位置
 sftp_files.properties.owner:
+  en: Owner
   zh-CN: 所有者
 sftp_files.properties.owner_group:
+  en: "%{owner} : %{group}"
   zh-CN: "%{owner} : %{group}"
 sftp_files.properties.mixed:
+  en: (mixed)
   zh-CN: （不一致）
 sftp_files.properties.unknown:
+  en: —
   zh-CN: —
 sftp_files.properties.rights:
+  en: Permissions
   zh-CN: 权限
 sftp_files.properties.class_owner:
+  en: Owner
   zh-CN: 所有者
 sftp_files.properties.class_group:
+  en: Group
   zh-CN: 组
 sftp_files.properties.class_others:
+  en: Others
   zh-CN: 其他
 sftp_files.properties.read:
+  en: Read
   zh-CN: 读
 sftp_files.properties.write:
+  en: Write
   zh-CN: 写
 sftp_files.properties.execute:
+  en: Execute
   zh-CN: 执行
 sftp_files.properties.octal:
+  en: Octal
   zh-CN: 八进制
 sftp_files.properties.links:
+  en: Symbolic links have no permissions of their own.
   zh-CN: 符号链接没有独立的权限。
 sftp_files.properties.no_rights:
+  en: The host did not report permissions for these items.
   zh-CN: 主机没有告诉这些项目的权限。
 sftp_files.properties.recursive:
+  en: Apply recursively to subfolders and files
   zh-CN: 递归应用到子目录和文件
 sftp_files.properties.dir_x:
+  en: Add execute permission for directories (X)
   zh-CN: 为目录添加执行权限（X）
 sftp_files.properties.commit:
+  en: OK
   zh-CN: 确定
 sftp_files.properties.unsupported:
+  en: This computer's system does not support changing permissions
   zh-CN: 这台电脑的系统不支持修改权限

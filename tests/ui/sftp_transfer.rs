@@ -1,5 +1,6 @@
-//! SFTP 传输（工单 22）：确认框的四个入口、队列卡片和它的工具条、问题框（冲突、重试、续传）、断开、
-//! 绿点和关闭确认。连接是假的（`FakeSftpProvider`），真协议的上传、下载、续传在 backend 的 `sftp_tests`。
+//! SFTP 传输（工单 22）：上传和下载的各个入口（直接开始，不再先确认）、队列卡片和它的工具条、
+//! 问题框（冲突、重试、续传）、断开、绿点和关闭确认。连接是假的（`FakeSftpProvider`），
+//! 真协议的上传、下载、续传在 backend 的 `sftp_tests`。
 // 参考 since2006/shell-rs @ b2a307a: tests/ui/transfer.rs
 
 use std::path::PathBuf;
@@ -129,18 +130,36 @@ fn select(cx: &mut TestAppContext, fixture: &Fixture, remote: bool, name: &'stat
     });
 }
 
-/// 选下载目录时选到的：引擎只收这台电脑上的完整路径，Windows 上 `/picked` 不算。
-fn picked_folder() -> &'static str {
-    if cfg!(windows) {
-        "C:\\picked"
-    } else {
-        "/picked"
-    }
-}
-
 /// 本地「下载」目录里的文件，引擎看到的路径。
 fn local_file(name: &str) -> PathBuf {
     PathBuf::from(LOCAL_DOWNLOADS).join(name)
+}
+
+/// 本地一侧的目录，两个系统上都是完整路径：下载的目标引擎只收绝对路径，
+/// Windows 上 `/local/...` 那样的不算。
+fn absolute_local_folder() -> &'static str {
+    if cfg!(windows) {
+        r"C:\收到的"
+    } else {
+        "/收到的"
+    }
+}
+
+/// 把本地一侧换到完整路径，返回它。下载直接落到本地一侧现在的目录。
+fn download_folder(cx: &mut TestAppContext, fixture: &Fixture) -> &'static str {
+    let folder = absolute_local_folder();
+    command(
+        cx,
+        fixture,
+        SftpTabCommand::Navigate {
+            side: CardSide::Local,
+            path: folder.into(),
+        },
+    );
+    wait(cx, fixture, "本地换到完整路径", |cx, fixture| {
+        value(cx, fixture, "local-path").as_deref() == Some(folder)
+    });
+    folder
 }
 
 fn upload_paths(cx: &mut TestAppContext, fixture: &Fixture, names: &[&str]) {
@@ -155,11 +174,10 @@ fn upload_paths(cx: &mut TestAppContext, fixture: &Fixture, names: &[&str]) {
     );
 }
 
-/// 确认一批上传，等工作线程收到。
+/// 开始一批上传，等工作线程收到。
 fn start_upload(cx: &mut TestAppContext, fixture: &Fixture, name: &'static str) {
     let before = fixture.sftp.requests.lock().unwrap().len();
     upload_paths(cx, fixture, &[name]);
-    click(cx, fixture, "upload-confirm");
     wait(cx, fixture, "工作线程收到这一批", |_, fixture| {
         fixture.sftp.requests.lock().unwrap().len() > before
     });
@@ -198,35 +216,26 @@ fn conflict(id: u64) -> TransferQuestion {
 // ---------- 入口 ----------
 
 #[gpui_kit::test]
-fn f5_in_the_local_list_confirms_and_uploads_into_the_remote_folder(cx: &mut TestAppContext) {
+fn f5_in_the_local_list_uploads_into_the_remote_folder(cx: &mut TestAppContext) {
     let fixture = open(cx);
     select(cx, &fixture, false, "文件 甲.txt");
     press(cx, &fixture, "f5");
 
-    assert!(visible(cx, &fixture, "upload-confirm"));
-    assert_eq!(
-        value(cx, &fixture, "upload-target").as_deref(),
-        Some("/home/tester")
-    );
-    let summary = label(cx, &fixture, "transfer-summary").unwrap();
-    assert!(summary.starts_with("上传 1 个文件到 "), "{summary}");
-    // 确认之前什么都不传。
-    assert!(fixture.sftp.requests.lock().unwrap().is_empty());
-    assert!(!visible(cx, &fixture, "transfer-queue"));
-
-    click(cx, &fixture, "upload-confirm");
-    wait_head(cx, &fixture, "正在扫描");
+    // 不再先弹确认框：直接进队列，目标就是远程当前目录。
+    assert!(!visible(cx, &fixture, "upload-confirm"));
+    wait_head(cx, &fixture, "Scanning");
     let requests = fixture.sftp.requests.lock().unwrap();
     assert_eq!(requests[0].sources(), [local_file("文件 甲.txt")]);
     assert_eq!(requests[0].destination().as_str(), "/home/tester");
 }
 
-/// 七列照 26 号：进度是最后一列，定宽 148，贴着行的右边，不出界。
+/// 七列照 26 号：进度是最后一列，定宽 232（长进度条 + 放得下「已完成（跳过 N 项）」的状态区），
+/// 贴着行的右边，不出界。
 #[gpui_kit::test]
 fn the_queue_columns_fit_the_row(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
     let (row, status) = in_frame(cx, fixture.handle, |window, _| {
         (
             window.find(("queue-entry", 1usize)).bounds(),
@@ -234,33 +243,45 @@ fn the_queue_columns_fit_the_row(cx: &mut TestAppContext) {
         )
     });
     assert!(status.right() <= row.right() + px(1.), "{status:?} {row:?}");
-    assert_eq!(status.size.width, px(148.));
+    assert_eq!(status.size.width, px(232.));
+}
+
+/// 带跳过计数的长状态：文字完整、列宽不变，也不把进度条挤短。
+#[gpui_kit::test]
+fn a_long_status_keeps_its_column_width(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    start_upload(cx, &fixture, "文件 甲.txt");
+    wait_head(cx, &fixture, "Scanning");
+
+    fixture.sftp.emit(SftpEvent::Progress(
+        TransferProgress::new(TransferPhase::Completed).with_details(vec![
+            TransferDetail::done("/home/tester/甲"),
+            TransferDetail::skipped("/home/tester/乙"),
+        ]),
+    ));
+    wait(cx, &fixture, "这批结束", |cx, fixture| {
+        label(cx, fixture, ("queue-entry", 1usize)).as_deref() == Some("Done (1 skipped)")
+    });
+
+    let (row, status) = in_frame(cx, fixture.handle, |window, _| {
+        (
+            window.find(("queue-entry", 1usize)).bounds(),
+            window.find(("queue-status", 1usize)).bounds(),
+        )
+    });
+    assert_eq!(status.size.width, px(232.));
+    assert!(status.right() <= row.right() + px(1.), "{status:?} {row:?}");
 }
 
 #[gpui_kit::test]
-fn f5_in_the_remote_list_confirms_and_downloads_into_a_chosen_folder(cx: &mut TestAppContext) {
+fn f5_in_the_remote_list_downloads_into_the_local_folder(cx: &mut TestAppContext) {
     let fixture = open(cx);
+    let folder = download_folder(cx, &fixture);
     select(cx, &fixture, true, "文件 甲.txt");
     press(cx, &fixture, "f5");
 
-    assert!(visible(cx, &fixture, "download-confirm"));
-    assert_eq!(
-        value(cx, &fixture, "download-target").as_deref(),
-        Some(LOCAL_DOWNLOADS)
-    );
-    click(cx, &fixture, "download-browse");
-    cx.run_until_parked();
-    assert!(cx.did_prompt_for_paths());
-    cx.simulate_path_prompt_response(|options| {
-        assert!(options.directories && !options.files && !options.multiple);
-        Some(vec![picked_folder().into()])
-    });
-    cx.run_until_parked();
-    assert_eq!(
-        value(cx, &fixture, "download-target").as_deref(),
-        Some(picked_folder())
-    );
-    click(cx, &fixture, "download-confirm");
+    // 直接下载到本地当前目录，不再弹确认框。
+    assert!(!visible(cx, &fixture, "download-confirm"));
     wait(cx, &fixture, "工作线程收到下载", |_, fixture| {
         !fixture.sftp.downloads.lock().unwrap().is_empty()
     });
@@ -269,30 +290,26 @@ fn f5_in_the_remote_list_confirms_and_downloads_into_a_chosen_folder(cx: &mut Te
         downloads[0].sources()[0].as_str(),
         "/home/tester/文件 甲.txt"
     );
-    assert_eq!(
-        downloads[0].destination(),
-        std::path::Path::new(picked_folder())
-    );
+    assert_eq!(downloads[0].destination(), std::path::Path::new(folder));
 }
 
 #[gpui_kit::test]
-fn the_confirmation_refuses_a_target_it_cannot_use_and_escape_sends_nothing(
-    cx: &mut TestAppContext,
-) {
+fn a_target_it_cannot_use_is_refused_and_nothing_is_queued(cx: &mut TestAppContext) {
     let fixture = open(cx);
-    upload_paths(cx, &fixture, &["文件 甲.txt"]);
-    // 焦点已经在目标输入框里，文字选中着。
-    press(cx, &fixture, "backspace");
-    click(cx, &fixture, "upload-confirm");
-    assert!(visible(cx, &fixture, "upload-target-error"));
-    assert!(visible(cx, &fixture, "upload-confirm"), "框还开着");
-
-    press(cx, &fixture, "escape");
-    assert!(!visible(cx, &fixture, "upload-confirm"));
-    cx.update(|cx| {
-        let tab = tab_of(&fixture, cx);
-        assert_eq!(tab.read(cx).unfinished_transfers(), 0);
-    });
+    // 远程目标不能是空的。
+    command(
+        cx,
+        &fixture,
+        SftpTabCommand::UploadPaths {
+            paths: vec![local_file("文件 甲.txt")],
+            target: String::new(),
+        },
+    );
+    assert!(fixture.sftp.requests.lock().unwrap().is_empty());
+    assert_eq!(
+        cx.update(|cx| tab_of(&fixture, cx).read(cx).unfinished_transfers()),
+        0
+    );
 
     // 下载的目标是本机目录，要完整路径。
     command(
@@ -303,8 +320,11 @@ fn the_confirmation_refuses_a_target_it_cannot_use_and_escape_sends_nothing(
             target: "相对/路径".into(),
         },
     );
-    click(cx, &fixture, "download-confirm");
-    assert!(visible(cx, &fixture, "download-target-error"));
+    assert!(fixture.sftp.downloads.lock().unwrap().is_empty());
+    assert_eq!(
+        cx.update(|cx| tab_of(&fixture, cx).read(cx).unfinished_transfers()),
+        0
+    );
 }
 
 fn tab_of(fixture: &Fixture, cx: &App) -> Entity<SftpTab> {
@@ -312,26 +332,7 @@ fn tab_of(fixture: &Fixture, cx: &App) -> Entity<SftpTab> {
 }
 
 #[gpui_kit::test]
-fn enter_in_the_target_field_confirms(cx: &mut TestAppContext) {
-    let fixture = open(cx);
-    upload_paths(cx, &fixture, &["文件 甲.txt"]);
-    in_frame(cx, fixture.handle, |window, cx| {
-        window.input("/固定目标", cx);
-        window.press("enter", cx);
-    });
-    wait(cx, &fixture, "工作线程收到这一批", |_, fixture| {
-        !fixture.sftp.requests.lock().unwrap().is_empty()
-    });
-    assert_eq!(
-        fixture.sftp.requests.lock().unwrap()[0]
-            .destination()
-            .as_str(),
-        "/固定目标"
-    );
-}
-
-#[gpui_kit::test]
-fn the_native_picker_leads_to_the_same_confirmation(cx: &mut TestAppContext) {
+fn the_native_picker_uploads_straight_into_the_remote_folder(cx: &mut TestAppContext) {
     let fixture = open(cx);
     command(cx, &fixture, SftpTabCommand::ChooseFiles);
     cx.run_until_parked();
@@ -340,15 +341,18 @@ fn the_native_picker_leads_to_the_same_confirmation(cx: &mut TestAppContext) {
         assert!(options.files && options.multiple);
         Some(vec!["/tmp/甲".into(), "/tmp/乙".into()])
     });
-    cx.run_until_parked();
-    assert!(visible(cx, &fixture, "upload-confirm"));
+    wait(cx, &fixture, "工作线程收到这一批", |_, fixture| {
+        !fixture.sftp.requests.lock().unwrap().is_empty()
+    });
+    let requests = fixture.sftp.requests.lock().unwrap();
     assert_eq!(
-        value(cx, &fixture, "upload-target").as_deref(),
-        Some("/home/tester")
+        requests[0].sources(),
+        [PathBuf::from("/tmp/甲"), PathBuf::from("/tmp/乙")]
     );
+    assert_eq!(requests[0].destination().as_str(), "/home/tester");
 }
 
-/// 「上传文件夹…」（工单 35）：系统的文件夹选择框只选文件夹，选中的整个走同一个确认框和传输队列。
+/// 「上传文件夹…」（工单 35）：系统的文件夹选择框只选文件夹，选中的整个直接进传输队列。
 #[gpui_kit::test]
 fn the_folder_picker_uploads_the_chosen_folder_through_the_queue(cx: &mut TestAppContext) {
     let fixture = open(cx);
@@ -361,18 +365,9 @@ fn the_folder_picker_uploads_the_chosen_folder_through_the_queue(cx: &mut TestAp
     let answer = folder.clone();
     cx.simulate_path_prompt_response(move |options| {
         assert!(options.directories && !options.files, "{options:?}");
-        assert_eq!(options.prompt.as_deref(), Some("选择要上传的文件夹"));
+        assert_eq!(options.prompt.as_deref(), Some("Choose folders to upload"));
         Some(vec![answer])
     });
-    cx.run_until_parked();
-    assert_eq!(
-        value(cx, &fixture, "upload-target").as_deref(),
-        Some("/home/tester")
-    );
-    let summary = label(cx, &fixture, "transfer-summary").unwrap();
-    assert!(summary.starts_with("上传 1 个文件夹到 "), "{summary}");
-
-    click(cx, &fixture, "upload-confirm");
     wait(cx, &fixture, "工作线程收到这一批", |_, fixture| {
         !fixture.sftp.requests.lock().unwrap().is_empty()
     });
@@ -382,7 +377,7 @@ fn the_folder_picker_uploads_the_chosen_folder_through_the_queue(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
-fn dropping_files_from_outside_on_a_remote_folder_asks_to_upload_there(cx: &mut TestAppContext) {
+fn dropping_files_from_outside_on_a_remote_folder_uploads_there(cx: &mut TestAppContext) {
     let fixture = open(cx);
     in_frame(cx, fixture.handle, |window, cx| {
         let position = window
@@ -400,15 +395,19 @@ fn dropping_files_from_outside_on_a_remote_folder_asks_to_upload_there(cx: &mut 
             cx,
         );
     });
-    cx.run_until_parked();
+    wait(cx, &fixture, "工作线程收到这一批", |_, fixture| {
+        !fixture.sftp.requests.lock().unwrap().is_empty()
+    });
+    let requests = fixture.sftp.requests.lock().unwrap();
     assert_eq!(
-        value(cx, &fixture, "upload-target").as_deref(),
-        Some("/home/tester/目录")
+        requests[0].sources(),
+        [PathBuf::from("/tmp/资源管理器的文件")]
     );
+    assert_eq!(requests[0].destination().as_str(), "/home/tester/目录");
 }
 
 #[gpui_kit::test]
-fn dragging_between_the_sides_asks_first(cx: &mut TestAppContext) {
+fn dragging_between_the_sides_transfers_at_once(cx: &mut TestAppContext) {
     let fixture = open(cx);
     in_frame(cx, fixture.handle, |window, cx| {
         let from = window
@@ -423,13 +422,21 @@ fn dragging_between_the_sides_asks_first(cx: &mut TestAppContext) {
             .center();
         window.drag(from, to, cx);
     });
-    cx.run_until_parked();
-    assert_eq!(
-        value(cx, &fixture, "upload-target").as_deref(),
-        Some("/home/tester/目录")
-    );
-    press(cx, &fixture, "escape");
+    wait(cx, &fixture, "上传开始", |_, fixture| {
+        !fixture.sftp.requests.lock().unwrap().is_empty()
+    });
+    {
+        let requests = fixture.sftp.requests.lock().unwrap();
+        assert_eq!(requests[0].sources(), [local_file("文件 甲.txt")]);
+        assert_eq!(requests[0].destination().as_str(), "/home/tester/目录");
+    }
 
+    // 第一批跑完，轮到拖下去的这一批。
+    fixture.sftp.emit(SftpEvent::Progress(TransferProgress::new(
+        TransferPhase::Completed,
+    )));
+    fixture.sftp.emit(SftpEvent::Idle);
+    download_folder(cx, &fixture);
     in_frame(cx, fixture.handle, |window, cx| {
         let from = window
             .within("remote-card")
@@ -443,8 +450,15 @@ fn dragging_between_the_sides_asks_first(cx: &mut TestAppContext) {
             .center();
         window.drag(from, to, cx);
     });
-    cx.run_until_parked();
-    let target = value(cx, &fixture, "download-target").unwrap();
+    wait(cx, &fixture, "下载开始", |_, fixture| {
+        !fixture.sftp.downloads.lock().unwrap().is_empty()
+    });
+    let downloads = fixture.sftp.downloads.lock().unwrap();
+    assert_eq!(
+        downloads[0].sources()[0].as_str(),
+        "/home/tester/文件 乙.txt"
+    );
+    let target = downloads[0].destination().to_string_lossy().into_owned();
     assert!(target.ends_with("目录"), "{target}");
 }
 
@@ -454,24 +468,22 @@ fn dragging_between_the_sides_asks_first(cx: &mut TestAppContext) {
 fn batches_wait_their_turn_and_the_queue_goes_away_when_cleared(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
     assert_eq!(
         label(cx, &fixture, "transfer-queue-summary").as_deref(),
-        Some("1 批进行中")
+        Some("1 running")
     );
 
-    // 第二批：框里说要排队，确认以后等着，工作线程还没收到。
+    // 第二批直接排上，等着，工作线程还没收到。
     upload_paths(cx, &fixture, &["文件 乙.txt"]);
-    assert!(visible(cx, &fixture, "transfer-queued-note"));
-    click(cx, &fixture, "upload-confirm");
     cx.run_until_parked();
     assert_eq!(
         label(cx, &fixture, ("queue-entry", 2usize)).as_deref(),
-        Some("等待中")
+        Some("Waiting")
     );
     assert_eq!(
         label(cx, &fixture, "transfer-queue-summary").as_deref(),
-        Some("1 批进行中 · 1 批等待")
+        Some("1 running · 1 waiting")
     );
     assert_eq!(fixture.sftp.requests.lock().unwrap().len(), 1);
 
@@ -489,7 +501,7 @@ fn batches_wait_their_turn_and_the_queue_goes_away_when_cleared(cx: &mut TestApp
     );
     assert_eq!(
         label(cx, &fixture, ("queue-entry", 1usize)).as_deref(),
-        Some("已完成")
+        Some("Done")
     );
 
     // 进度、在传的文件自己一行。
@@ -522,7 +534,7 @@ fn batches_wait_their_turn_and_the_queue_goes_away_when_cleared(cx: &mut TestApp
     )));
     fixture.sftp.emit(SftpEvent::Idle);
     wait(cx, &fixture, "第二批结束", |cx, fixture| {
-        label(cx, fixture, ("queue-entry", 2usize)).as_deref() == Some("已完成")
+        label(cx, fixture, ("queue-entry", 2usize)).as_deref() == Some("Done")
     });
     click(cx, &fixture, "clear-finished-transfers");
     assert!(!visible(cx, &fixture, "transfer-queue"));
@@ -532,10 +544,10 @@ fn batches_wait_their_turn_and_the_queue_goes_away_when_cleared(cx: &mut TestApp
 fn the_queue_stops_resumes_and_takes_a_batch_off(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
 
     click(cx, &fixture, "cancel-transfer");
-    wait_head(cx, &fixture, "已停止");
+    wait_head(cx, &fixture, "Stopped");
     wait(cx, &fixture, "能继续", |cx, fixture| {
         cx.update(|cx| tab_of(fixture, cx).read(cx).can_resume_transfer())
     });
@@ -556,13 +568,13 @@ fn the_queue_stops_resumes_and_takes_a_batch_off(cx: &mut TestAppContext) {
     assert_eq!(fixture.sftp.requests.lock().unwrap().len(), 1);
 
     click(cx, &fixture, "cancel-transfer");
-    wait_head(cx, &fixture, "已停止");
+    wait_head(cx, &fixture, "Stopped");
     wait(cx, &fixture, "能移出", |cx, fixture| {
         cx.update(|cx| tab_of(fixture, cx).read(cx).can_remove_transfer())
     });
     click(cx, &fixture, "remove-transfer");
     wait(cx, &fixture, "移出", |cx, fixture| {
-        label(cx, fixture, ("queue-entry", 1usize)).as_deref() == Some("已移出")
+        label(cx, fixture, ("queue-entry", 1usize)).as_deref() == Some("Removed")
     });
     assert_eq!(
         cx.update(|cx| tab_of(&fixture, cx).read(cx).unfinished_transfers()),
@@ -575,9 +587,9 @@ fn the_queue_stops_resumes_and_takes_a_batch_off(cx: &mut TestAppContext) {
 fn a_batch_taken_off_is_not_picked_up_by_a_reconnect(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
     click(cx, &fixture, "cancel-transfer");
-    wait_head(cx, &fixture, "已停止");
+    wait_head(cx, &fixture, "Stopped");
     wait(cx, &fixture, "能移出", |cx, fixture| {
         cx.update(|cx| tab_of(fixture, cx).read(cx).can_remove_transfer())
     });
@@ -596,11 +608,10 @@ fn a_batch_taken_off_is_not_picked_up_by_a_reconnect(cx: &mut TestAppContext) {
 fn discarding_drops_the_stopped_batch_and_the_next_one_goes(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
     upload_paths(cx, &fixture, &["文件 乙.txt"]);
-    click(cx, &fixture, "upload-confirm");
     click(cx, &fixture, "cancel-transfer");
-    wait_head(cx, &fixture, "已停止");
+    wait_head(cx, &fixture, "Stopped");
     // 停着的一批占着队头：第二批不开始。
     assert_eq!(fixture.sftp.requests.lock().unwrap().len(), 1);
     wait(cx, &fixture, "能丢弃", |cx, fixture| {
@@ -613,7 +624,7 @@ fn discarding_drops_the_stopped_batch_and_the_next_one_goes(cx: &mut TestAppCont
     });
     assert_eq!(
         label(cx, &fixture, ("queue-entry", 1usize)).as_deref(),
-        Some("已丢弃续传进度")
+        Some("Resume Progress Discarded")
     );
 }
 
@@ -621,12 +632,21 @@ fn discarding_drops_the_stopped_batch_and_the_next_one_goes(cx: &mut TestAppCont
 fn a_batch_unfolds_to_how_its_items_ended_and_a_rough_end_is_summed_up(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
 
+    let toggle = ("queue-expand", 1usize);
+    assert_eq!(
+        label(cx, &fixture, toggle).as_deref(),
+        Some("Expand transfer details")
+    );
     in_frame(cx, fixture.handle, |window, cx| {
-        window.click(("queue-expand", 1usize), cx)
+        window.click(toggle, cx)
     });
     assert!(visible(cx, &fixture, "transfer-detail-empty"));
+    assert_eq!(
+        label(cx, &fixture, toggle).as_deref(),
+        Some("Collapse transfer details")
+    );
 
     fixture.sftp.emit(SftpEvent::Progress(
         TransferProgress::new(TransferPhase::Completed).with_details(vec![
@@ -636,7 +656,7 @@ fn a_batch_unfolds_to_how_its_items_ended_and_a_rough_end_is_summed_up(cx: &mut 
         ]),
     ));
     wait(cx, &fixture, "这批结束", |cx, fixture| {
-        label(cx, fixture, ("queue-entry", 1usize)).as_deref() == Some("部分失败（1 项）")
+        label(cx, fixture, ("queue-entry", 1usize)).as_deref() == Some("Partly Failed (1)")
     });
     assert_eq!(
         label(
@@ -645,7 +665,7 @@ fn a_batch_unfolds_to_how_its_items_ended_and_a_rough_end_is_summed_up(cx: &mut 
             ElementId::Name("transfer-detail:/home/tester/丙".into())
         )
         .as_deref(),
-        Some("失败 /home/tester/丙")
+        Some("Failed /home/tester/丙")
     );
     // 结束后汇总：有跳过或失败时弹通知，全部完成不打扰。
     let notes = in_frame(cx, fixture.handle, |window, cx| {
@@ -658,7 +678,7 @@ fn a_batch_unfolds_to_how_its_items_ended_and_a_rough_end_is_summed_up(cx: &mut 
 fn a_finished_batch_refreshes_the_side_it_went_to(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
     let listed = fixture.sftp.listed.lock().unwrap().len();
     fixture.sftp.emit(SftpEvent::Progress(TransferProgress::new(
         TransferPhase::Completed,
@@ -675,10 +695,9 @@ fn a_finished_batch_refreshes_the_side_it_went_to(cx: &mut TestAppContext) {
         &fixture,
         SftpTabCommand::DownloadPaths {
             paths: vec!["/home/tester/文件 甲.txt".into()],
-            target: picked_folder().into(),
+            target: absolute_local_folder().into(),
         },
     );
-    click(cx, &fixture, "download-confirm");
     wait(cx, &fixture, "工作线程收到下载", |_, fixture| {
         !fixture.sftp.downloads.lock().unwrap().is_empty()
     });
@@ -695,7 +714,7 @@ fn a_finished_batch_refreshes_the_side_it_went_to(cx: &mut TestAppContext) {
 fn the_height_of_the_queue_can_be_dragged(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
     let height = |cx: &mut TestAppContext| {
         in_frame(cx, fixture.handle, |window, _| {
             window.find("transfer-queue").bounds().size.height
@@ -723,8 +742,8 @@ fn a_conflict_shows_both_sides_and_the_answer_goes_for_the_rest_when_ticked(
 
     let text = label(cx, &fixture, "transfer-question-text").unwrap();
     assert!(text.contains("nginx.conf"), "{text}");
-    assert!(text.contains("要传的 2.4 KB（本机）"), "{text}");
-    assert!(text.contains("已有的 1.5 KB（web-01）"), "{text}");
+    assert!(text.contains("Incoming 2.4 KB (This Computer)"), "{text}");
+    assert!(text.contains("Existing 1.5 KB (web-01)"), "{text}");
     click(cx, &fixture, "transfer-question-check");
     click(cx, &fixture, "transfer-question-overwrite");
     wait(cx, &fixture, "回答到工作线程", |_, fixture| {
@@ -744,7 +763,7 @@ fn closing_a_question_with_escape_cancels_the_batch(cx: &mut TestAppContext) {
     fixture.sftp.emit(SftpEvent::Question(conflict(901)));
     wait_visible(cx, &fixture, "transfer-question");
     press(cx, &fixture, "escape");
-    wait_head(cx, &fixture, "已停止");
+    wait_head(cx, &fixture, "Stopped");
     let (_, answer) = fixture.sftp.answers.lock().unwrap()[0];
     assert_eq!(answer.choice(), TransferChoice::Cancel);
 }
@@ -820,20 +839,6 @@ fn a_question_goes_away_when_the_batch_stops_or_reconnects(cx: &mut TestAppConte
     assert!(fixture.sftp.answers.lock().unwrap().is_empty());
 }
 
-/// 问题叠在别的框上面，答完回到下面的框。
-#[gpui_kit::test]
-fn a_question_stacks_on_a_confirmation_that_is_open(cx: &mut TestAppContext) {
-    let fixture = open(cx);
-    start_upload(cx, &fixture, "文件 甲.txt");
-    upload_paths(cx, &fixture, &["文件 乙.txt"]);
-    assert!(visible(cx, &fixture, "upload-confirm"));
-    fixture.sftp.emit(SftpEvent::Question(conflict(906)));
-    wait_visible(cx, &fixture, "transfer-question");
-    click(cx, &fixture, "transfer-question-skip");
-    assert!(!visible(cx, &fixture, "transfer-question"));
-    assert!(visible(cx, &fixture, "upload-confirm"));
-}
-
 // ---------- 断开 ----------
 
 #[gpui_kit::test]
@@ -852,7 +857,7 @@ fn a_transfer_asked_for_while_disconnected_offers_to_reconnect(cx: &mut TestAppC
     select(cx, &fixture, false, "文件 甲.txt");
     press(cx, &fixture, "f5");
     assert!(visible(cx, &fixture, "sftp-reconnect"));
-    assert!(!visible(cx, &fixture, "upload-confirm"));
+    assert!(fixture.sftp.requests.lock().unwrap().is_empty());
 }
 
 /// 断线后重连都失败了：批次停着等「继续」，这时「继续」就是重连。
@@ -866,12 +871,12 @@ fn a_batch_that_gave_up_reconnecting_waits_for_resume(cx: &mut TestAppContext) {
     fixture.sftp.emit(SftpEvent::Progress(TransferProgress::new(
         TransferPhase::Reconnecting,
     )));
-    wait_head(cx, &fixture, "正在重连");
+    wait_head(cx, &fixture, "Reconnecting");
     fixture.sftp.emit(SftpEvent::Progress(TransferProgress::new(
         TransferPhase::Stopped,
     )));
     fixture.sftp.emit(SftpEvent::Idle);
-    wait_head(cx, &fixture, "已停止");
+    wait_head(cx, &fixture, "Stopped");
     wait(cx, &fixture, "能继续", |cx, fixture| {
         cx.update(|cx| tab_of(fixture, cx).read(cx).can_resume_transfer())
     });
@@ -887,7 +892,7 @@ fn a_batch_that_gave_up_reconnecting_waits_for_resume(cx: &mut TestAppContext) {
 fn closing_with_a_transfer_running_asks_and_closes_its_dialogs(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
     let id = cx.update(|cx| fixture.workspace.read(cx).tab_ids()[0]);
     assert_eq!(
         cx.update(|cx| fixture.workspace.read(cx).tab_dot(id, cx)),
@@ -897,8 +902,11 @@ fn closing_with_a_transfer_running_asks_and_closes_its_dialogs(cx: &mut TestAppC
     dispatch(cx, fixture.handle, CloseFocusedCard);
     assert!(visible(cx, &fixture, "close-tabs"));
     let text = label(cx, &fixture, "close-tabs-text").unwrap();
-    assert!(text.contains("还有 1 批传输没完成"), "{text}");
-    assert!(text.contains("续传记录保留"), "{text}");
+    assert!(
+        text.contains("still has 1 unfinished transfer batches"),
+        "{text}"
+    );
+    assert!(text.contains("resume records are kept"), "{text}");
     click(cx, &fixture, "close-tabs-cancel");
 
     // 原型：框里说正在传哪个文件、这一批传到多少。
@@ -916,7 +924,7 @@ fn closing_with_a_transfer_running_asks_and_closes_its_dialogs(cx: &mut TestAppC
     dispatch(cx, fixture.handle, CloseFocusedCard);
     let text = label(cx, &fixture, "close-tabs-text").unwrap();
     assert!(
-        text.contains("还有 1 批传输没完成（backup.tar.gz，37%）"),
+        text.contains("still has 1 unfinished transfer batches (backup.tar.gz, 37%)"),
         "{text}"
     );
     click(cx, &fixture, "close-tabs-cancel");
@@ -936,13 +944,16 @@ fn closing_with_a_transfer_running_asks_and_closes_its_dialogs(cx: &mut TestAppC
 fn quitting_with_a_stopped_batch_asks(cx: &mut TestAppContext) {
     let fixture = open(cx);
     start_upload(cx, &fixture, "文件 甲.txt");
-    wait_head(cx, &fixture, "正在扫描");
+    wait_head(cx, &fixture, "Scanning");
     click(cx, &fixture, "cancel-transfer");
-    wait_head(cx, &fixture, "已停止");
+    wait_head(cx, &fixture, "Stopped");
 
     assert!(in_frame(cx, fixture.handle, micaterm::app::quit_held_back));
     let text = label(cx, &fixture, "quit-confirm-text").unwrap();
-    assert!(text.contains("还有 1 批传输没完成"), "{text}");
+    assert!(
+        text.contains("still has 1 unfinished transfer batches"),
+        "{text}"
+    );
 }
 
 /// 续传记录没有地方放（取不到数据目录）：窗口出来就告诉用户。
@@ -957,10 +968,11 @@ fn a_missing_resume_folder_is_reported_once_the_window_is_up(cx: &mut TestAppCon
     assert_eq!(shown, 1);
 }
 
-/// 编辑器打不开的文件，框里的「下载…」走同一个确认框，目标是本地一侧的当前目录。
+/// 编辑器打不开的文件，框里的「下载」直接下载到本地一侧的当前目录。
 #[gpui_kit::test]
 fn a_file_the_editor_refuses_can_be_downloaded(cx: &mut TestAppContext) {
     let fixture = open(cx);
+    let folder = download_folder(cx, &fixture);
     fixture.sftp.files.lock().unwrap().insert(
         "/home/tester/blob.bin".into(),
         (vec![0xff, 0xfe, 0x00], 100),
@@ -975,11 +987,24 @@ fn a_file_the_editor_refuses_can_be_downloaded(cx: &mut TestAppContext) {
     );
     wait_visible(cx, &fixture, "editor-refused");
     click(cx, &fixture, "editor-refused-download");
-    wait_visible(cx, &fixture, "download-confirm");
+    wait(cx, &fixture, "工作线程收到下载", |_, fixture| {
+        !fixture.sftp.downloads.lock().unwrap().is_empty()
+    });
+    let downloads = fixture.sftp.downloads.lock().unwrap();
+    assert_eq!(downloads[0].sources()[0].as_str(), "/home/tester/blob.bin");
+    assert_eq!(downloads[0].destination(), std::path::Path::new(folder));
+}
+
+#[gpui_kit::test]
+fn transfer_rows_show_direction_badge_and_source_to_target_flow(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    start_upload(cx, &fixture, "文件 甲.txt");
+    wait_head(cx, &fixture, "Scanning");
+
     assert_eq!(
-        value(cx, &fixture, "download-target").as_deref(),
-        Some(LOCAL_DOWNLOADS)
+        label(cx, &fixture, ("queue-direction", 1usize)).as_deref(),
+        Some("Upload")
     );
-    let summary = label(cx, &fixture, "transfer-summary").unwrap();
-    assert!(summary.ends_with("下载 1 个文件"), "{summary}");
+    let flow = label(cx, &fixture, ("queue-flow", 1usize)).unwrap();
+    assert!(flow.contains("文件 甲.txt") && flow.contains("→ /home/tester"), "{flow}");
 }

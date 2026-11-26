@@ -5,12 +5,12 @@
 //! 内存为准、写穿到磁盘：每次改动立刻写文件，写失败时内存照样改，
 //! 并发出 `SettingsStoreEvent::PersistFailed`，由窗口壳弹通知，绝不静默吞掉。
 
+mod agent_command_editor;
 mod app_page;
 mod apply;
 mod backdrop;
 mod cli_page;
 mod controls;
-mod agent_command_editor;
 mod local_shell_editor;
 mod model;
 mod pages;

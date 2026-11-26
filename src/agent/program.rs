@@ -1,6 +1,7 @@
 //! 应用内启动的 Agent 跑哪个程序（Agent CLI 工单 07）：设置 › Agent 的「Agent 命令」，
-//! 留空时先找 `claude`，再找 `codex`。每个先在 `PATH` 里找；`claude` 找不到时再看不在 `PATH`
-//! 里的常见位置：官方安装脚本的 `~/.local/bin`，和 Claude 桌面版自带的那份。
+//! 留空时先找 `claude`，再找 `codex`，最后是 Antigravity 的 CLI（`agy`）。每个先在 `PATH` 里找；
+//! 找不到时再看不在 `PATH` 里的常见位置：官方安装脚本的 `~/.local/bin`、Claude 桌面版自带的那份，
+//! 和 Antigravity CLI 安装脚本放的位置。
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -13,9 +14,10 @@ use micaterm_terminal::LocalShell;
 use crate::cli::AgentKind;
 
 /// 自动检测时按顺序找的程序。
-const DETECTED: [(&str, AgentKind); 2] = [
+const DETECTED: [(&str, AgentKind); 3] = [
     ("claude", AgentKind::ClaudeCode),
     ("codex", AgentKind::Codex),
+    ("agy", AgentKind::Antigravity),
 ];
 
 /// 要启动的 Agent。
@@ -169,6 +171,14 @@ fn known_installs() -> Vec<KnownInstall> {
                 bundled: false,
             });
         }
+        // Antigravity 的 CLI（`agy`）：安装脚本放的位置（Windows 在 %LOCALAPPDATA%\agy\bin）。
+        if let Some(file) = crate::cli::antigravity_cli_path(&home) {
+            found.push(KnownInstall {
+                kind: AgentKind::Antigravity,
+                file,
+                bundled: false,
+            });
+        }
     }
     if let Some(file) = newest_bundled(desktop_data_dirs()) {
         found.push(KnownInstall {
@@ -316,6 +326,47 @@ mod tests {
         let found = agent_program_in(None, path, None, &[]).unwrap();
         assert_eq!(found.command, "claude");
         assert_eq!(found.name.as_ref(), "Claude Code");
+    }
+
+    /// Antigravity 的 CLI（`agy`）排在 claude、codex 后面；不在 `PATH` 里时用安装脚本放的那份。
+    #[test]
+    fn the_antigravity_cli_is_detected_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().as_os_str();
+        let file = |name: &str| std::fs::write(dir.path().join(name), "").unwrap();
+        file(if cfg!(windows) { "agy.cmd" } else { "agy" });
+        let found = agent_program_in(None, path, None, &[]).unwrap();
+        assert_eq!(
+            (found.command.as_str(), found.kind),
+            ("agy", Some(AgentKind::Antigravity))
+        );
+        assert_eq!(found.name.as_ref(), "Antigravity");
+
+        // `PATH` 里的 claude 排在它前面。
+        file(if cfg!(windows) {
+            "claude.exe"
+        } else {
+            "claude"
+        });
+        let found = agent_program_in(None, path, None, &[]).unwrap();
+        assert_eq!(found.kind, Some(AgentKind::ClaudeCode));
+
+        // 不在 `PATH` 里：用安装脚本放的那份。
+        let empty = OsStr::new("");
+        let install = PathBuf::from(r"C:\Users\me\AppData\Local\agy\bin\agy.exe");
+        let known = [KnownInstall {
+            kind: AgentKind::Antigravity,
+            file: install.clone(),
+            bundled: false,
+        }];
+        let found = agent_program_in(None, empty, None, &known).unwrap();
+        assert_eq!(found.command, format!("\"{}\"", install.display()));
+        assert_eq!(found.kind, Some(AgentKind::Antigravity));
+
+        // 设置里写了命令时也认得出它。
+        let written = agent_program_in(Some("agy --help"), empty, None, &[]).unwrap();
+        assert_eq!(written.kind, Some(AgentKind::Antigravity));
+        assert_eq!(written.name.as_ref(), "Antigravity");
     }
 
     #[test]

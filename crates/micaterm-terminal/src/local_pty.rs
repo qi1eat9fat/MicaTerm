@@ -1374,7 +1374,7 @@ mod windows_tests {
             .unwrap_err()
             .to_string();
         assert!(
-            error.contains(r"无法启动 C:\no\such\shell.exe -l"),
+            error.contains(r"Could not start C:\no\such\shell.exe -l"),
             "{error}"
         );
     }

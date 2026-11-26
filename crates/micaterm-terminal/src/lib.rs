@@ -47,9 +47,6 @@ pub use engine::{
     KeyRefused, SCREEN_READ_LIMIT, ScreenRead, TerminalCell, TerminalEngine, TerminalEvent,
     TerminalSnapshot,
 };
-pub use run::{
-    BusyReason, RunContext, RunEvent, RunFailure, RunHandle, RunProgress, RunTiming, TerminalRun,
-};
 pub use font::{
     BUNDLED_FONT_FAMILY, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT,
     FONT_SIZE_RANGE, LINE_HEIGHT_RANGE, TerminalFont, TerminalFontPreview, is_font_installed,
@@ -64,6 +61,9 @@ pub use model::{
     TerminalStatus,
 };
 pub use notices::TerminalNotice;
+pub use run::{
+    BusyReason, RunContext, RunEvent, RunFailure, RunHandle, RunProgress, RunTiming, TerminalRun,
+};
 pub use search::{SearchDirection, SearchMark, SearchPosition};
 pub use shell_info::LocalShellInfo;
 pub use terminal_view::{
@@ -78,4 +78,4 @@ pub use transport::{
 };
 
 // 终端自己的文案，来自 `locales/terminal.yml`：见 `i18n`。
-rust_i18n::i18n!("locales", fallback = "zh-CN");
+rust_i18n::i18n!("locales", fallback = "en");

@@ -16,6 +16,29 @@ use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+/// 终端和编辑器共用的匹配标记高度：按设备像素取整，并保证不超出行高。
+pub fn find_highlight_height(font_size: Pixels, line_height: Pixels, scale: f32) -> Pixels {
+    ((font_size * 1.3 * scale)
+        .round()
+        .min((line_height * scale).floor()))
+        / scale
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use gpui_kit::px;
+
+    use super::find_highlight_height;
+
+    // 这里不能用 `use super::*`：它带进 `gpui_kit::*` 里的 `test` 宏，会盖住内建的 `#[test]`。
+    #[test]
+    fn highlight_snaps_to_device_pixels_and_fits_short_lines() {
+        assert_eq!(find_highlight_height(px(13.), px(22.), 1.), px(17.));
+        assert_eq!(find_highlight_height(px(13.), px(22.), 1.5), px(25.) / 1.5);
+        assert_eq!(find_highlight_height(px(13.), px(13.), 1.5), px(19.) / 1.5);
+    }
+}
+
 /// 卡片和匹配高亮画在什么颜色、什么字上。应用按自己的 token 设成全局量；没设时用一套中性灰。
 #[derive(Clone, Debug, PartialEq)]
 pub struct FindStyle {
@@ -23,7 +46,7 @@ pub struct FindStyle {
     pub background: Hsla,
     /// 外圈的线（`--line-strong`）。
     pub border: Hsla,
-    pub shadow: Hsla,
+    pub shadows: Vec<BoxShadow>,
     /// 输入的字（`--text`）。
     pub text: Hsla,
     /// 放大镜和计数（`--st-dim`）。
@@ -49,17 +72,22 @@ pub struct FindStyle {
     /// 当前项：底和字（`find_current` / `find_current_text`）。
     pub current: Hsla,
     pub current_text: Hsla,
+    /// 圆角：外框、按钮、提示框。
+    pub radius: Pixels,
+    pub button_radius: Pixels,
+    pub tooltip_radius: Pixels,
 }
 
 impl Global for FindStyle {}
 
 impl Default for FindStyle {
     fn default() -> Self {
-        let gray = |lightness: f32| hsla(0., 0., lightness, 1.);
+        let gray = crate::default_gray;
         Self {
             background: gray(0.98),
             border: gray(0.82),
-            shadow: hsla(0., 0., 0., 0.08),
+            // 阴影由应用在启动时按主题注入（`src/settings/apply.rs`），这里不内置。
+            shadows: Vec::new(),
             text: gray(0.15),
             dim: gray(0.5),
             icon: gray(0.4),
@@ -71,11 +99,14 @@ impl Default for FindStyle {
             font: "".into(),
             text_size: px(12.),
             mono_font: "".into(),
-            mono_size: px(11.5),
+            mono_size: px(11.),
             matched: hsla(45. / 360., 0.84, 0.49, 0.18),
             matched_line: hsla(43. / 360., 1., 0.38, 0.55),
             current: hsla(44. / 360., 0.87, 0.61, 1.),
             current_text: gray(0.15),
+            radius: px(8.),
+            button_radius: px(4.),
+            tooltip_radius: px(6.),
         }
     }
 }
@@ -86,18 +117,15 @@ impl FindStyle {
     }
 }
 
-/// 卡片的位置和大小（26 号 `.find`）。
+/// 卡片的位置和大小。
 const TOP: Pixels = px(8.);
 const RIGHT: Pixels = px(12.);
 const WIDTH: Pixels = px(300.);
-/// 有替换那一行时的宽（26 号 `.find.rep`）。
 const REPLACE_WIDTH: Pixels = px(360.);
 const HEIGHT: Pixels = px(32.);
-const RADIUS: Pixels = px(8.);
-/// 按钮边长、图标边长、按钮圆角。
+/// 按钮边长、图标边长。
 const BUTTON: Pixels = px(24.);
 const ICON: Pixels = px(14.);
-const BUTTON_RADIUS: Pixels = px(6.);
 
 type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -155,7 +183,7 @@ impl FindButton {
             .items_center()
             .justify_center()
             .size(BUTTON)
-            .rounded(BUTTON_RADIUS)
+            .rounded(style.button_radius)
             .text_color(if self.enabled {
                 style.icon
             } else {
@@ -221,7 +249,7 @@ impl FindTextButton {
             .items_center()
             .h(BUTTON)
             .px(px(8.))
-            .rounded(BUTTON_RADIUS)
+            .rounded(style.button_radius)
             .whitespace_nowrap()
             .text_color(if self.enabled {
                 style.text
@@ -328,7 +356,7 @@ impl Render for FindTooltip {
             .gap(px(8.))
             .px(px(8.))
             .py(px(4.))
-            .rounded(BUTTON_RADIUS)
+            .rounded(style.tooltip_radius)
             .bg(style.tooltip)
             .text_color(style.tooltip_text)
             .font_family(style.font.clone())
@@ -464,17 +492,11 @@ impl FindCard {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .rounded(RADIUS)
+            .rounded(style.radius)
             .bg(style.background)
             .border_1()
             .border_color(style.border)
-            .shadow(vec![BoxShadow {
-                color: style.shadow,
-                offset: point(px(0.), px(4.)),
-                blur_radius: px(14.),
-                spread_radius: px(0.),
-                inset: false,
-            }])
+            .shadow(style.shadows)
             .font_family(style.font.clone())
             .text_size(style.text_size)
             .text_color(style.text)

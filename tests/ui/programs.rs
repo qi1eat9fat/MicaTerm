@@ -169,7 +169,7 @@ fn a_program_printing_shows_the_busy_dot_until_it_goes_quiet(cx: &mut TestAppCon
     assert_eq!(tab_dot(cx, &workspace, 1), Some(StatusDot::Busy));
     // 点只画在标签上（卡片没有头部；状态栏写前台程序名）。
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find(("tab-dot", 1usize)).label(), Some("有输出"));
+        assert_eq!(window.find(("tab-dot", 1usize)).label(), Some("Output"));
     });
 
     cx.executor().advance_clock(Duration::from_millis(1600));
@@ -214,7 +214,7 @@ fn a_program_that_ends_out_of_sight_asks_for_attention(cx: &mut TestAppContext) 
         == Some(StatusDot::Attention)));
     assert_eq!(card_dot(cx, &workspace, 1), Some(StatusDot::Attention));
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find(("tab-dot", 1usize)).label(), Some("需要注意"));
+        assert_eq!(window.find(("tab-dot", 1usize)).label(), Some("Needs Attention"));
     });
     // 别的标签不受影响。
     assert_eq!(tab_dot(cx, &workspace, 2), Some(StatusDot::None));

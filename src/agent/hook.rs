@@ -1,7 +1,8 @@
 //! `micaterm hook` 收到的东西（Agent CLI 工单 09）：Claude Code 的 hook 把 JSON 写在 stdin，
-//! Codex 的 `notify` 把 JSON 当最后一个参数。这里只认得出的几种事，别的一律不报。
+//! Codex 的 `notify` 把 JSON 当最后一个参数，Antigravity CLI 把事件名当参数、JSON 写在 stdin。
+//! 这里只认得出的几种事，别的一律不报。
 // 参照 Kuddev/pebrel（GPL-3.0）: nebula_app/src/ai_hook/protocol.rs、payload.rs 的事件归类，
-// 只留 Claude Code 和 Codex。
+// 只留 Claude Code、Codex 和 Antigravity CLI。
 
 use serde_json::Value;
 
@@ -24,11 +25,13 @@ const ACTIONABLE_NOTIFICATIONS: &[&str] = &[
     "elicitation_dialog",
 ];
 
-/// 报 hook 的是哪个 Agent（`micaterm hook claude` / `micaterm hook codex`）。
+/// 报 hook 的是哪个 Agent（`micaterm hook claude` / `hook codex` / `hook agy`）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HookSource {
     Claude,
     Codex,
+    /// Antigravity CLI：事件名是命令行的第一个参数。
+    Antigravity,
 }
 
 impl HookSource {
@@ -36,13 +39,29 @@ impl HookSource {
         match name {
             "claude" => Some(HookSource::Claude),
             "codex" => Some(HookSource::Codex),
+            "agy" => Some(HookSource::Antigravity),
             _ => None,
         }
     }
 }
 
 /// 一次 hook 是什么事，和它带来的那句话；不认得的事 `None`。
-pub fn hook_event(source: HookSource, payload: &Value) -> Option<(HookEvent, Option<String>)> {
+/// `given` 是命令行给的事件名（Antigravity CLI 这样发）；Claude Code、Codex 的事件名在载荷里。
+pub fn hook_event(
+    source: HookSource,
+    given: Option<&str>,
+    payload: &Value,
+) -> Option<(HookEvent, Option<String>)> {
+    // Antigravity CLI：事件名在 argv 里，载荷是 camelCase，也没有「等你确认」的事件，
+    // 只报开始干活、还在干和回合结束。
+    if source == HookSource::Antigravity {
+        return match given {
+            Some("PreInvocation") => Some((HookEvent::PromptSubmit, None)),
+            Some("PostInvocation") => Some((HookEvent::ToolComplete, None)),
+            Some("Stop") => Some((HookEvent::TurnDone, None)),
+            _ => None,
+        };
+    }
     // 别家 hook 运行器用 camelCase 字段名，Claude Code、Codex 自己从不这样发：不是它们，别串台。
     if payload.get("hookEventName").is_some() {
         return None;
@@ -106,7 +125,7 @@ mod tests {
 
     #[test]
     fn claude_code_hooks_map_to_events() {
-        let claude = |payload| hook_event(HookSource::Claude, &payload);
+        let claude = |payload| hook_event(HookSource::Claude, None, &payload);
         assert_eq!(
             claude(json!({"hook_event_name": "UserPromptSubmit", "prompt": "看一下磁盘"})),
             Some((HookEvent::PromptSubmit, None))
@@ -136,7 +155,7 @@ mod tests {
     /// 「闲着等你输入」的提醒、没写类型的通知都不算等你确认；别家运行器的 camelCase 载荷不认。
     #[test]
     fn idle_reminders_and_foreign_payloads_are_not_events() {
-        let claude = |payload| hook_event(HookSource::Claude, &payload);
+        let claude = |payload| hook_event(HookSource::Claude, None, &payload);
         assert_eq!(
             claude(
                 json!({"hook_event_name": "Notification", "notification_type": "idle_prompt",
@@ -157,7 +176,7 @@ mod tests {
 
     #[test]
     fn codex_notify_and_hooks_map_to_events() {
-        let codex = |payload| hook_event(HookSource::Codex, &payload);
+        let codex = |payload| hook_event(HookSource::Codex, None, &payload);
         assert_eq!(
             codex(json!({"type": "agent-turn-complete", "last-assistant-message": "done"})),
             Some((HookEvent::TurnDone, None))
@@ -174,11 +193,25 @@ mod tests {
         let long = "字".repeat(300);
         let (_, message) = hook_event(
             HookSource::Claude,
+            None,
             &json!({"hook_event_name": "PermissionRequest", "message": long}),
         )
         .unwrap();
         let message = message.unwrap();
         assert_eq!(message.chars().count(), 201);
         assert!(message.ends_with('…'));
+    }
+
+    /// Antigravity CLI 的事件名在参数里：开始干活、还在干、回合结束；不认得的不报。
+    #[test]
+    fn antigravity_events_come_from_the_argument() {
+        let agy = |event| hook_event(HookSource::Antigravity, Some(event), &json!({}));
+        assert_eq!(agy("PreInvocation"), Some((HookEvent::PromptSubmit, None)));
+        assert_eq!(agy("PostInvocation"), Some((HookEvent::ToolComplete, None)));
+        assert_eq!(agy("Stop"), Some((HookEvent::TurnDone, None)));
+        assert_eq!(agy("PreToolUse"), None);
+        assert_eq!(agy("SessionStart"), None);
+        // 没有事件名（比如手敲 `micaterm hook agy`）时什么也不报。
+        assert_eq!(hook_event(HookSource::Antigravity, None, &json!({})), None);
     }
 }

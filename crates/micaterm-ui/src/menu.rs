@@ -1,7 +1,7 @@
-//! 右键菜单（26 号，照 Zed `context_menu`）：最小宽 200、四周留 4、圆角 8、外圈 1px 深一档的线；
-//! 每项高 28、圆角 5、左右留 8，文字和右边的快捷键之间至少 24；悬停或键盘选中是 `--sel` 底；
+//! 右键菜单（照 Muxy 空壳的右键菜单）：最小宽 200、四周留 5、圆角 8、外圈 1px 深一档的线；
+//! 每项高 21、圆角 5、左右留 6，文字和右边的快捷键之间至少 16；悬停或键盘选中是强调色底、白字；
 //! 快捷键用等宽字体、淡色，按基线和文字对齐再上移 0.5（用户定的全局规则）；
-//! 置灰项文字更淡，危险项（删除、断开连接）是红字；分隔是一条 1px 线，上下各留 6。
+//! 置灰项文字更淡，危险项（删除、断开连接）是红字；分隔是一条 1px 线，上下各留 3。
 //! 勾选项（「显示隐藏文件」）开着时右边画一个对勾，在快捷键的位置。
 //!
 //! 行为照 gpui-component 的 `PopupMenu`，调用方几乎不用改：`Menu::build` 建，`action_context`
@@ -16,6 +16,9 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+/// 右键菜单、链接提示这类浮层与窗口边缘之间至少留的空白（调用方传给 `snap_to_window_with_margin`）。
+pub const WINDOW_MARGIN: Pixels = px(8.);
+
 /// 菜单画在什么颜色、什么字上。应用按自己的 token 设成全局量；没设时用一套中性灰。
 #[derive(Clone, Debug, PartialEq)]
 pub struct MenuStyle {
@@ -23,8 +26,8 @@ pub struct MenuStyle {
     /// 外圈的线（`--line-strong`）。
     pub border: Hsla,
     /// 菜单底下的阴影。
-    pub shadow: Hsla,
-    /// 分隔线（`--line`）。
+    pub shadows: Vec<BoxShadow>,
+    /// 分隔线（`--line-strong`，和菜单外圈同色；`--line` 是按内容底混的，在面板上几乎看不见）。
     pub separator: Hsla,
     pub text: Hsla,
     /// 快捷键（`--st-dim`）。
@@ -33,34 +36,49 @@ pub struct MenuStyle {
     pub disabled: Hsla,
     /// 危险项（`--err`）。
     pub danger: Hsla,
-    /// 悬停、键盘选中的底（`--sel`）。
+    /// 悬停、键盘选中的底（强调色）。
     pub selected: Hsla,
+    /// 悬停、键盘选中时的文字（强调色上的字）。
+    pub selected_text: Hsla,
     /// 文字的字体、字号；快捷键的字体、字号。
     pub font: SharedString,
     pub text_size: Pixels,
     pub hint_font: SharedString,
     pub hint_size: Pixels,
+    /// 菜单几何尺寸（由应用主题统一注入）。
+    pub min_width: Pixels,
+    pub row_height: Pixels,
+    pub padding: Pixels,
+    pub radius: Pixels,
+    pub item_radius: Pixels,
 }
 
 impl Global for MenuStyle {}
 
 impl Default for MenuStyle {
     fn default() -> Self {
-        let gray = |lightness: f32| hsla(0., 0., lightness, 1.);
+        let gray = crate::default_gray;
         Self {
             background: gray(0.98),
             border: gray(0.82),
-            shadow: hsla(0., 0., 0., 0.1),
+            // 阴影由应用在启动时按主题注入（`src/settings/apply.rs`），这里不内置。
+            shadows: Vec::new(),
             separator: gray(0.88),
             text: gray(0.15),
             hint: gray(0.5),
             disabled: gray(0.66),
             danger: hsla(0., 0.6, 0.48, 1.),
             selected: gray(0.87),
+            selected_text: gray(0.15),
             font: "".into(),
-            text_size: px(12.),
+            text_size: px(11.),
             hint_font: "".into(),
-            hint_size: px(11.5),
+            hint_size: px(11.),
+            min_width: px(160.),
+            row_height: px(20.),
+            padding: px(4.),
+            radius: px(8.),
+            item_radius: px(4.),
         }
     }
 }
@@ -71,14 +89,8 @@ impl MenuStyle {
     }
 }
 
-/// 最小宽度、行高、四周留白、圆角（26 号 `.menu`、`.mi`）。
-const MIN_WIDTH: Pixels = px(200.);
-const ROW: Pixels = px(28.);
-const PADDING: Pixels = px(4.);
-const RADIUS: Pixels = px(8.);
-const ITEM_RADIUS: Pixels = px(5.);
 /// 文字和快捷键之间至少这么宽。
-const HINT_GAP: Pixels = px(24.);
+const HINT_GAP: Pixels = px(14.);
 
 enum MenuItem {
     Separator,
@@ -331,7 +343,7 @@ fn hint_shift(style: &MenuStyle, window: &Window) -> Pixels {
     let text = window.text_system();
     let baseline = |family: &SharedString, size: Pixels| {
         let id = text.resolve_font(&font(family.clone()));
-        text.baseline_offset(id, size, ROW)
+        text.baseline_offset(id, size, style.row_height)
     };
     baseline(&style.font, style.text_size) - baseline(&style.hint_font, style.hint_size) - px(0.5)
 }
@@ -339,6 +351,7 @@ fn hint_shift(style: &MenuStyle, window: &Window) -> Pixels {
 impl Render for Menu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let style = MenuStyle::current(cx);
+        let row_height = style.row_height;
         let shift = hint_shift(&style, window);
         let rows: Vec<AnyElement> = self
             .items
@@ -350,7 +363,7 @@ impl Render for Menu {
                     .test_support()
                     .flex_none()
                     .h(px(1.))
-                    .my(px(6.))
+                    .my(px(2.5))
                     .mx(px(4.))
                     .bg(style.separator)
                     .into_any_element(),
@@ -379,6 +392,8 @@ impl Render for Menu {
                         style.hint
                     };
                     let disabled = *disabled;
+                    let selected = self.selected == Some(index) && !disabled;
+                    let text_color = if selected { style.selected_text } else { color };
                     div()
                         .id(index)
                         .test_support()
@@ -388,14 +403,12 @@ impl Render for Menu {
                         .flex_none()
                         .items_center()
                         .gap(HINT_GAP)
-                        .h(ROW)
-                        .px(px(8.))
-                        .rounded(ITEM_RADIUS)
-                        .text_color(color)
+                        .h(row_height)
+                        .px(px(6.))
+                        .rounded(style.item_radius)
+                        .text_color(text_color)
                         .whitespace_nowrap()
-                        .when(self.selected == Some(index) && !disabled, |row| {
-                            row.bg(style.selected)
-                        })
+                        .when(selected, |row| row.bg(style.selected))
                         .when(!disabled, |row| {
                             row.cursor_pointer()
                                 .on_hover(cx.listener(move |menu, hovered: &bool, _, cx| {
@@ -411,24 +424,28 @@ impl Render for Menu {
                                     menu.confirm(index, window, cx);
                                 }))
                         })
-                        .child(div().flex_1().line_height(ROW).child(label.clone()))
+                        .child(div().flex_1().line_height(row_height).child(label.clone()))
                         .children(hint.map(|hint| {
                             div()
                                 .flex_none()
                                 .relative()
                                 .top(shift)
-                                .line_height(ROW)
+                                .line_height(row_height)
                                 .font_family(style.hint_font.clone())
                                 .text_size(style.hint_size)
-                                .text_color(hint_color)
+                                .text_color(if selected {
+                                    style.selected_text.opacity(0.7)
+                                } else {
+                                    hint_color
+                                })
                                 .child(hint)
                         }))
                         .when(*checked == Some(true), |row| {
                             row.child(
                                 Icon::new(IconName::Check)
-                                    .size(px(14.))
+                                    .size(px(11.))
                                     .flex_none()
-                                    .text_color(color),
+                                    .text_color(text_color),
                             )
                         })
                         .into_any_element()
@@ -453,19 +470,13 @@ impl Render for Menu {
             .occlude()
             .flex()
             .flex_col()
-            .min_w(MIN_WIDTH)
-            .p(PADDING)
-            .rounded(RADIUS)
+            .min_w(style.min_width)
+            .p(style.padding)
+            .rounded(style.radius)
             .bg(style.background)
             .border_1()
             .border_color(style.border)
-            .shadow(vec![BoxShadow {
-                color: style.shadow,
-                offset: point(px(0.), px(6.)),
-                blur_radius: px(20.),
-                spread_radius: px(0.),
-                inset: false,
-            }])
+            .shadow(style.shadows)
             .font_family(style.font.clone())
             .text_size(style.text_size)
             .children(rows)
@@ -476,9 +487,15 @@ impl Render for Menu {
 mod tests {
     use gpui_kit::{TestAppContext, actions};
 
-    use super::{Menu, MenuItem};
+    use super::{Menu, MenuItem, WINDOW_MARGIN};
 
     actions!(menu_test, [First, Second, Third]);
+
+    /// 菜单贴边留白仍是 8px。
+    #[test]
+    fn window_margin_stays_8px() {
+        assert_eq!(WINDOW_MARGIN, gpui_kit::px(8.));
+    }
 
     #[gpui_kit::test]
     fn separators_never_lead_or_double(cx: &mut TestAppContext) {

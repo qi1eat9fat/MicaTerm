@@ -118,7 +118,7 @@ fn the_shell_from_the_settings_is_started(cx: &mut TestAppContext) {
     assert_eq!(provider.shells(), [LocalShell::new("cmd.exe /k")]);
 }
 
-/// 卡片顶行（26 号，2026-11-14）：高 28，写 shell 名；终端在它下面 8、离左边 20。
+/// 卡片顶行：高 36，写 shell 名；终端在它下面 6、离左边 16。
 /// 卡片和标签的无障碍名称是 shell 名和目录。
 #[gpui_kit::test]
 fn the_card_has_a_title_row_and_names_the_shell_and_its_folder(cx: &mut TestAppContext) {
@@ -136,11 +136,11 @@ fn the_card_has_a_title_row_and_names_the_shell_and_its_folder(cx: &mut TestAppC
         let terminal = window.find(("terminal", 1usize)).bounds();
         let title = window.find(("card-title", 1usize));
         assert_eq!(title.bounds().top(), card.bounds().top());
-        assert_eq!(title.bounds().size.height, px(28.));
+        assert_eq!(title.bounds().size.height, px(22.));
         assert_eq!(title.label(), Some("pwsh"));
-        // 终端在顶行下面 8（终端自己四周留 0.5 rem）、离左边 20。
-        assert_eq!(terminal.top() - card.bounds().top(), px(36.));
-        assert_eq!(terminal.left() - card.bounds().left(), px(20.));
+        // 终端在顶行下面 6（终端自己四周留 0.5 rem）、离左边 8（左右尽量铺满）。
+        assert_eq!(terminal.top() - card.bounds().top(), px(28.));
+        assert_eq!(terminal.left() - card.bounds().left(), px(8.));
         // 没有报告目录时是主目录。
         assert_eq!(card.label(), Some("pwsh ~"));
         // 标签也是。
@@ -173,9 +173,10 @@ fn the_header_follows_the_folder_of_the_shell(cx: &mut TestAppContext) {
     assert_eq!(label.as_deref(), Some(expected));
 }
 
-/// 底部状态栏（高 28）：正中是路径，右边是尺寸（本地卡片没有连接状态和系统，编码不写）。
+/// 底部状态栏（高 22）：最左边是文件夹 + 路径；本地卡片没有系统和连接状态，
+/// 也不再写列数 × 行数，编码不常驻。
 #[gpui_kit::test]
-fn the_status_bar_shows_the_folder_and_the_size(cx: &mut TestAppContext) {
+fn the_status_bar_shows_the_folder_on_the_left(cx: &mut TestAppContext) {
     let (handle, workspace, _, _) = open_with_fake_terminals(cx, FakeTerminalFactory::default());
 
     dispatch(cx, handle, NewLocalTerminalTab);
@@ -183,21 +184,22 @@ fn the_status_bar_shows_the_folder_and_the_size(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, _| {
         let card = window.find(CARD).bounds();
         let status = window.find(("card-status", 1usize));
-        assert_eq!(status.bounds().size.height, px(28.));
+        assert_eq!(status.bounds().size.height, px(22.));
         // 贴着卡片底边。
         assert_eq!(card.bottom(), status.bounds().bottom());
         let label = status.label().expect("the status bar says what it shows");
-        assert!(label.starts_with("~ · "), "{label}");
+        assert_eq!(label, "~");
+        assert!(!label.contains('×'), "{label}");
         assert!(!label.contains("UTF-8"), "{label}");
-        let path = window.find(("card-status-path", 1usize)).bounds();
-        let middle = (path.left() + path.right()) / 2.;
-        let center = (card.left() + card.right()) / 2.;
-        assert!((middle - center).abs() < px(1.), "{path:?} {card:?}");
-        // 尺寸是终端现在的列数 × 行数。
-        let size = label.rsplit(" · ").next().unwrap();
-        let (columns, rows) = size.split_once('×').expect("columns × rows");
-        assert!(columns.parse::<usize>().unwrap() > 20, "{label}");
-        assert!(rows.parse::<usize>().unwrap() > 5, "{label}");
+        // 路径那一组贴着左边（不是正中）。
+        let path = window.find(("card-status-path-group", 1usize)).bounds();
+        assert!(
+            (path.left() - card.left()).abs() < px(1.),
+            "{path:?} {card:?}"
+        );
+        // 本地卡片没有系统和连接状态那两段。
+        assert!(window.try_find(("card-status-system", 1usize)).is_none());
+        assert!(window.try_find(("card-status-state", 1usize)).is_none());
     });
     cx.update(|cx| assert_eq!(workspace.read(cx).tab_ids().len(), 1));
 }
@@ -226,7 +228,7 @@ fn closing_the_card_closes_its_shell(cx: &mut TestAppContext) {
     dispatch(cx, handle, NewLocalTerminalTab);
     assert_eq!(factory.shutdowns(), 0);
 
-    click_terminal_menu(cx, handle, 1, "关闭卡片");
+    click_terminal_menu(cx, handle, 1, "Close Card");
 
     assert_eq!(factory.wait_for_shutdowns(1), 1);
     in_frame(cx, handle, |window, _| {
@@ -271,7 +273,7 @@ fn a_shell_that_exits_leaves_its_card_and_says_why(cx: &mut TestAppContext) {
     dispatch(cx, handle, NewLocalTerminalTab);
 
     let screen = wait_for_screen(cx, &workspace, CardId(1), "退出码 9");
-    assert!(screen.contains("[进程已退出，退出码 9]"), "{screen}");
+    assert!(screen.contains("[Process exited with code 9]"), "{screen}");
     in_frame(cx, handle, |window, _| assert!(window.find(CARD).visible()));
 }
 
@@ -283,7 +285,10 @@ fn a_shell_that_cannot_start_leaves_its_card_and_says_why(cx: &mut TestAppContex
     dispatch(cx, handle, NewLocalTerminalTab);
 
     let screen = wait_for_screen(cx, &workspace, CardId(1), "测试启动失败");
-    assert!(screen.contains("[终端错误：测试启动失败]"), "{screen}");
+    assert!(
+        screen.contains("[Terminal error: 测试启动失败]"),
+        "{screen}"
+    );
     in_frame(cx, handle, |window, _| assert!(window.find(CARD).visible()));
 }
 

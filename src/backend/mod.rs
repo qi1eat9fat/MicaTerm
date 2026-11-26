@@ -34,7 +34,8 @@ mod transport;
 
 pub use describe::{
     authentication_fields, authentication_instructions, authentication_title, describe_chain,
-    describe_error, describe_exec_error, describe_login_error, host_key_changed_lead, latency_label, unknown_host_lead,
+    describe_error, describe_exec_error, describe_login_error, host_key_changed_lead,
+    latency_label, unknown_host_lead,
 };
 pub use remote::{
     ConnectionId, ProbeFailure, PromptId, RemoteEvent, RemotePrompt, RemoteTarget,

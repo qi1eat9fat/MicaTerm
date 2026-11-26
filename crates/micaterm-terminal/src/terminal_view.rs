@@ -28,7 +28,7 @@ use crate::actions::{
     ClearTerminal, CopyTerminal, DismissTerminalFind, FindInTerminal, FindNextInTerminal,
     FindPreviousInTerminal, PasteTerminal, SelectAllTerminal, SendBackTab, SendTab,
 };
-use micaterm_ui::{FindButton, FindCard, FindStyle, Menu};
+use micaterm_ui::{FindButton, FindCard, FindStyle, Menu, WINDOW_MARGIN};
 
 use crate::box_drawing::{self, CellMetrics};
 use crate::font;
@@ -324,6 +324,8 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
         let subscriptions = vec![
             cx.observe(&engine, |_, _, cx| cx.notify()),
+            cx.observe_global::<TerminalColors>(|_, cx| cx.notify()),
+            cx.observe_global::<TerminalFont>(|_, cx| cx.notify()),
             cx.observe_global::<TerminalInteraction>(|this, cx| {
                 this.cursor_visible = true;
                 cx.notify();
@@ -1243,7 +1245,7 @@ impl Render for TerminalView {
                     deferred(
                         anchored()
                             .position(position)
-                            .snap_to_window_with_margin(px(8.))
+                            .snap_to_window_with_margin(WINDOW_MARGIN)
                             .child(menu),
                     )
                     .with_priority(gpui_kit::base::POPUP_PRIORITY),
@@ -1257,7 +1259,7 @@ impl Render for TerminalView {
                         deferred(
                             anchored()
                                 .position(link.position + point(px(0.), px(20.)))
-                                .snap_to_window_with_margin(px(8.))
+                                .snap_to_window_with_margin(WINDOW_MARGIN)
                                 .child(link_tooltip(link.uri, window, cx)),
                         )
                         .with_priority(1),
@@ -1502,7 +1504,30 @@ impl Element for TerminalElement {
         let mut highlights = Vec::new();
         let find_style = FindStyle::current(cx);
         // 高亮只盖住字的高度（26 号是行内的 span），不是整行：行高 1.6 时整行太高。
-        let highlight_height = ((font_size * 1.3).min(line_height) * scale).round() / scale;
+        let highlight_height = micaterm_ui::find_highlight_height(font_size, line_height, scale);
+        // 焦点终端画设置里的光标（会闪）；不在焦点的画空心块，一眼看出焦点在哪个窗格；结束了不画。
+        let focused = self.focus_handle.is_focused(window);
+        let shape = match self.snapshot.cursor_shape {
+            CursorShape::Hidden => CursorShape::Hidden,
+            _ if !focused => CursorShape::HollowBlock,
+            shape => shape,
+        };
+        let cursor_shown = self.snapshot.cursor_row.is_some()
+            && self.marked_text.is_empty()
+            && !self.ended
+            && (self.cursor_visible || !focused);
+        // 实心块状光标直接画在单元格底色层，并反转光标下字符颜色，避免半透明方块盖糊字符。
+        let block_cursor = (cursor_shown && shape == CursorShape::Block).then(|| {
+            (
+                self.snapshot
+                    .cursor_row
+                    .unwrap_or_default()
+                    .min(self.snapshot.rows.saturating_sub(1)),
+                self.snapshot
+                    .cursor_column
+                    .min(self.snapshot.columns.saturating_sub(1)),
+            )
+        });
         let mut drawn = Vec::new();
         for (row_index, row) in self
             .snapshot
@@ -1524,13 +1549,16 @@ impl Element for TerminalElement {
                     cell.flags,
                     &self.snapshot.colors,
                 );
-                let cell_background = if cell.selected {
+                let on_block_cursor = block_cursor == Some((row_index, column));
+                let cell_background = if on_block_cursor {
+                    palette.cursor
+                } else if cell.selected {
                     palette.selection
                 } else {
                     background
                 };
-                // 查找的匹配连成一段，在底色上面另画一块（选中的字照旧是选中色）。
-                let mark = if cell.selected {
+                // 查找的匹配连成一段，在底色上面另画一块（选中的字和块状光标照旧优先）。
+                let mark = if cell.selected || on_block_cursor {
                     SearchMark::None
                 } else {
                     cell.search
@@ -1574,13 +1602,19 @@ impl Element for TerminalElement {
                     .link
                     .map(|link| palette.link(hovered_link == Some(link)));
                 let text_color = link.unwrap_or(foreground);
-                let color = if cell.selected {
-                    palette.foreground
+                let color = if on_block_cursor {
+                    palette.cursor_text_color()
+                } else if cell.selected {
+                    palette.selected_text_color(text_color)
                 } else if cell.search == SearchMark::Focused {
                     find_style.current_text
                 } else {
                     text_color
                 };
+                let underline_color = cell
+                    .underline_color
+                    .map(|underline| palette.resolve(underline, &self.snapshot.colors))
+                    .unwrap_or(color);
                 // Drawn here, a space in the line keeps the cell.
                 let mut characters = character.chars();
                 let shapes = match (characters.next(), characters.next()) {
@@ -1615,8 +1649,12 @@ impl Element for TerminalElement {
                             cell.flags
                                 .intersects(Flags::ALL_UNDERLINES)
                                 .then_some(UnderlineStyle {
-                                    thickness: px(1.),
-                                    color: Some(text_color),
+                                    thickness: if cell.flags.contains(Flags::DOUBLE_UNDERLINE) {
+                                        px(1.5)
+                                    } else {
+                                        px(1.)
+                                    },
+                                    color: Some(underline_color),
                                     wavy: cell.flags.contains(Flags::UNDERCURL),
                                 })
                         }
@@ -1624,7 +1662,7 @@ impl Element for TerminalElement {
                     strikethrough: cell.flags.contains(Flags::STRIKEOUT).then_some(
                         StrikethroughStyle {
                             thickness: px(1.),
-                            color: Some(text_color),
+                            color: Some(color),
                         },
                     ),
                 });
@@ -1687,21 +1725,10 @@ impl Element for TerminalElement {
             palette.selection,
             window,
         );
-        // 焦点终端画设置里的光标（会闪）；不在焦点的画空心块，一眼看出焦点在哪个窗格
-        // （26 号原型，代替卡片的强调色描边）；结束了不画。
-        let focused = self.focus_handle.is_focused(window);
-        let shape = match self.snapshot.cursor_shape {
-            CursorShape::Hidden => CursorShape::Hidden,
-            _ if !focused => CursorShape::HollowBlock,
-            shape => shape,
-        };
-        let cursor = self
-            .snapshot
-            .cursor_row
-            .filter(|_| {
-                self.marked_text.is_empty() && !self.ended && (self.cursor_visible || !focused)
-            })
-            .and_then(|_| cursor_quad(cursor_bounds, shape, &palette));
+        // 实心块状光标已在底色层绘制并反色字符，这里只画下划线、竖线和失焦空心块。
+        let cursor = (cursor_shown && block_cursor.is_none())
+            .then(|| cursor_quad(cursor_bounds, shape, &palette))
+            .flatten();
 
         TerminalPaintState {
             hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
@@ -2206,7 +2233,7 @@ fn cursor_quad(
             return Some(outline(bounds, palette.cursor, BorderStyle::Solid));
         }
     };
-    Some(fill(cursor, palette.cursor.opacity(0.75)))
+    Some(fill(cursor, palette.cursor))
 }
 
 /// The cell on screen under `position`, if it is over the grid.
@@ -2314,6 +2341,13 @@ impl TerminalPalette {
         flags: Flags,
         overrides: &[Option<Rgb>; COUNT],
     ) -> (Hsla, Hsla) {
+        // 传统终端约定（draw_bold_text_with_bright_colors）：Bold + 标准 8 色提亮到对应亮色，
+        // 让 `ls`/`grep`/`man`/prompt 的 `\x1b[1;3xm` 高亮层次清晰呈现。
+        let foreground = if flags.contains(Flags::BOLD) && !flags.contains(Flags::DIM) {
+            brighten_named_ansi(foreground)
+        } else {
+            foreground
+        };
         let mut foreground = self.resolve(foreground, overrides);
         let mut background = self.resolve(background, overrides);
         if flags.contains(Flags::INVERSE) {
@@ -2323,6 +2357,20 @@ impl TerminalPalette {
             foreground = foreground.opacity(0.66);
         }
         (foreground, background)
+    }
+
+    /// 块状光标上的反色字符：优先在主题背景与前景中选对比度更高的颜色，确保光标下的字清晰锐利。
+    fn cursor_text_color(&self) -> Hsla {
+        contrasting_ink(self.cursor, self.background, self.foreground)
+    }
+
+    /// 选中态文字尽量保留原语法颜色，仅当在选区底色上对比度不足 3:1 时才回退高对比文字色。
+    fn selected_text_color(&self, text_color: Hsla) -> Hsla {
+        if contrast_ratio(text_color, self.selection) >= 3.0 {
+            text_color
+        } else {
+            contrasting_ink(self.selection, self.foreground, self.background)
+        }
     }
 
     fn resolve(&self, color: Color, overrides: &[Option<Rgb>; COUNT]) -> Hsla {
@@ -2357,6 +2405,56 @@ impl TerminalPalette {
 
 fn rgb_to_hsla(color: Rgb) -> Hsla {
     rgb(((color.r as u32) << 16) | ((color.g as u32) << 8) | color.b as u32).into()
+}
+
+fn brighten_named_ansi(color: Color) -> Color {
+    match color {
+        Color::Named(NamedColor::Black) => Color::Named(NamedColor::BrightBlack),
+        Color::Named(NamedColor::Red) => Color::Named(NamedColor::BrightRed),
+        Color::Named(NamedColor::Green) => Color::Named(NamedColor::BrightGreen),
+        Color::Named(NamedColor::Yellow) => Color::Named(NamedColor::BrightYellow),
+        Color::Named(NamedColor::Blue) => Color::Named(NamedColor::BrightBlue),
+        Color::Named(NamedColor::Magenta) => Color::Named(NamedColor::BrightMagenta),
+        Color::Named(NamedColor::Cyan) => Color::Named(NamedColor::BrightCyan),
+        Color::Named(NamedColor::White) => Color::Named(NamedColor::BrightWhite),
+        other => other,
+    }
+}
+
+fn relative_luminance(color: Hsla) -> f32 {
+    let rgb = color.to_rgb();
+    let linear = |value: f32| {
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(rgb.r) + 0.7152 * linear(rgb.g) + 0.0722 * linear(rgb.b)
+}
+
+fn contrast_ratio(a: Hsla, b: Hsla) -> f32 {
+    let (l1, l2) = (relative_luminance(a), relative_luminance(b));
+    (l1.max(l2) + 0.05) / (l1.min(l2) + 0.05)
+}
+
+/// 在给定不透明底色上从 `preferred`、`alternate`（必要时回退纯黑/纯白）中选对比度最高的字色。
+fn contrasting_ink(background: Hsla, preferred: Hsla, alternate: Hsla) -> Hsla {
+    let best_theme = if contrast_ratio(preferred, background) >= contrast_ratio(alternate, background) {
+        preferred
+    } else {
+        alternate
+    };
+    if contrast_ratio(best_theme, background) >= 4.5 {
+        return best_theme;
+    }
+    let black: Hsla = rgb(0x000000).into();
+    let white: Hsla = rgb(0xffffff).into();
+    if contrast_ratio(black, background) >= contrast_ratio(white, background) {
+        black
+    } else {
+        white
+    }
 }
 
 pub(crate) fn encode_key(keystroke: &Keystroke, mode: TermMode) -> Option<Vec<u8>> {
@@ -2741,5 +2839,45 @@ mod tests {
 
         assert_eq!(preedit_caret_position(&layouts, 2, 2, 3, 5), (0, 4));
         assert_eq!(preedit_caret_position(&layouts, 6, 2, 3, 5), (3, 4));
+    }
+
+    #[test]
+    fn bold_brightens_standard_ansi_colors_and_selection_preserves_syntax_color() {
+        use alacritty_terminal::term::color::COUNT;
+        use alacritty_terminal::vte::ansi::{Color, NamedColor};
+        use super::{TerminalPalette, TerminalTheme, contrast_ratio};
+
+        let theme = TerminalTheme::default_for(gpui_kit::component::ThemeMode::Dark);
+        let palette = TerminalPalette {
+            theme,
+            foreground: theme.foreground(),
+            background: theme.background(),
+            cursor: theme.cursor(),
+            selection: theme.selection(),
+        };
+        let overrides = [None; COUNT];
+        let (normal_red, _) = palette.cell_colors(
+            Color::Named(NamedColor::Red),
+            Color::Named(NamedColor::Background),
+            Flags::empty(),
+            &overrides,
+        );
+        let (bold_red, _) = palette.cell_colors(
+            Color::Named(NamedColor::Red),
+            Color::Named(NamedColor::Background),
+            Flags::BOLD,
+            &overrides,
+        );
+        assert_eq!(normal_red, theme.indexed(1));
+        assert_eq!(bold_red, theme.indexed(9));
+        assert_ne!(normal_red, bold_red);
+
+        // 选中时高对比的语法色保留原色，低对比颜色则自动回退可读文字色。
+        let green = theme.indexed(2);
+        assert_eq!(palette.selected_text_color(green), green);
+        assert!(contrast_ratio(palette.selected_text_color(palette.selection), palette.selection) >= 4.5);
+
+        // 块状光标上的反色字符满足 WCAG AA 对比度。
+        assert!(contrast_ratio(palette.cursor_text_color(), palette.cursor) >= 4.5);
     }
 }

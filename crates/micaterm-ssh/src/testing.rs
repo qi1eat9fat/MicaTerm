@@ -88,6 +88,8 @@ pub struct Seen {
     pub commands: Vec<String>,
     /// 当作跳板时，每个 direct-tcpip 通道要去的 `(host, port)`，按顺序（工单 15）。
     pub forwards: Vec<(String, u32)>,
+    /// 通过 `env` 请求送来的环境变量 `(name, value)`。
+    pub env: Vec<(String, String)>,
 }
 
 impl TestServer {
@@ -361,6 +363,19 @@ impl server::Handler for Handler {
     ) -> anyhow::Result<()> {
         lock(&self.seen).size = Some((columns, rows));
         session.channel_success(channel)?;
+        Ok(())
+    }
+
+    async fn env_request(
+        &mut self,
+        _: ChannelId,
+        variable_name: &str,
+        variable_value: &str,
+        _: &mut server::Session,
+    ) -> anyhow::Result<()> {
+        lock(&self.seen)
+            .env
+            .push((variable_name.to_string(), variable_value.to_string()));
         Ok(())
     }
 

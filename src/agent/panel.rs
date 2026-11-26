@@ -15,11 +15,13 @@ use super::state::{AgentState, AgentTracker, state_label};
 use crate::app::{CatalogIcon, RestartAgent, ShowAgent};
 use crate::cli::AgentKind;
 use crate::i18n::t;
-use crate::theme::{Tokens, size};
+use crate::theme::space;
+use crate::theme::{INTERFACE_FONT_SIZE, Tokens, TypeScale, WEIGHT_SEMIBOLD, size};
+use crate::ui::dock::dock_panel;
 use crate::ui::icon_button::IconButton;
 
-/// 面板第一次展开的宽度：终端要宽一些（凭据、片段是 280）。之后是用户拖到的宽度。
-pub const AGENT_PANEL_WIDTH: Pixels = px(440.);
+/// 面板第一次展开的宽度（与停靠面板统一）。之后是用户拖到的宽度。
+pub const AGENT_PANEL_WIDTH: Pixels = size::DOCK_PANEL_WIDTH;
 
 /// 面板里跑着的 Agent。
 pub struct AgentPanel {
@@ -67,10 +69,10 @@ impl AgentPanel {
                 .flex()
                 .flex_none()
                 .items_center()
-                .gap(px(5.))
-                .ml(px(8.))
+                .gap(space::SPACE_5)
+                .ml(space::SPACE_8)
                 .text_color(text)
-                .child(div().size(px(6.)).rounded_full().bg(dot))
+                .child(crate::ui::dot(dot, size::DOT))
                 .child(label),
         )
     }
@@ -97,17 +99,29 @@ impl AgentPanel {
     }
 
     pub fn render(&self, target: &FocusHandle, tokens: &Tokens) -> AnyElement {
+        let scale = TypeScale::from_base(INTERFACE_FONT_SIZE);
         let header = div()
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(4.))
-            .h(px(32.))
-            .pl(px(16.))
-            .pr(px(8.))
+            .gap(space::SPACE_5)
+            .h(size::DOCK_HEADER)
+            .pl(space::SPACE_10)
+            // 右边只留 1：20 宽按钮的中心和顶栏 22 宽窗口按钮的圆点中心对齐。
+            .pr(px(1.))
+            .border_b(size::LINE)
+            .border_color(tokens.line)
+            .text_size(scale.sm)
             .child(
                 div()
                     .flex_none()
+                    .text_color(tokens.icon)
+                    .child(Icon::new(CatalogIcon::Sparkles).size(size::ICON_SM)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .font_weight(WEIGHT_SEMIBOLD)
                     .text_color(tokens.text)
                     .child(t!("agent.panel.title")),
             )
@@ -124,23 +138,33 @@ impl AgentPanel {
             .children(self.folder_label(tokens))
             .children(self.state_chip(tokens))
             .child(div().flex_1())
+            // 两个按钮贴在一起（间距 2，和凭据、片段面板的标题行一致），好和顶栏窗口按钮对齐。
             .child(
-                IconButton::new(
-                    "agent-panel-restart",
-                    CatalogIcon::RefreshCw,
-                    t!("agent.panel.restart"),
-                )
-                .size(px(24.), px(14.))
-                .dispatch(Box::new(RestartAgent), target, tokens),
-            )
-            .child(
-                IconButton::new(
-                    "agent-panel-close",
-                    CatalogIcon::Close,
-                    t!("agent.panel.close"),
-                )
-                .size(px(24.), px(14.))
-                .dispatch(Box::new(ShowAgent), target, tokens),
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(space::SPACE_2)
+                    .child(
+                        IconButton::new(
+                            "agent-panel-restart",
+                            CatalogIcon::RefreshCw,
+                            t!("agent.panel.restart"),
+                        )
+                        .sm()
+                        // 刷新箭头画出来比关闭的 × 大一圈，单独小一号。
+                        .icon_size(px(10.))
+                        .dispatch(Box::new(RestartAgent), target, tokens),
+                    )
+                    .child(
+                        IconButton::new(
+                            "agent-panel-close",
+                            CatalogIcon::Close,
+                            t!("agent.panel.close"),
+                        )
+                        .sm()
+                        .dispatch(Box::new(ShowAgent), target, tokens),
+                    ),
             );
         let note = self.note.clone().map(|note| {
             div()
@@ -150,32 +174,26 @@ impl AgentPanel {
                 .flex()
                 .flex_none()
                 .items_center()
-                .gap(px(6.))
-                .h(px(28.))
-                .px(px(16.))
+                .gap(space::SPACE_5)
+                .h(size::DOCK_HEADER)
+                .pl(space::SPACE_10)
+                .pr(space::SPACE_16)
                 .border_b(size::LINE)
                 .border_color(tokens.line)
+                .text_size(scale.sm)
                 .text_color(tokens.text2)
                 .child(
                     div()
                         .flex_none()
                         .text_color(tokens.icon)
-                        .child(Icon::new(CatalogIcon::Check).size(px(12.))),
+                        .child(Icon::new(CatalogIcon::Check).size(size::ICON_SM)),
                 )
                 .child(div().min_w_0().truncate().child(note))
         });
-        div()
-            .id("agent-panel")
+        // 外框和凭据、片段面板共用：宽度由外面的可拖分隔决定（默认 `AGENT_PANEL_WIDTH`），这里填满。
+        dock_panel("agent-panel", tokens)
             .test_support()
-            .flex()
-            .flex_col()
-            // 宽度由外面的可拖分隔决定（默认 `AGENT_PANEL_WIDTH`），这里填满。
-            .flex_1()
-            .min_w_0()
             .h_full()
-            .border_l(size::LINE)
-            .border_color(tokens.line)
-            .bg(tokens.content)
             .child(header)
             .children(note)
             .child(

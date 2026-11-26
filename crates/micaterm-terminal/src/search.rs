@@ -64,6 +64,7 @@ impl SearchPosition {
         match (self.total, self.current()) {
             (0, _) => t!("terminal.find.no_results"),
             (total, Some(current)) => format!("{current}/{total}").into(),
+            (total @ 1, None) => t!("terminal.find.count_one", count = total),
             (total, None) => t!("terminal.find.count", count = total),
         }
     }
@@ -377,8 +378,9 @@ mod tests {
     #[test]
     fn position_labels_read_as_the_bar_shows_them() {
         assert_eq!(SearchPosition::new(Some(2), 12).label(), "3/12");
-        assert_eq!(SearchPosition::new(None, 0).label(), "无结果");
-        assert_eq!(SearchPosition::new(None, 4).label(), "4 项");
+        assert_eq!(SearchPosition::new(None, 0).label(), "No Results");
+        assert_eq!(SearchPosition::new(None, 1).label(), "1 result");
+        assert_eq!(SearchPosition::new(None, 4).label(), "4 results");
     }
 
     fn step(

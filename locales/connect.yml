@@ -1,28 +1,41 @@
 _version: 2
 # 连接时要问用户的事（src/connect/）。按钮文案照 shell-rs，样式照全部界面原型。
 connect.unknown_host.title:
+  en: Verify Host Key
   zh-CN: 确认主机密钥
 connect.unknown_host.note:
+  en: Once trusted, it is saved to MicaTerm's own known_hosts and you won't be asked again
   zh-CN: 信任后记在 MicaTerm 自己的 known_hosts，之后不再问
 connect.unknown_host.trust:
+  en: Trust and Connect
   zh-CN: 信任并连接
 connect.key_changed.title:
+  en: Host Key Changed
   zh-CN: 主机密钥变了
 connect.key_changed.saved:
+  en: "Saved: %{fingerprint}"
   zh-CN: 记下的：%{fingerprint}
 connect.key_changed.now:
+  en: "Current: %{fingerprint}"
   zh-CN: 现在的：%{fingerprint}
 connect.key_changed.saved_label:
+  en: Saved
   zh-CN: 记下的
 connect.key_changed.now_label:
+  en: Current
   zh-CN: 现在的
 connect.key_changed.replace:
+  en: Update and Connect
   zh-CN: 更新并连接
 connect.fingerprint.algorithm:
+  en: Type
   zh-CN: 类型
 connect.fingerprint.value:
+  en: Fingerprint
   zh-CN: 指纹
 connect.cancel:
+  en: Cancel
   zh-CN: 取消
 connect.ok:
+  en: Connect
   zh-CN: 连接

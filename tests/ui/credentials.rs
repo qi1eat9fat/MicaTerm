@@ -98,10 +98,10 @@ fn the_credentials_icon_opens_the_panel_and_closes_it_again(cx: &mut TestAppCont
     assert_eq!(
         rows(cx, handle),
         [
-            "部署密钥 · 密钥 · ED25519 · deploy · 2 台主机",
-            "运维密码 · 密码 · root · 1 台主机",
-            "本机 Agent · SSH Agent · ops · 1 台主机",
-            "旧 RSA 密钥 · 密钥 · admin · 未使用",
+            "部署密钥 · Key · ED25519 · deploy · 2 hosts",
+            "运维密码 · Password · root · 1 host",
+            "本机 Agent · SSH Agent · ops · 1 host",
+            "旧 RSA 密钥 · Key · admin · Unused",
         ]
     );
 
@@ -116,6 +116,19 @@ fn the_credentials_icon_opens_the_panel_and_closes_it_again(cx: &mut TestAppCont
     assert!(present(cx, handle, "snippets"));
 }
 
+/// 标题行右边的「收起」和右侧栏的图标一样，把面板收起来。
+#[gpui_kit::test]
+fn the_headers_collapse_button_closes_the_panel(cx: &mut TestAppContext) {
+    let (handle, workspace, _) = open(cx);
+    click(cx, handle, "right-sidebar-credentials");
+    assert!(present(cx, handle, "credentials"));
+    click(cx, handle, "credentials-close");
+    assert!(!present(cx, handle, "credentials"));
+    cx.update(|cx| {
+        assert_eq!(workspace.read(cx).right_panel(), None);
+    });
+}
+
 /// 保险库的状态只在主机栏左下角（26 号）：面板里没有状态条；锁着时名称、类型、用户名照常显示。
 #[gpui_kit::test]
 fn a_locked_vault_still_lists_every_credential(cx: &mut TestAppContext) {
@@ -127,7 +140,7 @@ fn a_locked_vault_still_lists_every_credential(cx: &mut TestAppContext) {
     assert_eq!(rows(cx, handle).len(), 4);
     assert_eq!(
         label(cx, handle, row(1)).as_deref(),
-        Some("部署密钥 · 密钥 · ED25519 · deploy · 2 台主机")
+        Some("部署密钥 · Key · ED25519 · deploy · 2 hosts")
     );
 }
 
@@ -141,7 +154,7 @@ fn credentials_are_grouped_by_kind_and_a_group_folds(cx: &mut TestAppContext) {
         "credential-group",
         micaterm_hosts::CredentialKind::Key as usize,
     );
-    assert_eq!(label(cx, handle, group).as_deref(), Some("密钥"));
+    assert_eq!(label(cx, handle, group).as_deref(), Some("Key"));
 
     click(cx, handle, group);
     assert_eq!(shown_rows(cx, handle), [2, 3]);
@@ -235,7 +248,7 @@ fn a_new_password_credential_keeps_its_password_in_the_vault(cx: &mut TestAppCon
     let (handle, workspace, secrets) = open_with_secrets(cx);
     new_credential(cx, handle);
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("modal-title").label(), Some("新建凭据"));
+        assert_eq!(window.find("modal-title").label(), Some("New Credential"));
         assert_eq!(window.find("credential-name").focused(), Some(true));
     });
 
@@ -245,11 +258,11 @@ fn a_new_password_credential_keeps_its_password_in_the_vault(cx: &mut TestAppCon
     assert!(credential_dialog_open(cx, handle));
     assert_eq!(
         error_of(cx, handle, "credential-name").as_deref(),
-        Some("名称不能为空")
+        Some("Name is required")
     );
     assert_eq!(
         error_of(cx, handle, "credential-password").as_deref(),
-        Some("请输入密码")
+        Some("Enter a password")
     );
 
     fill(cx, handle, "credential-name", "跳板密码");
@@ -268,7 +281,7 @@ fn a_new_password_credential_keeps_its_password_in_the_vault(cx: &mut TestAppCon
     );
     assert_eq!(
         label(cx, handle, row(5)).as_deref(),
-        Some("跳板密码 · 密码 · ops · 未使用")
+        Some("跳板密码 · Password · ops · Unused")
     );
 }
 
@@ -318,13 +331,14 @@ fn a_generated_key_shows_its_public_key_and_goes_into_the_vault(cx: &mut TestApp
     );
     assert_eq!(
         label(cx, handle, row(5)).as_deref(),
-        Some("新服务器密钥 · 密钥 · ED25519 · deploy · 未使用")
+        Some("新服务器密钥 · Key · ED25519 · deploy · Unused")
     );
 }
 
 /// 一把没加密的 Ed25519 私钥的文件内容和它的公钥。
 fn plain_key() -> (String, String) {
-    let key = micaterm_hosts::GeneratedKey::generate(micaterm_hosts::KeyAlgorithm::Ed25519).unwrap();
+    let key =
+        micaterm_hosts::GeneratedKey::generate(micaterm_hosts::KeyAlgorithm::Ed25519).unwrap();
     (
         key.encode("me@laptop", "").unwrap().to_string(),
         key.public_key_line("me@laptop"),
@@ -346,7 +360,7 @@ fn a_pasted_key_is_read_for_its_public_key_and_kept_in_the_vault(cx: &mut TestAp
     save_credential(cx, handle);
     assert_eq!(
         error_of(cx, handle, "credential-key-text").as_deref(),
-        Some("这是公钥（放在服务器上的那一半），请粘贴私钥")
+        Some("This is a public key (the half that lives on the server). Paste the private key instead")
     );
 
     cx.update(|cx| cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text.clone())));
@@ -387,7 +401,7 @@ fn a_key_file_is_copied_into_the_vault_once(cx: &mut TestAppContext) {
     save_credential(cx, handle);
     assert_eq!(
         error_of(cx, handle, "credential-key-file").as_deref(),
-        Some("请选择私钥文件")
+        Some("Choose a private key file")
     );
     fill(
         cx,
@@ -398,7 +412,7 @@ fn a_key_file_is_copied_into_the_vault_once(cx: &mut TestAppContext) {
     save_credential(cx, handle);
     assert_eq!(
         error_of(cx, handle, "credential-key-file").as_deref(),
-        Some("读不出这个文件")
+        Some("Could not read this file")
     );
 
     fill(cx, handle, "credential-key-file", &path.to_string_lossy());
@@ -461,7 +475,7 @@ fn a_double_click_or_enter_edits_a_credential(cx: &mut TestAppContext) {
     assert!(credential_dialog_open(cx, handle));
     assert_eq!(
         label(cx, handle, "modal-title").as_deref(),
-        Some("编辑凭据")
+        Some("Edit Credential")
     );
     assert_eq!(
         label(cx, handle, "modal-detail").as_deref(),
@@ -485,14 +499,17 @@ fn the_menu_edits_copies_a_public_key_and_deletes(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open(cx);
     dispatch(cx, handle, ShowCredentials);
 
-    assert_eq!(menu_labels(cx, handle, 1), ["编辑…", "复制公钥", "删除"]);
+    assert_eq!(
+        menu_labels(cx, handle, 1),
+        ["Edit…", "Copy Public Key", "Delete"]
+    );
     click_menu_item(cx, handle, 1);
     let public_key = credential(cx, &workspace, 1).unwrap().public_key.unwrap();
     let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
     assert_eq!(copied.as_deref(), Some(public_key.as_ref()));
 
     // 只有密钥有「复制公钥」。
-    assert_eq!(menu_labels(cx, handle, 2), ["编辑…", "删除"]);
+    assert_eq!(menu_labels(cx, handle, 2), ["Edit…", "Delete"]);
     click_menu_item(cx, handle, 0);
     assert_eq!(
         label(cx, handle, "modal-detail").as_deref(),
@@ -537,7 +554,7 @@ fn renaming_a_credentials_user_renames_every_host_using_it(cx: &mut TestAppConte
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find(("credential-key-source", 0usize)).label(),
-            Some("当前私钥")
+            Some("Current Key")
         );
         assert_eq!(
             window.find(("credential-key-source", 0usize)).selected(),
@@ -550,7 +567,7 @@ fn renaming_a_credentials_user_renames_every_host_using_it(cx: &mut TestAppConte
     );
     assert_eq!(
         label(cx, handle, "credential-usage").as_deref(),
-        Some("有 2 台主机在用这条凭据，保存后它们跟着改")
+        Some("2 hosts use this credential and will follow the change after saving")
     );
 
     fill(cx, handle, "credential-user", "release");
@@ -621,7 +638,7 @@ fn a_locked_vault_keeps_a_credentials_password_out_of_the_form(cx: &mut TestAppC
     dispatch(cx, handle, micaterm::app::EditCredential(ops.id));
     assert_eq!(
         label(cx, handle, "credential-password-locked").as_deref(),
-        Some("已保存，保险库锁定中 · 解锁后修改")
+        Some("Saved; the vault is locked · unlock to edit")
     );
     assert!(!present(cx, handle, "credential-password"));
     // 只改名字：不碰密码，也不用解锁。
@@ -668,9 +685,9 @@ fn deleting_a_key_in_use_names_its_hosts_and_leaves_them_without_a_password(
     assert_eq!(
         label(cx, handle, "credential-delete-text").as_deref(),
         Some(
-            "确定删除「部署密钥」吗？\n有 2 台主机在用它：\ndb-01\nstaging-api\n\
-             删除后，这些主机的认证改成「无密码」，用户名 deploy 保留。\n\
-             保险库里的私钥和口令一起删除。"
+            "Delete \"部署密钥\"?\n2 hosts use it:\ndb-01\nstaging-api\n\
+             After deletion, those hosts switch to \"No Password\" authentication and keep the username deploy.\n\
+             The private key and passphrase in the vault are deleted too."
         )
     );
     // 取消就什么都不动。
@@ -706,9 +723,9 @@ fn deleting_a_password_credential_in_use_turns_its_hosts_back_to_a_password(
     assert_eq!(
         label(cx, handle, "credential-delete-text").as_deref(),
         Some(
-            "确定删除「运维密码」吗？\n有 1 台主机在用它：\nweb-01\n\
-             删除后，这些主机的认证改成「密码」，用户名 root 保留。\n\
-             保险库里的密码一起删除。"
+            "Delete \"运维密码\"?\n1 host uses it:\nweb-01\n\
+             After deletion, those hosts switch to \"Password\" authentication and keep the username root.\n\
+             The password in the vault is deleted too."
         )
     );
     click(cx, handle, "credential-delete-confirm");
@@ -729,7 +746,7 @@ fn deleting_an_unused_credential_just_asks(cx: &mut TestAppContext) {
     );
     assert_eq!(
         label(cx, handle, "credential-delete-text").as_deref(),
-        Some("确定删除「旧 RSA 密钥」吗？\n保险库里的私钥和口令一起删除。")
+        Some("Delete \"旧 RSA 密钥\"?\nThe private key and passphrase in the vault are deleted too.")
     );
     click(cx, handle, "credential-delete-confirm");
     assert!(credential(cx, &workspace, 4).is_none());
@@ -756,9 +773,9 @@ fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
         assert_eq!(
             choices,
             [
-                Some("密码".into()),
-                Some("使用凭据".into()),
-                Some("无密码".into())
+                Some("Password".into()),
+                Some("Credential".into()),
+                Some("No Password".into())
             ]
         );
     });
@@ -771,7 +788,7 @@ fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
     assert!(host_dialog_open(cx, handle));
     assert_eq!(
         error_of(cx, handle, "host-credential").as_deref(),
-        Some("请选一条凭据")
+        Some("Choose a credential")
     );
 
     click(cx, handle, "host-credential");
@@ -781,24 +798,24 @@ fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
     assert_eq!(
         options,
         [
-            "部署密钥（密钥 · deploy）",
-            "运维密码（密码 · root）",
-            "本机 Agent（SSH Agent · ops）",
-            "旧 RSA 密钥（密钥 · admin）"
+            "部署密钥 (Key · deploy)",
+            "运维密码 (Password · root)",
+            "本机 Agent (SSH Agent · ops)",
+            "旧 RSA 密钥 (Key · admin)"
         ]
     );
     assert_eq!(
         label(cx, handle, "host-credential-new").as_deref(),
-        Some("新建凭据…")
+        Some("New Credential…")
     );
     click(cx, handle, ("host-credential-option", 1usize));
     assert_eq!(
         label(cx, handle, "host-credential").as_deref(),
-        Some("部署密钥（密钥 · deploy）")
+        Some("部署密钥 (Key · deploy)")
     );
     assert_eq!(
         label(cx, handle, "host-auth-hint").as_deref(),
-        Some("用户名跟着凭据走：deploy")
+        Some("The username comes from the credential: deploy")
     );
     assert_eq!(error_of(cx, handle, "host-credential"), None);
     save_host(cx, handle);
@@ -811,7 +828,7 @@ fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
     dispatch(cx, handle, ShowCredentials);
     assert_eq!(
         label(cx, handle, row(1)).as_deref(),
-        Some("部署密钥 · 密钥 · ED25519 · deploy · 3 台主机")
+        Some("部署密钥 · Key · ED25519 · deploy · 3 hosts")
     );
 
     // 编辑时停在「使用凭据」和选的那条。
@@ -821,7 +838,7 @@ fn a_host_logs_in_with_the_credential_it_picks(cx: &mut TestAppContext) {
     });
     assert_eq!(
         label(cx, handle, "host-credential").as_deref(),
-        Some("部署密钥（密钥 · deploy）")
+        Some("部署密钥 (Key · deploy)")
     );
 }
 
@@ -832,7 +849,7 @@ fn a_host_without_a_password_tries_the_agent_and_the_default_keys(cx: &mut TestA
     click(cx, handle, ("host-auth", 2usize));
     assert_eq!(
         label(cx, handle, "host-auth-hint").as_deref(),
-        Some("依次尝试 SSH Agent 和 ~/.ssh 下的默认私钥")
+        Some("Tries the SSH Agent and the default keys in ~/.ssh in turn")
     );
     assert!(!present(cx, handle, "host-password"));
     fill(cx, handle, "host-user", "admin");
@@ -867,7 +884,7 @@ fn a_credential_made_on_top_of_the_host_dialog_is_picked_when_saved(cx: &mut Tes
     assert!(credential_dialog_open(cx, handle));
     assert_eq!(
         label(cx, handle, "modal-detail").as_deref(),
-        Some("保存后自动选上")
+        Some("Selected automatically after saving")
     );
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
     assert!(!credential_dialog_open(cx, handle));
@@ -885,7 +902,7 @@ fn a_credential_made_on_top_of_the_host_dialog_is_picked_when_saved(cx: &mut Tes
     assert!(host_dialog_open(cx, handle));
     assert_eq!(
         label(cx, handle, "host-credential").as_deref(),
-        Some("办公室 Agent（SSH Agent · ops）")
+        Some("办公室 Agent (SSH Agent · ops)")
     );
     save_host(cx, handle);
     assert!(!host_dialog_open(cx, handle));
@@ -930,7 +947,7 @@ fn a_host_connects_with_its_credential_unlocking_only_for_a_saved_key(cx: &mut T
     dispatch(cx, handle, micaterm::app::ConnectHost(HostId(3)));
     assert_eq!(
         label(cx, handle, "vault-unlock-reason").as_deref(),
-        Some("连接 db-01 要用保存的凭据")
+        Some("Connecting to db-01 needs the saved credential")
     );
     assert_eq!(remote.targets().len(), 1);
     fill(cx, handle, "vault-unlock-password", MASTER);

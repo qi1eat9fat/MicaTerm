@@ -1,63 +1,79 @@
 _version: 2
 snippets.panel.title:
+  en: Snippets
   zh-CN: 片段
 snippets.panel.target:
+  en: → %{card}
   zh-CN: → %{card}
 snippets.panel.new:
+  en: New Snippet
   zh-CN: 新建片段
-snippets.panel.search:
-  zh-CN: 按名称或命令搜索
+snippets.panel.collapse:
+  en: Collapse Panel
+  zh-CN: 收起面板
 snippets.panel.empty:
+  en: No snippets yet
   zh-CN: 还没有命令片段
 snippets.panel.empty_hint:
+  en: Click + above to create one
   zh-CN: 点上面的 + 新建一个
-snippets.panel.no_match:
-  zh-CN: 没有匹配的片段
 snippets.panel.no_terminal:
+  en: The current tab has no terminal
   zh-CN: 当前标签没有终端
-snippets.panel.no_terminal_hint:
-  zh-CN: 切到终端标签后，点片段会发到焦点卡片
-snippets.panel.runs_on_click:
-  zh-CN: 直接执行（单击这一行也会执行）
-snippets.panel.types_on_click:
-  zh-CN: 直接执行（单击这一行只输入）
 snippets.menu.enter:
+  en: Type into Terminal
   zh-CN: 输入到终端
 snippets.menu.copy:
+  en: Copy Command
   zh-CN: 复制命令
 snippets.menu.edit:
+  en: Edit…
   zh-CN: 编辑…
 snippets.menu.delete:
+  en: Delete
   zh-CN: 删除
 snippets.notice.full_screen:
+  en: '%{card} is running a full-screen program and did not receive "%{snippet}"'
   zh-CN: "%{card} 正在运行全屏程序，没有输入「%{snippet}」"
 snippets.notice.failed:
+  en: '%{card} did not receive "%{snippet}": %{error}'
   zh-CN: "%{card} 没有收到「%{snippet}」：%{error}"
 snippets.dialog.new_title:
+  en: New Snippet
   zh-CN: 新建命令片段
 snippets.dialog.edit_title:
+  en: Edit Snippet
   zh-CN: 编辑命令片段
 snippets.dialog.name:
+  en: Name
   zh-CN: 名称
 snippets.dialog.name_placeholder:
+  en: "For example: Check disk usage"
   zh-CN: 例如：查看磁盘
 snippets.dialog.command:
+  en: Command
   zh-CN: 命令
 snippets.dialog.command_placeholder:
+  en: Multiple lines are allowed
   zh-CN: 可以多行
-snippets.dialog.run_on_click:
-  zh-CN: 点击时自动执行
 snippets.dialog.name_required:
+  en: Enter a name
   zh-CN: 请输入名称
 snippets.dialog.command_required:
+  en: Enter a command
   zh-CN: 请输入命令
 snippets.dialog.cancel:
+  en: Cancel
   zh-CN: 取消
 snippets.dialog.save:
+  en: Save
   zh-CN: 保存
 snippets.delete.title:
+  en: 'Delete "%{name}"?'
   zh-CN: 删除「%{name}」？
 snippets.delete.description:
+  en: This cannot be undone.
   zh-CN: 删除后不能恢复。
 snippets.delete.ok:
+  en: Delete
   zh-CN: 删除

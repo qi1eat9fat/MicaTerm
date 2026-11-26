@@ -174,7 +174,7 @@ fn a_card_handed_to_the_agent_is_listed_read_and_typed_into_until_taken_back(
     dispatch(cx, handle, HandCardToAgent(CardId(1)));
     start_new_agent(cx, handle);
     assert!(
-        status(cx, handle).starts_with("Agent · 已连接"),
+        status(cx, handle).starts_with("Agent · Connected"),
         "{}",
         status(cx, handle)
     );
@@ -283,17 +283,68 @@ fn the_card_menu_hands_the_card_over_and_takes_it_back(cx: &mut TestAppContext) 
     let endpoint = endpoint(&dir, "menu");
     let (handle, _workspace, _remote) = open(cx, &endpoint, FakeTerminalFactory::default());
     let labels = terminal_menu_labels(cx, handle, 1);
-    assert!(labels.contains(&"交给 Agent".to_string()), "{labels:?}");
-    assert!(!labels.contains(&"收回 Agent".to_string()), "{labels:?}");
+    assert!(labels.contains(&"Hand to Agent".to_string()), "{labels:?}");
+    assert!(
+        !labels.contains(&"Take Back from Agent".to_string()),
+        "{labels:?}"
+    );
 
-    click_terminal_menu(cx, handle, 1, "交给 Agent");
+    click_terminal_menu(cx, handle, 1, "Hand to Agent");
     start_new_agent(cx, handle);
     assert_eq!(cards(cx, &endpoint).len(), 1);
     let labels = terminal_menu_labels(cx, handle, 1);
-    assert!(labels.contains(&"收回 Agent".to_string()), "{labels:?}");
-    assert!(!labels.contains(&"交给 Agent".to_string()), "{labels:?}");
+    assert!(
+        labels.contains(&"Take Back from Agent".to_string()),
+        "{labels:?}"
+    );
+    assert!(
+        !labels.contains(&"Hand to Agent".to_string()),
+        "{labels:?}"
+    );
 
-    click_terminal_menu(cx, handle, 1, "收回 Agent");
+    click_terminal_menu(cx, handle, 1, "Take Back from Agent");
+    assert!(cards(cx, &endpoint).is_empty());
+}
+
+/// 卡片顶行也有「交给 Agent / 收回 Agent」：排在分屏按钮左边，和顶栏的 Agent 按钮同一列；
+/// 交接后文案和按下状态跟着变。
+#[gpui_kit::test]
+fn the_card_title_row_hands_the_card_over_and_takes_it_back(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let endpoint = endpoint(&dir, "title-button");
+    let (handle, _workspace, _remote) = open(cx, &endpoint, FakeTerminalFactory::default());
+
+    in_frame(cx, handle, |window, _| {
+        let label = window
+            .find(("card-agent", 1usize))
+            .label()
+            .map(str::to_owned);
+        assert_eq!(label.as_deref(), Some("Hand to Agent"));
+        // 和顶栏的 Agent 图标同一列。
+        let card = window.find(("card-agent", 1usize)).bounds().center().x;
+        let top = window.find("right-sidebar-agent").bounds().center().x;
+        assert!(
+            (card - top).abs() < gpui_kit::px(0.01),
+            "{card:?} != {top:?}"
+        );
+    });
+
+    in_frame(cx, handle, |window, cx| {
+        window.click(("card-agent", 1usize), cx)
+    });
+    start_new_agent(cx, handle);
+    assert_eq!(cards(cx, &endpoint).len(), 1);
+    in_frame(cx, handle, |window, _| {
+        let label = window
+            .find(("card-agent", 1usize))
+            .label()
+            .map(str::to_owned);
+        assert_eq!(label.as_deref(), Some("Take Back from Agent"));
+    });
+
+    in_frame(cx, handle, |window, cx| {
+        window.click(("card-agent", 1usize), cx)
+    });
     assert!(cards(cx, &endpoint).is_empty());
 }
 

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gpui_kit::AsKeystroke as _;
-use micaterm::app::{OpenHostSftp, SftpAction, SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
+use micaterm::app::{OpenHostSftp, SftpAction, SftpShortcut, SftpTabCommand};
 use micaterm::backend::sftp::{PermissionEdit, RemoteOperation, RemotePath, SftpEvent};
 use micaterm::sftp_tab::{CardSide, NewEntryKind, SftpTab};
 
@@ -229,7 +229,7 @@ fn a_new_folder_asks_for_a_name_and_is_created_in_this_directory(cx: &mut TestAp
     // 名字已经填好、选中：打字就替换。
     assert_eq!(
         value_of(cx, &fixture, "entry-name").as_deref(),
-        Some("新建文件夹")
+        Some("New Folder")
     );
     let listed_before = fixture.sftp.listed.lock().unwrap().len();
     type_text(cx, &fixture, "logs");
@@ -293,7 +293,7 @@ fn a_new_file_is_selected_once_it_shows_and_enter_commits(cx: &mut TestAppContex
     );
     assert_eq!(
         value_of(cx, &fixture, "entry-name").as_deref(),
-        Some("新建文件.txt")
+        Some("New File.txt")
     );
     type_text(cx, &fixture, "a.txt");
     press(cx, &fixture, "enter");
@@ -326,7 +326,7 @@ fn a_bad_name_is_said_under_the_field_and_the_dialog_stays(cx: &mut TestAppConte
     click(cx, &fixture, "entry-name-commit");
     assert_eq!(
         label_of(cx, &fixture, "entry-name-error").as_deref(),
-        Some("已有名为「目录」的项目")
+        Some("An item named \"目录\" already exists")
     );
     assert!(visible(cx, &fixture, "entry-name"));
     assert!(fixture.sftp.operations.lock().unwrap().is_empty());
@@ -396,7 +396,7 @@ fn f2_with_several_selected_does_nothing_and_the_same_name_is_refused(cx: &mut T
     click(cx, &fixture, "entry-name-commit");
     assert_eq!(
         label_of(cx, &fixture, "entry-name-error").as_deref(),
-        Some("名称未改变")
+        Some("The name did not change")
     );
 }
 
@@ -428,7 +428,7 @@ fn delete_asks_first_and_cancel_keeps_the_file(cx: &mut TestAppContext) {
     press(cx, &fixture, "delete");
     assert_eq!(
         label_of(cx, &fixture, "file-delete-text").as_deref(),
-        Some("确定删除「文件 甲.txt」吗？\n远程文件无法恢复，目录会连同其中全部内容一起删除。")
+        Some("Delete \"文件 甲.txt\"?\nRemote files cannot be recovered; a folder is deleted with all of its contents.")
     );
     click(cx, &fixture, "file-delete-cancel");
     assert!(!visible(cx, &fixture, "file-delete"));
@@ -470,7 +470,7 @@ fn delete_takes_every_selected_item_but_never_the_parent_row(cx: &mut TestAppCon
     assert!(
         label_of(cx, &fixture, "file-delete-text")
             .unwrap()
-            .starts_with("确定删除选中的 4 项吗？")
+            .starts_with("Delete the 4 selected items?")
     );
     click(cx, &fixture, "file-delete-confirm");
     let [RemoteOperation::Delete { paths }] = &wait_for_operations(cx, &fixture, 1)[..] else {
@@ -487,9 +487,9 @@ fn a_local_delete_goes_to_the_trash_and_says_so(cx: &mut TestAppContext) {
     press(cx, &fixture, "delete");
     let text = label_of(cx, &fixture, "file-delete-text").unwrap();
     assert!(text.ends_with(if cfg!(windows) {
-        "项目会移到回收站。"
+        "The items will be moved to the Recycle Bin."
     } else {
-        "项目会移到废纸篓。"
+        "The items will be moved to the Trash."
     }));
     click(cx, &fixture, "file-delete-confirm");
 
@@ -821,7 +821,7 @@ fn is_listed(cx: &mut TestAppContext, fixture: &Fixture, remote: bool, name: &st
 }
 
 #[gpui_kit::test]
-fn hidden_files_have_a_switch_for_each_side(cx: &mut TestAppContext) {
+fn hidden_files_are_always_shown(cx: &mut TestAppContext) {
     let fixture = open(cx);
     for remote in [true, false] {
         command(
@@ -834,31 +834,15 @@ fn hidden_files_have_a_switch_for_each_side(cx: &mut TestAppContext) {
         );
         wait_for_path(cx, &fixture, remote, "/dotfiles");
     }
-    assert!(!is_listed(cx, &fixture, false, ".bashrc"));
-    assert!(!is_listed(cx, &fixture, true, ".bashrc"));
+    // 本地远程都显示点文件，没有开关可以藏起来。
+    assert!(is_listed(cx, &fixture, false, ".bashrc"));
+    assert!(is_listed(cx, &fixture, true, ".bashrc"));
     // 状态栏不写隐藏了几项（26 号）。
     assert!(
         !label_of(cx, &fixture, "local-status")
             .unwrap()
-            .contains("隐藏")
+            .contains("hidden")
     );
-
-    // 本地的开关（Ctrl+Alt+H）只管本地，写进设置。
-    command(
-        cx,
-        &fixture,
-        SftpTabCommand::FocusCard {
-            side: CardSide::Local,
-        },
-    );
-    press(cx, &fixture, "ctrl-alt-h");
-    assert!(is_listed(cx, &fixture, false, ".bashrc"));
-    assert!(!is_listed(cx, &fixture, true, ".bashrc"));
-    let settings = cx.update(|cx| fixture.workspace.read(cx).settings().clone());
-    cx.update(|cx| {
-        let hidden = settings.read(cx).settings().sftp.show_hidden;
-        assert!(hidden.local && !hidden.remote);
-    });
     // 隐藏文件能认出来：行和图标按它变淡。
     let tab = tab(cx, &fixture);
     cx.update(|cx| {
@@ -870,16 +854,6 @@ fn hidden_files_have_a_switch_for_each_side(cx: &mut TestAppContext) {
             .collect();
         assert_eq!(hidden, [".ssh", ".bashrc"]);
     });
-
-    // 远程的开关。
-    dispatch(cx, fixture.handle, ToggleHiddenFiles(CardSide::Remote));
-    assert!(is_listed(cx, &fixture, true, ".bashrc"));
-
-    // 选中的隐藏文件再藏起来，也不再算选中。
-    select(cx, &fixture, false, ".bashrc");
-    press(cx, &fixture, "ctrl-alt-h");
-    assert!(!is_listed(cx, &fixture, false, ".bashrc"));
-    assert!(selected(cx, &fixture, false).is_empty());
 }
 
 // ---------- 列和排序 ----------
@@ -1062,23 +1036,16 @@ fn a_right_click_selects_the_row_and_blank_space_has_its_own_menu(cx: &mut TestA
             .right_click("size:文件 甲.txt", cx)
     });
     assert_eq!(selected(cx, &fixture, true), ["文件 甲.txt"]);
-    assert_eq!(menu_item(cx, &fixture, "编辑"), Some(0));
-    assert!(menu_item(cx, &fixture, "删除").is_some());
-    assert_eq!(menu_item(cx, &fixture, "新建文件夹…"), None);
+    assert_eq!(menu_item(cx, &fixture, "Edit"), Some(0));
+    assert!(menu_item(cx, &fixture, "Delete").is_some());
+    assert_eq!(menu_item(cx, &fixture, "New Folder…"), None);
     press(cx, &fixture, "escape");
     assert!(!visible(cx, &fixture, "popup-menu"));
 
     in_frame(cx, fixture.handle, |window, cx| {
         window.within("remote-card").right_click("name-cell:..", cx)
     });
-    assert_eq!(menu_item(cx, &fixture, "新建文件夹…"), Some(0));
-    let hidden = menu_item(cx, &fixture, "显示隐藏文件").expect("没有「显示隐藏文件」");
-    let checked = in_frame(cx, fixture.handle, move |window, _| {
-        window.within("popup-menu").find(hidden).selected()
-    });
-    assert_eq!(checked, Some(false));
-    in_frame(cx, fixture.handle, move |window, cx| {
-        window.within("popup-menu").click(hidden, cx)
-    });
-    assert!(cx.update(|cx| micaterm::sftp_tab::ShowHiddenFiles::get(CardSide::Remote, cx)));
+    assert_eq!(menu_item(cx, &fixture, "New Folder…"), Some(0));
+    // 隐藏文件一直显示，菜单里没有「显示隐藏文件」。
+    assert_eq!(menu_item(cx, &fixture, "Show Hidden Files"), None);
 }

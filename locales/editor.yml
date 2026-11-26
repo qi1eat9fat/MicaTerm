@@ -4,124 +4,185 @@ _version: 2
 # 部分文案来自 since2006/shell-rs @ b2a307a: locales/editor.yml、locales/explorer.yml
 
 editor.command.reload_remote:
+  en: Reload (Read Again from Server)
   zh-CN: 重新加载（从服务器重读）
 editor.command.reload_local:
+  en: Reload (Read Again from Disk)
   zh-CN: 重新加载（从磁盘重读）
 editor.status.unsaved:
+  en: Unsaved
   zh-CN: 未保存
 editor.find.placeholder:
+  en: Find
   zh-CN: 查找
 editor.find.replace_placeholder:
+  en: Replace With
   zh-CN: 替换为
 editor.find.previous:
+  en: Previous
   zh-CN: 上一个
 editor.find.next:
+  en: Next
   zh-CN: 下一个
 editor.find.close:
+  en: Close
   zh-CN: 关闭
 editor.find.replace:
+  en: Replace
   zh-CN: 替换
 editor.find.replace_all:
+  en: Replace All
   zh-CN: 全部替换
 editor.text_label:
+  en: 'Editing "%{name}"'
   zh-CN: 编辑「%{name}」
 editor.status.cursor:
+  en: "Line %{line}, Column %{column}"
   zh-CN: 第 %{line} 行，第 %{column} 列
 editor.status.plain_text:
+  en: Plain Text
   zh-CN: 纯文本
 editor.status.saving:
+  en: Saving…
   zh-CN: 正在保存…
 editor.status.reloading:
+  en: Reloading…
   zh-CN: 正在重新加载…
 editor.changed.title_remote:
+  en: File Changed on the Server
   zh-CN: 文件在远程被改过
 editor.changed.title_local:
+  en: File Changed on Disk
   zh-CN: 文件在磁盘上被改过
 editor.changed.lead_remote:
+  en: "This remote file was changed after it was opened:"
   zh-CN: 打开之后，远程的这个文件被改过：
 editor.changed.lead_local:
+  en: "This file on disk was changed after it was opened:"
   zh-CN: 打开之后，磁盘上的这个文件被改过：
 editor.changed.opened:
+  en: When Opened
   zh-CN: 打开时
 editor.changed.now:
+  en: Now
   zh-CN: 现在
 editor.changed.gone:
+  en: The file no longer exists
   zh-CN: 文件已不存在
 editor.changed.warning:
+  en: Overwriting will discard someone else's changes.
   zh-CN: 覆盖会丢掉别人的修改。
 editor.changed.warning_gone:
+  en: Overwriting will recreate this file.
   zh-CN: 覆盖会重新创建这个文件。
 editor.changed.reload:
+  en: Reload
   zh-CN: 重新加载
 editor.changed.cancel:
+  en: Cancel
   zh-CN: 取消
 editor.changed.overwrite:
+  en: Overwrite
   zh-CN: 覆盖
 editor.close.title:
+  en: Save Changes?
   zh-CN: 保存修改吗
 editor.close.description:
+  en: This file has unsaved changes that will be lost if you don't save.
   zh-CN: 这个文件有未保存的修改，不保存就会丢掉。
 editor.close.discard:
+  en: Don't Save
   zh-CN: 不保存
 editor.close.cancel:
+  en: Cancel
   zh-CN: 取消
 editor.close.save:
+  en: Save
   zh-CN: 保存
 editor.reload.title:
+  en: 'Reload "%{name}"'
   zh-CN: 重新加载「%{name}」
 editor.reload.description:
+  en: Unsaved changes will be lost.
   zh-CN: 未保存的修改会丢掉。
 editor.reload.cancel:
+  en: Cancel
   zh-CN: 取消
 editor.reload.confirm:
+  en: Reload
   zh-CN: 重新加载
 editor.reload.failed:
+  en: 'Could not reload "%{name}"'
   zh-CN: 重新加载「%{name}」失败
 editor.save.failed:
+  en: 'Could not save "%{name}"'
   zh-CN: 保存「%{name}」失败
 editor.save.interrupted_title:
+  en: '"%{name}" is Incomplete'
   zh-CN: 「%{name}」没有写完
 editor.save.interrupted:
+  en: "The remote file is now incomplete. Please save it again. %{message}"
   zh-CN: 远程的文件现在不完整，请再保存一次。%{message}
 editor.file.connecting:
+  en: Connecting to SFTP; try again once it connects
   zh-CN: 正在连接 SFTP，连上以后再试
 editor.file.connection_lost:
+  en: The connection was closed
   zh-CN: 连接断开了
 editor.file.open_failed:
+  en: 'Cannot open "%{name}"'
   zh-CN: 打不开「%{name}」
 editor.refused.title:
+  en: Cannot Open in Editor
   zh-CN: 无法用编辑器打开
 editor.refused.too_large:
+  en: '"%{name}" is %{size}; the editor only opens UTF-8 text files up to %{limit}.'
   zh-CN: 「%{name}」有 %{size}，编辑器只打开 %{limit} 以内的 UTF-8 文本文件。
 editor.refused.not_text:
+  en: '"%{name}" is not a UTF-8 text file; the editor only opens UTF-8 text files up to %{limit}.'
   zh-CN: 「%{name}」不是 UTF-8 文本文件，编辑器只打开 %{limit} 以内的 UTF-8 文本文件。
 editor.refused.not_file:
+  en: '"%{name}" is not a regular file and cannot be opened in the editor.'
   zh-CN: 「%{name}」不是普通文件，编辑器打不开。
 editor.refused.download_hint:
+  en: Download it to this computer first and open it with another program.
   zh-CN: 可以先下载到本机，再用别的程序打开。
 editor.refused.close:
+  en: Close
   zh-CN: 关闭
 editor.refused.download:
+  en: Download…
   zh-CN: 下载…
 quit.title:
+  en: Quit MicaTerm
   zh-CN: 退出 MicaTerm
 quit.transfers:
+  en: "%{name} still has %{count} unfinished transfer batches%{detail}."
   zh-CN: "%{name} 还有 %{count} 批传输没完成%{detail}。"
 quit.transfers_note:
+  en: Quitting clears the queue; resume records are kept, and the next transfer of the same file will ask whether to resume.
   zh-CN: 退出后队列清空；续传记录保留，下次传同一个文件会问是否续传。
 quit.unsaved:
+  en: '"%{name}" has unsaved changes that will be lost on quit.'
   zh-CN: 「%{name}」有未保存的修改，退出就会丢掉。
 quit.cancel:
+  en: Cancel
   zh-CN: 取消
 quit.confirm:
+  en: Quit Anyway
   zh-CN: 仍要退出
 save_wait.title:
+  en: Saving
   zh-CN: 正在保存
 save_wait.saving:
+  en: '"%{name}" is being written back; stopping now will leave the file incomplete.'
   zh-CN: 「%{name}」正在写回，中途停下文件会不完整。
 save_wait.then_close:
+  en: It will close when the save finishes.
   zh-CN: 写完就关闭。
 save_wait.then_quit:
+  en: It will quit when the save finishes.
   zh-CN: 写完就退出。
 save_wait.cancel:
+  en: Stay Here
   zh-CN: 不等了，留在这里

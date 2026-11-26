@@ -10,5 +10,14 @@
 mod find;
 mod menu;
 
-pub use find::{FindButton, FindCard, FindStyle, FindTextButton, ReplaceRow};
-pub use menu::{Menu, MenuStyle};
+use gpui_kit::{Hsla, hsla};
+
+/// 共享组件没被应用注入样式时的中性灰阶（菜单和查找卡的兜底）。
+pub(crate) fn default_gray(lightness: f32) -> Hsla {
+    hsla(0., 0., lightness, 1.)
+}
+
+pub use find::{
+    FindButton, FindCard, FindStyle, FindTextButton, ReplaceRow, find_highlight_height,
+};
+pub use menu::{Menu, MenuStyle, WINDOW_MARGIN};

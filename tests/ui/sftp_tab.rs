@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use micaterm::app::{
     CloseFocusedCard, CloseOtherTabs, ConnectHost, NextTab, OpenCardSftp, OpenHostSftp, OpenSftp,
-    SftpAction, SftpTabCommand, ShowCredentials, ShowSnippets, ToggleHiddenFiles,
+    SftpAction, SftpTabCommand, ShowCredentials, ShowSnippets,
 };
 use micaterm::backend::sftp::{FileStamp, RemotePath, SftpEvent, TextFile};
 use micaterm::backend::{
@@ -279,7 +279,7 @@ fn a_local_card_greys_the_files_icon_and_says_why(cx: &mut TestAppContext) {
 
     assert_eq!(
         files_button(cx, &fixture),
-        FilesButton::Unavailable("本地终端没有远程文件".into())
+        FilesButton::Unavailable("A local terminal has no remote files".into())
     );
     in_frame(cx, fixture.handle, |window, cx| {
         window.press("ctrl-shift-u", cx)
@@ -292,7 +292,7 @@ fn a_local_card_greys_the_files_icon_and_says_why(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_new_tab_page_and_a_local_editor_have_no_remote_files(cx: &mut TestAppContext) {
     let fixture = open(cx);
-    let reason = FilesButton::Unavailable("当前标签没有远程文件".into());
+    let reason = FilesButton::Unavailable("The current tab has no remote files".into());
     assert_eq!(files_button(cx, &fixture), reason);
     dispatch(cx, fixture.handle, OpenSftp);
     assert_eq!(tab_count(cx, &fixture), 0);
@@ -441,7 +441,7 @@ fn ctrl_o_turns_the_path_bar_into_an_input_and_enter_goes_there(cx: &mut TestApp
     assert!(editing_path(cx, &fixture, true));
     assert_eq!(
         label(cx, fixture.handle, "remote-path-hint").as_deref(),
-        Some("回车切换 · Esc 取消")
+        Some("Enter to switch · Esc to cancel")
     );
 
     // 打开时选中了当前路径：打字就替换。
@@ -548,7 +548,7 @@ fn the_path_bar_works_for_the_local_side_too(cx: &mut TestAppContext) {
     assert!(failed, "没有报错");
     assert_eq!(
         label(cx, fixture.handle, "local-path-hint").as_deref(),
-        Some("无法读取目录：找不到这个目录")
+        Some("Cannot read this directory: 找不到这个目录")
     );
     let tab = active_sftp(cx, &fixture).unwrap();
     assert_eq!(
@@ -735,12 +735,12 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
     open_tab(cx, &fixture);
     assert_eq!(
         label(cx, fixture.handle, "local-status").as_deref(),
-        Some("4 项 · 已选 0 项")
+        Some("4 items · 0 selected")
     );
-    // 连着时不写连接状态、地址和延迟（26 号，用户定只留名称和项数）。
+    // 连着时也写「已连接」，和终端卡片的状态栏一样。
     assert_eq!(
         label(cx, fixture.handle, "remote-status").as_deref(),
-        Some("4 项 · 已选 0 项")
+        Some("Connected · 4 items · 0 selected")
     );
     fixture
         .sftp
@@ -750,7 +750,7 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
     cx.run_until_parked();
     assert_eq!(
         label(cx, fixture.handle, "remote-status").as_deref(),
-        Some("4 项 · 已选 0 项")
+        Some("Connected · 4 items · 0 selected")
     );
 
     // 选中几项。
@@ -758,7 +758,7 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
     in_frame(cx, fixture.handle, |window, cx| window.press("ctrl-a", cx));
     assert_eq!(
         label(cx, fixture.handle, "local-status").as_deref(),
-        Some("4 项 · 已选 4 项")
+        Some("4 items · 4 selected")
     );
 
     // 断开：名字后面红字写「已断开」和原因，列表还在。
@@ -767,13 +767,13 @@ fn the_status_bars_count_items_and_say_how_the_connection_is(cx: &mut TestAppCon
     ));
     let lost = wait_until(cx, fixture.handle, |cx| {
         label(cx, fixture.handle, "remote-status").as_deref()
-            == Some("已断开 · 连接超时（已自动重连 3 次） · 4 项 · 已选 0 项")
+            == Some("Disconnected · 连接超时（已自动重连 3 次） · 4 items · 0 selected")
     });
     assert!(lost, "{:?}", label(cx, fixture.handle, "remote-status"));
 }
 
 #[gpui_kit::test]
-/// 状态栏只数显示出来的项，不写隐藏了几项（26 号）。
+/// 状态栏只数显示出来的项，不写隐藏了几项（26 号）；隐藏文件一直显示。
 fn the_status_bar_counts_only_the_files_shown(cx: &mut TestAppContext) {
     let fixture = open(cx);
     open_tab(cx, &fixture);
@@ -785,19 +785,10 @@ fn the_status_bar_counts_only_the_files_shown(cx: &mut TestAppContext) {
             path: "/dotfiles".into(),
         },
     );
-    let hidden = wait_until(cx, fixture.handle, |cx| {
-        label(cx, fixture.handle, "remote-status")
-            .is_some_and(|status| status == "1 项 · 已选 0 项")
-    });
-    assert!(hidden, "{:?}", label(cx, fixture.handle, "remote-status"));
-
-    // 开关写进设置，这一侧马上显示。
-    dispatch(cx, fixture.handle, ToggleHiddenFiles(CardSide::Remote));
-    let settings = cx.update(|cx| fixture.workspace.read(cx).settings().clone());
-    assert!(cx.update(|cx| settings.read(cx).settings().sftp.show_hidden.remote));
+    // `/dotfiles` 里两个点文件加一个 notes.txt：全显示。
     let shown = wait_until(cx, fixture.handle, |cx| {
         label(cx, fixture.handle, "remote-status")
-            .is_some_and(|status| status.ends_with("3 项 · 已选 0 项"))
+            .is_some_and(|status| status == "Connected · 3 items · 0 selected")
     });
     assert!(shown, "{:?}", label(cx, fixture.handle, "remote-status"));
 }
@@ -845,7 +836,8 @@ fn in_an_sftp_tab_snippets_say_there_is_no_terminal_and_credentials_work(cx: &mu
     open_tab(cx, &fixture);
 
     dispatch(cx, fixture.handle, ShowSnippets);
-    assert!(visible(cx, fixture.handle, "snippets-no-terminal"));
+    // 面板照常打开；SFTP 标签没有终端，所以标题行不显示目标卡片（点片段时的提示见 `snippets` 的测试）。
+    assert!(!visible(cx, fixture.handle, "snippets-target"));
 
     dispatch(cx, fixture.handle, ShowCredentials);
     assert_eq!(
@@ -962,7 +954,7 @@ fn closing_a_tab_with_unfinished_transfers_asks_first(cx: &mut TestAppContext) {
     assert!(
         label(cx, fixture.handle, "close-tabs-text")
             .unwrap()
-            .contains("web-01 还有 1 批传输没完成")
+            .contains("web-01 still has 1 unfinished transfer batches")
     );
 
     // 取消：什么都不变。
@@ -1061,7 +1053,7 @@ fn disconnected_a_remote_command_offers_to_reconnect(cx: &mut TestAppContext) {
     assert!(back, "没有重新连接");
     let connected = wait_until(cx, fixture.handle, |cx| {
         label(cx, fixture.handle, "remote-status")
-            .is_some_and(|status| !status.starts_with("已断开"))
+            .is_some_and(|status| !status.starts_with("Disconnected"))
     });
     assert!(
         connected,
@@ -1132,8 +1124,11 @@ fn tabs_of_every_kind_reorder_by_dragging_and_keep_working(cx: &mut TestAppConte
     in_frame(cx, fixture.handle, |window, cx| {
         {
             let popup = window.within("popup-menu");
-            assert_eq!(popup.find(0_usize).label(), Some("关闭标签"));
-            assert_eq!(popup.find(2_usize).label(), Some("关闭右侧的标签"));
+            assert_eq!(popup.find(0_usize).label(), Some("Close Tab"));
+            assert_eq!(
+                popup.find(2_usize).label(),
+                Some("Close Tabs to the Right")
+            );
         }
         window.press("escape", cx);
     });
@@ -1174,4 +1169,51 @@ fn tabs_of_every_kind_reorder_by_dragging_and_keep_working(cx: &mut TestAppConte
         editor.map(|editor| editor.read(cx).text(cx))
     });
     assert_eq!(text.as_deref(), Some("x"));
+}
+
+#[gpui_kit::test]
+fn pane_headers_expose_place_names_and_direct_reconnect(cx: &mut TestAppContext) {
+    let fixture = open(cx);
+    open_tab(cx, &fixture);
+
+    assert_eq!(
+        label(cx, fixture.handle, "local-header").as_deref(),
+        Some("This Computer")
+    );
+    assert_eq!(
+        label(cx, fixture.handle, "remote-header").as_deref(),
+        Some("web-01")
+    );
+
+    // 表头的动作图标和路径栏的编辑铅笔都去掉了，动作走右键菜单和快捷键。
+    for id in [
+        "local-action-up",
+        "local-action-mkdir",
+        "local-action-upload",
+        "local-action-refresh",
+        "remote-action-up",
+        "remote-action-mkdir",
+        "remote-action-upload",
+        "remote-action-download",
+        "remote-action-refresh",
+        "local-path-edit-trigger",
+        "remote-path-edit-trigger",
+    ] {
+        assert!(!visible(cx, fixture.handle, id), "{id} 应该已经移除");
+    }
+
+    // Disconnecting surfaces the inline Reconnect pill in the remote pane header.
+    assert!(!visible(cx, fixture.handle, "remote-action-reconnect"));
+    fixture
+        .sftp
+        .emit(SftpEvent::Disconnected("连接超时".into()));
+    assert!(wait_until(cx, fixture.handle, |cx| {
+        visible(cx, fixture.handle, "remote-action-reconnect")
+    }));
+    in_frame(cx, fixture.handle, |window, cx| {
+        window.click("remote-action-reconnect", cx)
+    });
+    assert!(wait_until(cx, fixture.handle, |_| {
+        *fixture.sftp.reconnects.lock().unwrap() == 1
+    }));
 }

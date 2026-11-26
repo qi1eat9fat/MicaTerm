@@ -1,6 +1,5 @@
-// 来自 since2006/shell-rs @ b2a307a: src/explorer/file_icons.rs
-// 改造：只留单色一种（工单 12 去掉了「图标风格」和 Material Icon Theme 的彩色图标）。
-//! SFTP 列表里名称前的图标：和界面其余图标同一套 Lucide 线条图标，按类型分。
+//! SFTP file and directory icons: Lucide line icons aligned with Muxy's `Files` and `Source Control`
+//! panels (`site/card4.html`, `site/card5.html`), differentiated by entry kind and file category.
 
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -9,25 +8,74 @@ use gpui_kit::*;
 use super::{FileEntry, FileKind};
 use crate::app::CatalogIcon;
 
-/// What a row names, as far as its icon goes.
+/// Semantic icon category for an entry in the SFTP file list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileIconKind {
-    /// `..`.
+    /// `..` parent directory entry.
     Parent,
     Folder,
     File,
-    /// A symbolic link to a folder.
+    /// Source code, script, or structured configuration file.
+    Code,
+    /// Plain text, documentation, or log file.
+    Text,
+    /// Symbolic link pointing to a directory.
     FolderLink,
-    /// A symbolic link to a file, or a broken one.
+    /// Symbolic link pointing to a file, or broken link.
     FileLink,
 }
 
-/// 一个文件或目录的图标；链接用带箭头的那个。
+impl FileIconKind {
+    /// Whether this icon represents a folder or folder symlink.
+    pub fn is_folder(self) -> bool {
+        matches!(self, Self::Folder | Self::FolderLink)
+    }
+}
+
+/// Classifies a filename into `Code`, `Text`, or generic `File`.
+fn classify_file_name(name: &str) -> FileIconKind {
+    let lower = name.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "dockerfile"
+            | "makefile"
+            | "justfile"
+            | "cargo.lock"
+            | "cmakelists.txt"
+            | ".bashrc"
+            | ".zshrc"
+            | ".profile"
+            | ".bash_profile"
+    ) {
+        return FileIconKind::Code;
+    }
+    if lower.starts_with("readme")
+        || lower.starts_with("license")
+        || lower.starts_with("notice")
+        || lower.starts_with("changelog")
+    {
+        return FileIconKind::Text;
+    }
+    let Some((_, ext)) = lower.rsplit_once('.') else {
+        return FileIconKind::File;
+    };
+    match ext {
+        "rs" | "toml" | "json" | "jsonc" | "yaml" | "yml" | "js" | "mjs" | "cjs" | "ts" | "mts"
+        | "cts" | "tsx" | "jsx" | "py" | "go" | "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat"
+        | "cmd" | "c" | "h" | "cpp" | "hpp" | "cc" | "java" | "kt" | "swift" | "rb" | "php"
+        | "lua" | "sql" | "html" | "htm" | "css" | "scss" | "vue" | "svelte" | "xml" | "svg"
+        | "nix" | "zig" | "lock" => FileIconKind::Code,
+        "md" | "markdown" | "txt" | "log" | "conf" | "cfg" | "ini" | "env" | "csv" | "tsv"
+        | "gitignore" | "gitattributes" | "editorconfig" | "service" => FileIconKind::Text,
+        _ => FileIconKind::File,
+    }
+}
+
+/// Monochrome Lucide icon for a file or directory entry.
 #[derive(IntoElement)]
 pub struct FileIcon {
     kind: FileIconKind,
     dimmed: bool,
-    /// 边长和颜色；不给就是小号和次要字色。
     size: Option<Pixels>,
     color: Option<Hsla>,
 }
@@ -42,21 +90,21 @@ impl FileIcon {
         }
     }
 
-    /// `size` 见方、`color` 色（SFTP 列表，26 号 `.sf-r .nm svg`）。
+    /// Explicit square size and color.
     pub fn sized(mut self, size: Pixels, color: Hsla) -> Self {
         self.size = Some(size);
         self.color = Some(color);
         self
     }
 
-    /// The icon of a row of the lists.
+    /// Resolves the appropriate icon for a `FileEntry`.
     pub fn entry(entry: &FileEntry) -> Self {
         let kind = if entry.is_parent() {
             FileIconKind::Parent
         } else {
             match (entry.kind, entry.target) {
                 (FileKind::Dir, _) => FileIconKind::Folder,
-                (FileKind::File, _) => FileIconKind::File,
+                (FileKind::File, _) => classify_file_name(&entry.name),
                 (FileKind::Symlink, Some(FileKind::Dir)) => FileIconKind::FolderLink,
                 (FileKind::Symlink, _) => FileIconKind::FileLink,
             }
@@ -64,7 +112,11 @@ impl FileIcon {
         Self::new(kind)
     }
 
-    /// Lighter, for a hidden file.
+    pub fn kind(&self) -> FileIconKind {
+        self.kind
+    }
+
+    /// Dimmed opacity for hidden dotfiles.
     pub fn dimmed(mut self, dimmed: bool) -> Self {
         self.dimmed = dimmed;
         self
@@ -77,6 +129,8 @@ impl RenderOnce for FileIcon {
             FileIconKind::Parent => Icon::new(IconName::ArrowUp),
             FileIconKind::Folder => Icon::new(IconName::Folder),
             FileIconKind::File => Icon::new(IconName::File),
+            FileIconKind::Code => Icon::new(CatalogIcon::FileCode),
+            FileIconKind::Text => Icon::new(CatalogIcon::FileText),
             FileIconKind::FolderLink => Icon::new(CatalogIcon::FolderSymlink),
             FileIconKind::FileLink => Icon::new(CatalogIcon::FileSymlink),
         }
@@ -87,5 +141,32 @@ impl RenderOnce for FileIcon {
         .flex_none()
         .text_color(self.color.unwrap_or(cx.theme().muted_foreground))
         .when(self.dimmed, |icon| icon.opacity(0.6))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileEntry, FileIcon, FileIconKind};
+
+    #[test]
+    fn classifies_code_text_and_folders() {
+        assert_eq!(FileIcon::entry(&FileEntry::parent()).kind(), FileIconKind::Parent);
+        assert_eq!(FileIcon::entry(&FileEntry::dir("crates")).kind(), FileIconKind::Folder);
+        assert_eq!(
+            FileIcon::entry(&FileEntry::file("deploy.sh", 10)).kind(),
+            FileIconKind::Code
+        );
+        assert_eq!(
+            FileIcon::entry(&FileEntry::file("Dockerfile", 10)).kind(),
+            FileIconKind::Code
+        );
+        assert_eq!(
+            FileIcon::entry(&FileEntry::file("README.md", 10)).kind(),
+            FileIconKind::Text
+        );
+        assert_eq!(
+            FileIcon::entry(&FileEntry::file("archive.tar.gz", 10)).kind(),
+            FileIconKind::File
+        );
     }
 }

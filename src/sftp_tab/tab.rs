@@ -3,12 +3,12 @@
 // 改造：本地从「本地默认打开目录」（默认「下载」）开始，远程从焦点卡片的目录开始，读不出来静默退回主目录。
 //! SFTP 标签：一台主机的本地加远程两张文件卡片，有自己的一条连接，不能分屏。
 //!
-//! 每个标签一条工作线程（`SftpTransport`），事件经通道过来，这里每 16ms 取一次：
+//! 每个标签一条工作线程（`SftpTransport`），事件经通道过来，这里每个
+//! `micaterm_terminal::rendering::FRAME_INTERVAL` 取一次：
 //! 工作线程不直接唤醒只在前台跑的 GPUI 任务。
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 use gpui_kit::base::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::{WindowExt as _, notification::Notification};
@@ -39,8 +39,8 @@ static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// 一栏不能比这再窄。
 const MIN_CARD_WIDTH: Pixels = px(240.);
-/// 传输队列开始时的高（26 号 `.sf-q`），能拖到 96–480。
-const QUEUE_HEIGHT: Pixels = px(212.);
+/// Default height of the bottom transfer list panel (resizable between `96` and `480`).
+const QUEUE_HEIGHT: Pixels = px(188.);
 
 /// 打开一个 SFTP 标签要的东西。
 pub struct SftpTabOptions {
@@ -175,7 +175,7 @@ impl SftpTab {
         let events_task = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor()
-                    .timer(Duration::from_millis(16))
+                    .timer(micaterm_terminal::rendering::FRAME_INTERVAL)
                     .await;
                 let pending: Vec<_> = (0..128).map_while(|_| events.try_recv().ok()).collect();
                 if !pending.is_empty()

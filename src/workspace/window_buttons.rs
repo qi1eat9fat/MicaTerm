@@ -1,6 +1,5 @@
-//! 窗口按钮：最小化、最大化（或还原）、关闭。每个 32 见方（和标签栏同高；26 号是宽 44，
-//! 用户改成和右侧图标栏的内宽一样，× 正好在图标栏那列图标的正上方），
-//! 图标 14，整组左边一条细线；关闭悬停是红底白字。
+//! 窗口按钮：照空壳的三个彩色圆点（最小化黄、最大化绿、关闭红），每个 28 宽、高同标签栏。
+//! 左边一条 1 × 20 的细线把入口图标和它们隔开。
 //!
 //! - Windows：只标 `window_control_area(Min / Max / Close)`，按下和抬起由平台层在非客户区完成
 //!   （最大化按钮还会弹出贴靠布局）。**不要**挂 `stop_propagation` 或点击处理器，
@@ -8,16 +7,18 @@
 //! - Linux：没有平台层的按钮区，自己处理点击。
 //! - macOS：用系统的红绿灯，不画。
 
-use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::app::CatalogIcon;
 use crate::i18n::t;
+use crate::theme::space;
 use crate::theme::{Tokens, size};
+use crate::ui::icon_button::TextTooltip;
 
-/// 一个窗口按钮的宽度：等于右侧图标栏扣掉左边线的内宽，关闭按钮和图标栏的图标中心在一条竖线上。
-const CAPTION_WIDTH: Pixels = px(32.);
+/// 一个窗口按钮的宽度。
+const CAPTION_WIDTH: Pixels = px(22.);
+/// 圆点的直径。
+const DOT: Pixels = px(10.);
 
 #[derive(Clone, Copy)]
 enum WindowButton {
@@ -43,12 +44,11 @@ impl WindowButton {
         }
     }
 
-    fn icon(self) -> CatalogIcon {
+    fn color(self, tokens: &Tokens) -> Hsla {
         match self {
-            Self::Minimize => CatalogIcon::WindowMinimize,
-            Self::Maximize { restore: false } => CatalogIcon::WindowMaximize,
-            Self::Maximize { restore: true } => CatalogIcon::WindowRestore,
-            Self::Close => CatalogIcon::WindowClose,
+            Self::Minimize => tokens.window_min,
+            Self::Maximize { .. } => tokens.window_max,
+            Self::Close => tokens.window_close,
         }
     }
 
@@ -62,43 +62,42 @@ impl WindowButton {
     }
 
     fn render(self, tokens: &Tokens) -> impl IntoElement + use<> {
-        let (hover_bg, hover_fg) = match self {
-            Self::Close => (tokens.close_hover, tokens.close_hover_text),
-            _ => (tokens.hover, tokens.text),
-        };
-        div()
+        let label = self.label();
+        let button = div()
             .id(self.id())
             .test_support()
-            .aria_label(self.label())
+            .aria_label(label.clone())
+            .tooltip(move |_, cx| TextTooltip::view(label.clone(), cx))
             .flex()
             .flex_none()
             .items_center()
             .justify_center()
             .w(CAPTION_WIDTH)
             .h_full()
-            .text_color(tokens.icon)
-            .hover(move |style| style.bg(hover_bg).text_color(hover_fg))
+            .rounded(size::RADIUS_SM)
+            .cursor_pointer()
+            .hover(move |style| style.bg(tokens.hover))
             .window_control_area(self.area())
-            .when(cfg!(target_os = "linux"), |button| {
-                button
-                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                    })
-                    .on_click(move |_, window, cx| {
-                        cx.stop_propagation();
-                        match self {
-                            Self::Minimize => window.minimize_window(),
-                            Self::Maximize { .. } => window.zoom_window(),
-                            Self::Close => {
-                                if !crate::app::quit_held_back(window, cx) {
-                                    window.remove_window();
-                                }
+            .child(div().size(DOT).rounded_full().bg(self.color(tokens)));
+        button.when(cfg!(target_os = "linux"), |button| {
+            button
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    match self {
+                        Self::Minimize => window.minimize_window(),
+                        Self::Maximize { .. } => window.zoom_window(),
+                        Self::Close => {
+                            if !crate::app::quit_held_back(window, cx) {
+                                window.remove_window();
                             }
                         }
-                    })
-            })
-            .child(Icon::new(self.icon()).size(px(14.)))
+                    }
+                })
+        })
     }
 }
 
@@ -116,8 +115,16 @@ pub(super) fn render_window_buttons(tokens: &Tokens, window: &Window) -> impl In
         .flex_none()
         .h_full()
         .when(!cfg!(target_os = "macos"), |row| {
-            row.border_l(size::LINE)
-                .border_color(tokens.line)
-                .children(buttons.map(|button| button.render(tokens)))
+            // 分隔线到图标也要约 6 的可见空隙：左边去掉 Agent 按钮的 4 内边距留 2，
+            // 右边最小化圆点自己的内边距（23 的按钮、11 的点）已经够 6，不再留。
+            row.child(
+                div()
+                    .flex_none()
+                    .w(px(1.))
+                    .h_full()
+                    .ml(space::SPACE_2)
+                    .bg(tokens.line),
+            )
+            .children(buttons.map(|button| button.render(tokens)))
         })
 }

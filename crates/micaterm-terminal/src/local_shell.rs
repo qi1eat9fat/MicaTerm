@@ -45,9 +45,15 @@ impl LocalShell {
         Some(locate(&first).unwrap_or_else(|| PathBuf::from(first)))
     }
 
-    /// 卡片头部显示的 shell 名：程序的文件名，去掉 `.exe`（`pwsh`、`bash`）。阻塞。
+    /// 卡片头部显示的 shell 名：程序的文件名，去掉 `.exe`（`bash`、`zsh`）；PowerShell 的
+    /// 两个可执行文件名（`pwsh`、`powershell`）都写成 `PowerShell`，和用户认得的名字一致。阻塞。
     pub fn display_name(&self) -> String {
-        program_name(self.program().as_deref())
+        let name = program_name(self.program().as_deref());
+        if name.eq_ignore_ascii_case("pwsh") || name.eq_ignore_ascii_case("powershell") {
+            "PowerShell".to_string()
+        } else {
+            name
+        }
     }
 
     /// What to spawn. Blocking: it looks at the file system, so it runs on
@@ -489,6 +495,16 @@ mod tests {
         assert_eq!(LocalShell::new("/no/such/zsh -l").display_name(), "zsh");
         // 默认 shell 也有名字。
         assert!(!LocalShell::default().display_name().is_empty());
+    }
+
+    #[test]
+    fn powershell_is_shown_by_the_name_users_know() {
+        // 可执行文件叫 pwsh / powershell，卡片上写 PowerShell。
+        assert_eq!(LocalShell::new("/no/such/pwsh").display_name(), "PowerShell");
+        assert_eq!(
+            LocalShell::new("powershell.exe -NoLogo").display_name(),
+            "PowerShell"
+        );
     }
 
     #[test]

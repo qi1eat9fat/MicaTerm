@@ -1,6 +1,6 @@
-//! 凭据面板（26 号「凭据」，停靠面板 `ui::dock`）：右侧图标栏「凭据」展开。标题行「凭据」+「+」；
+//! 凭据面板（26 号「凭据」，停靠面板 `ui::dock`）：右侧图标栏「凭据」展开。标题行是图标 +「凭据」+「+」「收起」；
 //! 下面按类型分组（密钥 / 密码 / SSH Agent），分组标题点一下收起；每条一行（`.ci`）：类型图标、名称、
-//! 淡色「用户名 · 算法」，右边「N 台」（没有主机在用时更淡的「未使用」）。名称 13、其余 12，按基线对齐。
+//! 淡色「用户名 · 算法」，右边「N 台」（没有主机在用时更淡的「未使用」）。行高 24，名称 12、其余 11，按基线对齐。
 //! 保险库的状态只在主机栏左下角显示，这里不重复；锁着时名称、用户名照常显示（它们不是秘密）。
 //!
 //! 单击选中，双击或回车编辑，↑↓ 按显示的顺序移动选中；右键菜单：编辑… / 复制公钥（只有密钥）/ 删除，
@@ -12,14 +12,18 @@ use gpui_kit::base::POPUP_PRIORITY;
 use gpui_kit::component::{Icon, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use micaterm_ui::Menu;
+use micaterm_ui::{Menu, WINDOW_MARGIN};
 
 use super::{kind_icon, kind_label, summary};
-use crate::app::{CopyCredentialPublicKey, DeleteCredential, EditCredential, NewCredential};
+use crate::app::{
+    CatalogIcon, CopyCredentialPublicKey, DeleteCredential, EditCredential, NewCredential,
+    ShowCredentials,
+};
 use crate::host::{Credential, CredentialId, CredentialKind, HostStore};
 use crate::i18n::t;
-use crate::theme::{Tokens, TypeScale, UI_FONT_FAMILY, baseline_shift, size};
-use crate::ui::dock::{DockNew, dock_empty, dock_group, dock_header, dock_panel};
+use crate::theme::space;
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, size};
+use crate::ui::dock::{DockClose, DockNew, dock_empty, dock_group, dock_header, dock_panel};
 
 /// 分组的顺序（26 号）：密钥、密码、SSH Agent。
 const GROUPS: [CredentialKind; 3] = [
@@ -207,40 +211,33 @@ impl CredentialPanel {
         cx.notify();
     }
 
-    /// 一条凭据（`.ci`）：类型图标、名称、淡色「用户名 · 算法」，右边「N 台」。
+    /// 一条凭据：左右内缩 4px 微圆角行，左边类型图标 + 正文色名称 + 淡色用户名 + 算法微徽章；
+    /// 右边仅在有主机引用时显示绿字主机计数（未使用时留白减噪，无障碍标签仍完整保留）。
     fn render_row(
         &self,
         credential: &Credential,
         hosts: usize,
         tokens: &Tokens,
-        window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let scale = TypeScale::current(cx);
         let id = credential.id;
         let selected = self.selected == Some(id);
         let pressed = self.menu.as_ref().is_some_and(|menu| menu.credential == id);
-        let (usage, usage_long) = if hosts == 0 {
-            (t!("credential.panel.unused"), t!("credential.panel.unused"))
+        let usage_long = if hosts == 0 {
+            t!("credential.panel.unused")
+        } else if hosts == 1 {
+            t!("credential.panel.hosts_one", count = hosts)
         } else {
-            (
-                t!("credential.panel.hosts_short", count = hosts),
-                t!("credential.panel.hosts", count = hosts),
-            )
+            t!("credential.panel.hosts", count = hosts)
         };
         let label = format!(
             "{} · {} · {usage_long}",
             credential.name,
             summary(credential)
         );
-        // 名称 `side`、后面两段 `small`：都设成行高、盒子居中，再把小字往下挪到同一条基线。
-        let small = scale.small;
-        let shift = baseline_shift(
-            window,
-            (UI_FONT_FAMILY, scale.side),
-            (UI_FONT_FAMILY, small),
-            scale.side_row,
-        );
+        let algorithm = key_algorithm_badge(credential);
+        let has_user = !credential.user.is_empty();
         let hover = tokens.hover;
         let target = self.target.clone();
         div()
@@ -251,23 +248,26 @@ impl CredentialPanel {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(10.))
-            .h(scale.side_row)
-            .px(px(8.))
-            .rounded(size::RADIUS_LG)
-            .text_size(scale.side)
-            .line_height(scale.side_row)
-            .text_color(tokens.label)
+            .gap(space::SPACE_5)
+            .h(size::DOCK_ROW)
+            .mx(space::SPACE_4)
+            .mt(px(1.))
+            .pl(px(18.))
+            .pr(space::SPACE_8)
+            .rounded(size::RADIUS_SM)
+            .text_size(scale.sm)
+            .line_height(size::DOCK_ROW)
+            .text_color(tokens.text)
             .whitespace_nowrap()
             .cursor_pointer()
             .map(|row| {
                 if selected {
-                    row.bg(tokens.sel).text_color(tokens.text)
+                    row.bg(tokens.sel)
                 } else {
                     row.hover(move |style| style.bg(hover))
                 }
             })
-            // 被右键的那一行描一圈细边，选中项不变（26 号 `.ci.ctx`）。
+            // 被右键的那一行描一圈细边，选中项不变。
             .when(pressed, |row| {
                 row.border_1().border_color(tokens.line_strong)
             })
@@ -293,9 +293,7 @@ impl CredentialPanel {
                     .flex_none()
                     .items_center()
                     .justify_center()
-                    .size(px(16.))
-                    // GPUI 里图标比文字高约 1 个设备像素（150% 实测）：钥匙、人形下移 0.5；
-                    // 锁上轻下重，看着已经齐，不动。
+                    .size(size::ICON_MD)
                     .relative()
                     .top(match credential.kind {
                         CredentialKind::Password => px(0.),
@@ -303,54 +301,70 @@ impl CredentialPanel {
                     })
                     .child(
                         Icon::new(kind_icon(credential.kind))
-                            .size(px(14.))
+                            .size(size::ICON_SM)
                             .text_color(tokens.icon),
                     ),
-            )
-            .child(div().flex_none().child(credential.name.clone()))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .ml(px(-2.))
-                    .relative()
-                    .top(shift)
-                    .truncate()
-                    .text_size(small)
-                    .text_color(tokens.st_dim)
-                    .child(row_detail(credential)),
             )
             .child(
                 div()
                     .flex_none()
-                    .relative()
-                    .top(shift)
-                    .text_size(small)
-                    .text_color(if hosts == 0 {
-                        tokens.faint
-                    } else {
-                        tokens.st_dim
-                    })
-                    .child(usage),
+                    .max_w(relative(0.56))
+                    .truncate()
+                    .font_weight(WEIGHT_NORMAL)
+                    .child(credential.name.clone()),
             )
+            .when(has_user, |row| {
+                row.child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(tokens.st_dim)
+                        .child(credential.user.clone()),
+                )
+            })
+            .when_some(algorithm, |row, algorithm| {
+                row.child(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .px(space::SPACE_4)
+                        .h(px(14.))
+                        .rounded(size::RADIUS_SM)
+                        .bg(tokens.sel)
+                        .text_size(scale.xs)
+                        .line_height(px(14.))
+                        .font_weight(WEIGHT_NORMAL)
+                        .text_color(tokens.text2)
+                        .child(algorithm),
+                )
+            })
+            .when(hosts > 0, |row| {
+                row.child(
+                    div()
+                        .ml_auto()
+                        .pl(space::SPACE_6)
+                        .flex_none()
+                        .text_size(scale.xs)
+                        .font_weight(WEIGHT_NORMAL)
+                        .text_color(tokens.ok_text)
+                        .child(usage_long),
+                )
+            })
     }
 }
 
-/// 行里的淡色一段：用户名，密钥再加算法（「deploy · ED25519」）；类型在分组标题上，不重复。
-/// 读不出公钥的密钥不写算法。
-fn row_detail(credential: &Credential) -> SharedString {
-    let algorithm = (credential.kind == CredentialKind::Key)
+/// 密钥凭据的算法微徽章（如 `ED25519`）；非密钥或读不出公钥时为 `None`。
+fn key_algorithm_badge(credential: &Credential) -> Option<SharedString> {
+    (credential.kind == CredentialKind::Key)
         .then(|| {
             credential
                 .public_key
                 .as_deref()
                 .and_then(crate::host::key_algorithm)
         })
-        .flatten();
-    match algorithm {
-        Some(algorithm) => format!("{} · {algorithm}", credential.user).into(),
-        None => credential.user.clone(),
-    }
+        .flatten()
+        .map(SharedString::from)
 }
 
 /// 一条凭据的右键菜单：编辑… / 复制公钥（只有密钥）/ 删除。菜单派发的 action 送到 `target`。
@@ -390,7 +404,7 @@ impl Focusable for CredentialPanel {
 }
 
 impl Render for CredentialPanel {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let credentials: Vec<(Credential, usize)> = {
             let store = self.store.read(cx);
@@ -409,7 +423,7 @@ impl Render for CredentialPanel {
                 cx,
             )
         });
-        // 每个有凭据的类型一组：分组标题，展开着时下面是它的凭据。
+        // 每个有凭据的类型一组：分组目录行，展开着时下面是缩进的凭据节点。
         let mut list: Vec<AnyElement> = Vec::new();
         for kind in GROUPS {
             let rows: Vec<&(Credential, usize)> = credentials
@@ -424,6 +438,7 @@ impl Render for CredentialPanel {
             list.push(dock_group(
                 ("credential-group", kind as usize),
                 kind_label(kind),
+                rows.len(),
                 collapsed,
                 list.is_empty(),
                 move |_, _, cx| {
@@ -437,7 +452,7 @@ impl Render for CredentialPanel {
             if !collapsed {
                 for (credential, hosts) in rows {
                     list.push(
-                        self.render_row(credential, *hosts, &tokens, window, cx)
+                        self.render_row(credential, *hosts, &tokens, cx)
                             .into_any_element(),
                     );
                 }
@@ -448,12 +463,18 @@ impl Render for CredentialPanel {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key))
             .child(dock_header(
+                CatalogIcon::KeyRound,
                 t!("credential.panel.title"),
                 None,
                 DockNew {
                     id: "credentials-new",
                     label: t!("credential.panel.new"),
                     action: Box::new(NewCredential),
+                },
+                DockClose {
+                    id: "credentials-close",
+                    label: t!("credential.panel.collapse"),
+                    action: Box::new(ShowCredentials),
                 },
                 &self.target,
                 &tokens,
@@ -467,7 +488,7 @@ impl Render for CredentialPanel {
                     .flex_col()
                     .flex_1()
                     .min_h_0()
-                    .pb(px(8.))
+                    .pb(space::SPACE_8)
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .children(list)
@@ -477,7 +498,7 @@ impl Render for CredentialPanel {
                 deferred(
                     anchored()
                         .position(menu.position)
-                        .snap_to_window_with_margin(px(8.))
+                        .snap_to_window_with_margin(WINDOW_MARGIN)
                         .child(menu.view.clone()),
                 )
                 .with_priority(POPUP_PRIORITY)

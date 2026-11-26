@@ -23,7 +23,7 @@ use crate::cli::{
 };
 use crate::i18n::t;
 use crate::settings::SettingsStore;
-use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, size};
+use crate::theme::{Tokens, TypeScale, size, space};
 use crate::ui::DialogLayer;
 use crate::ui::modal::{
     ModalButtonTone, ModalHead, OnClick, modal_button, modal_dialog, modal_note, modal_question,
@@ -326,9 +326,8 @@ impl PrepDialog {
         }
     }
 
-    /// 文件夹一行：「文件夹」+ 等宽字的路径 +「选择…」。
+    /// 文件夹一行：「文件夹」+ 路径 +「选择…」。
     fn folder_row(&self, tokens: &Tokens, window: &Window, cx: &mut Context<Self>) -> Div {
-        let scale = TypeScale::current(cx);
         let working = self.working.is_some();
         let path: SharedString = match &self.directory {
             Some(directory) => directory.to_string_lossy().into_owned().into(),
@@ -337,7 +336,7 @@ impl PrepDialog {
         div()
             .flex()
             .items_center()
-            .gap(px(10.))
+            .gap(space::SPACE_10)
             .child(
                 div()
                     .flex_none()
@@ -352,8 +351,6 @@ impl PrepDialog {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .font_family(MONO_FONT_FAMILY)
-                    .text_size(scale.mono_small)
                     .text_color(tokens.text)
                     .child(path),
             )
@@ -398,10 +395,10 @@ impl PrepDialog {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(8.))
+            .gap(space::SPACE_8)
             .h(ROW_HEIGHT)
-            .px(px(10.))
-            .rounded(size::RADIUS)
+            .px(space::SPACE_10)
+            .rounded(size::RADIUS_MD)
             .cursor_pointer()
             .text_color(tokens.text)
             .map(|row| {
@@ -422,8 +419,7 @@ impl PrepDialog {
             .children(time.map(|time| {
                 div()
                     .flex_none()
-                    .font_family(MONO_FONT_FAMILY)
-                    .text_size(scale.mono_small)
+                    .text_size(scale.sm)
                     .text_color(tokens.st_dim)
                     .child(time)
             }))
@@ -465,7 +461,7 @@ impl PrepDialog {
         div()
             .flex()
             .flex_col()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(
                 div()
                     .text_color(tokens.label)
@@ -476,7 +472,7 @@ impl PrepDialog {
                     .id("agent-prep-conversations")
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
+                    .gap(space::SPACE_2)
                     .max_h(ROW_HEIGHT * VISIBLE_ROWS)
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
@@ -501,7 +497,6 @@ impl Focusable for PrepDialog {
 impl Render for PrepDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
-        let scale = TypeScale::current(cx);
         let working = self.working.is_some();
         let starting = self.prep.start.is_some();
         let question = if self.only_update() {
@@ -527,7 +522,7 @@ impl Render for PrepDialog {
                     .aria_label(title.clone())
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(space::SPACE_8)
                     .min_h(px(26.))
                     .child(
                         div()
@@ -549,11 +544,6 @@ impl Render for PrepDialog {
                                 .min_w_0()
                                 .truncate()
                                 .text_color(tokens.st_dim)
-                                .when(*step != PrepStep::EnableCli, |detail| {
-                                    detail
-                                        .font_family(MONO_FONT_FAMILY)
-                                        .text_size(scale.mono_small)
-                                })
                                 .child(detail),
                         ),
                         (None, None) => row,
@@ -564,7 +554,7 @@ impl Render for PrepDialog {
             div()
                 .flex()
                 .flex_col()
-                .gap(px(8.))
+                .gap(space::SPACE_8)
                 .child(modal_question(question, &tokens))
                 .child(div().flex().flex_col().children(rows))
                 .child(modal_note(t!("agent.prep.note"), &tokens))
@@ -589,7 +579,7 @@ impl Render for PrepDialog {
         };
         let footer = div()
             .flex()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(modal_button(
                 "agent-prep-cancel",
                 t!("agent.prep.cancel"),
@@ -674,7 +664,7 @@ pub fn open_prep_dialog(
     });
     let focus = view.read(cx).focus_handle.clone();
     layer.open_dismissable(
-        move |dialog, _, _| modal_dialog(dialog).child(view.clone()),
+        move |dialog, _, cx| modal_dialog(dialog, &Tokens::current(cx)).child(view.clone()),
         move |_, _| {
             on_ready.borrow_mut().take();
         },

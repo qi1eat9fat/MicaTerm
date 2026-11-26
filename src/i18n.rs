@@ -1,38 +1,76 @@
-//! 多语言：MicaTerm 的界面文案，v1 只有简体中文，但文案全部走翻译表。
+//! 多语言：界面文案有英文和简体中文两套，设置 › 应用 › 语言里切换，切换后立即生效。
 //!
 //! 文案放在 `locales/<模块>.yml`，一个模块一个文件（`workspace.yml`、`settings.yml`……），
-//! 每个键下面写 `zh-CN:`。代码里用 `t!("键")` 取文案，返回 `SharedString`。
-//! 键说用途（`workspace.start.new_host`），不写中文原句；一句话一个键，不拼片段；插值写 `%{name}`。
+//! 每个键下面写 `en:` 和 `zh-CN:`。代码里用 `t!("键")` 取文案，返回 `SharedString`，按当前界面语言查表。
+//! 键说用途（`workspace.start.new_host`），不写英文原句；一句话一个键，不拼片段；插值写 `%{name}`。
 //! 以 `%`、`{` 开头或含 `: ` 的值要加引号，否则那条文案会悄悄没了。
 //!
-//! 守卫测试（本文件末尾）：代码里的键都有文案、文案都被用到、`src/` 里测试以外没有中文字面量
-//! （确实要留的那一行加 `// i18n: keep`）。
-// 来自 since2006/shell-rs @ b2a307a: src/i18n.rs（裁剪：只留 zh-CN，去掉运行时切换语言、`tn!` 和 `join_list`）
+//! 守卫测试（本文件末尾）：每个键中英文都有、代码里的键都有文案、文案都被用到、
+//! `src/` 里测试以外没有中文字面量（确实要留的那一行加 `// i18n: keep`）。
+// 来自 since2006/shell-rs @ b2a307a: src/i18n.rs（裁剪：只留界面语言和运行时切换，去掉 `tn!` 和 `join_list`）
 
 use std::borrow::Cow;
 
 use gpui_kit::SharedString;
+use serde::{Deserialize, Serialize};
 
-/// 文案所用的语言。v1 只有这一种。
-pub const LOCALE: &str = "zh-CN";
-
-/// gpui-kit 自己的文案（对话框按钮、输入框菜单等）也用简体中文。
-pub fn init() {
-    gpui_kit::component::set_locale(LOCALE);
+/// 界面语言。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Language {
+    /// 英文：默认，也是缺文案时的回退语言。
+    #[default]
+    English,
+    /// 简体中文。
+    ChineseSimplified,
 }
 
-/// `key` 的文案，把其中每个 `%{name}` 换成给的值：`t!("workspace.start.title")`、
-/// `t!("settings.store.save_failed", error = error)`。
+impl Language {
+    /// 设置里按顺序列的（分段按钮从左到右）。
+    pub const ALL: [Self; 2] = [Self::ChineseSimplified, Self::English];
+
+    /// 文案表里的语言代码（`locales/*.yml` 里的 `en:` / `zh-CN:`）。
+    pub fn locale(self) -> &'static str {
+        match self {
+            Self::English => "en",
+            Self::ChineseSimplified => "zh-CN",
+        }
+    }
+
+    /// 从语言代码认语言：`zh`、`zh-CN`、`zh-HK` 都算简体中文，其余是英文。
+    fn from_locale(locale: &str) -> Self {
+        if locale.split(['-', '_']).next() == Some("zh") {
+            Self::ChineseSimplified
+        } else {
+            Self::English
+        }
+    }
+}
+
+/// 当前的界面语言。
+pub fn language() -> Language {
+    Language::from_locale(&rust_i18n::locale())
+}
+
+/// 设置界面语言：应用的文案和 gpui-kit 自己的文案（对话框按钮、输入框菜单等）一起换。
+/// 界面的重画由设置的应用那一端负责（`settings::apply`）。
+pub fn set_language(language: Language) {
+    gpui_kit::component::set_locale(language.locale());
+}
+
+/// 回到默认语言。开窗口前调用；设置里存了别的语言时再由 `set_language` 覆盖。
+pub fn init() {
+    set_language(Language::default());
+}
+
+/// `key` 的文案，按当前界面语言查表，把其中每个 `%{name}` 换成给的值：
+/// `t!("workspace.start.title")`、`t!("settings.store.save_failed", error = error)`。
 macro_rules! t {
     ($key:expr $(,)?) => {
-        $crate::i18n::shared($crate::_rust_i18n_t!($key, locale = $crate::i18n::LOCALE))
+        $crate::i18n::shared($crate::_rust_i18n_t!($key))
     };
     ($key:expr, $($args:tt)+) => {
-        $crate::i18n::shared($crate::_rust_i18n_t!(
-            $key,
-            locale = $crate::i18n::LOCALE,
-            $($args)+
-        ))
+        $crate::i18n::shared($crate::_rust_i18n_t!($key, $($args)+))
     };
 }
 pub(crate) use t;
@@ -54,14 +92,14 @@ mod tests {
 
     use regex::Regex;
 
-    use super::LOCALE;
+    use super::Language;
 
     /// 标记这一行的中文字面量是有意保留的。
     const KEEP: &str = "i18n: keep";
 
-    fn messages() -> BTreeMap<String, String> {
+    fn messages(language: Language) -> BTreeMap<String, String> {
         crate::_rust_i18n_backend()
-            .messages_for_locale(LOCALE)
+            .messages_for_locale(language.locale())
             .unwrap_or_default()
             .into_iter()
             .map(|(key, text)| (key.into_owned(), text.into_owned()))
@@ -108,19 +146,59 @@ mod tests {
     }
 
     #[test]
-    fn there_is_text_in_simplified_chinese() {
-        assert!(!messages().is_empty());
+    fn the_language_codes_pick_the_right_table() {
+        assert_eq!(Language::from_locale("en"), Language::English);
+        assert_eq!(Language::from_locale("zh"), Language::ChineseSimplified);
+        assert_eq!(Language::from_locale("zh-CN"), Language::ChineseSimplified);
+        // 中文表里确实是中文；这里按语言代码直接查，不动进程的当前语言。
+        let chinese = crate::_rust_i18n_try_translate("zh-CN", "settings.appearance.language")
+            .expect("the Chinese text exists");
+        assert_eq!(chinese.as_ref(), "语言");
+        let fallback = crate::_rust_i18n_try_translate("en", "settings.appearance.language")
+            .expect("the English text exists");
+        assert_eq!(fallback.as_ref(), "Language");
+    }
+
+    #[test]
+    fn every_key_has_english_and_chinese() {
+        let english = messages(Language::English);
+        let chinese = messages(Language::ChineseSimplified);
+        assert!(!english.is_empty());
+        assert_eq!(
+            english.keys().collect::<Vec<_>>(),
+            chinese.keys().collect::<Vec<_>>()
+        );
+        // 英文表里不该混进中文。
+        assert!(
+            !english.values().any(|text| text.chars().any(is_cjk)),
+            "{:#?}",
+            english
+                .iter()
+                .filter(|(_, text)| text.chars().any(is_cjk))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn texts_follow_the_interface_text_rules() {
         let mut problems = Vec::new();
-        for (key, text) in messages() {
-            if text.contains("...") {
-                problems.push(format!("{key}: three dots instead of …"));
-            }
-            if text.trim() != text {
-                problems.push(format!("{key}: spaces around the text"));
+        for language in Language::ALL {
+            for (key, text) in messages(language) {
+                if text.contains("...") {
+                    problems.push(format!(
+                        "{}: {key}: three dots instead of …",
+                        language.locale()
+                    ));
+                }
+                // 列表分隔符和括号里的详情是要拼进句子的片段，需要首尾空格。
+                let fragment =
+                    key.ends_with(".separator") || key.starts_with("sftp_tab.close.detail");
+                if text.trim() != text && !fragment {
+                    problems.push(format!(
+                        "{}: {key}: spaces around the text",
+                        language.locale()
+                    ));
+                }
             }
         }
         assert!(problems.is_empty(), "{problems:#?}");
@@ -128,7 +206,7 @@ mod tests {
 
     #[test]
     fn every_key_in_the_code_has_text_and_every_text_is_used() {
-        let texts = messages();
+        let texts = messages(Language::English);
         let call = Regex::new(r#"\bt!\(\s*"([^"]+)""#).expect("pattern");
         let sources = all_sources();
         let mut problems = Vec::new();

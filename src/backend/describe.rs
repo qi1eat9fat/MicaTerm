@@ -526,7 +526,7 @@ mod tests {
             latency_label(Latency::Measured(Duration::from_micros(32_900))),
             "32 ms"
         );
-        assert_eq!(latency_label(Latency::TimedOut), "超时");
+        assert_eq!(latency_label(Latency::TimedOut), "Timed Out");
     }
 
     #[test]
@@ -542,10 +542,13 @@ mod tests {
             ConnectionPromptKind::UnknownHost(prompt) => unknown_host_lead(&prompt),
             _ => unreachable!("an unknown host stays one"),
         };
-        assert_eq!(lead(None), "第一次连接这台主机，请核对它的主机密钥：");
+        assert_eq!(
+            lead(None),
+            "First connection to this host; verify its host key:"
+        );
         assert_eq!(
             lead(Some("堡垒机")),
-            "跳板主机「堡垒机」：第一次连接这台主机，请核对它的主机密钥："
+            "Jump host \"堡垒机\": First connection to this host; verify its host key:"
         );
     }
 
@@ -564,9 +567,12 @@ mod tests {
             },
             None,
         );
-        assert_eq!(authentication_title(&password), "输入密码");
-        assert_eq!(authentication_instructions(&password), "请输入登录密码");
-        assert_eq!(authentication_fields(&password)[0].label(), "密码");
+        assert_eq!(authentication_title(&password), "Enter Password");
+        assert_eq!(
+            authentication_instructions(&password),
+            "Enter the login password"
+        );
+        assert_eq!(authentication_fields(&password)[0].label(), "Password");
 
         let passphrase = prompt(
             AuthenticationRequest::Passphrase {
@@ -575,10 +581,13 @@ mod tests {
             },
             Some("堡垒机"),
         );
-        assert_eq!(authentication_title(&passphrase), "输入私钥口令");
+        assert_eq!(
+            authentication_title(&passphrase),
+            "Enter Private Key Passphrase"
+        );
         assert_eq!(
             authentication_instructions(&passphrase),
-            "跳板主机「堡垒机」：已保存的口令无法解开保存的私钥，请重新输入"
+            "Jump host \"堡垒机\": The saved passphrase cannot unlock Saved Private Key; enter it again"
         );
 
         let code = prompt(
@@ -590,10 +599,10 @@ mod tests {
             },
             None,
         );
-        assert_eq!(authentication_title(&code), "输入验证码");
+        assert_eq!(authentication_title(&code), "Enter Verification Code");
         assert_eq!(
             authentication_instructions(&code),
-            "服务器要求键盘交互认证（密码已自动回答）："
+            "The server requires keyboard-interactive authentication (passwords are answered automatically):"
         );
         assert_eq!(
             authentication_fields(&code)[0].label(),
@@ -605,11 +614,11 @@ mod tests {
     fn missing_credentials_name_what_was_wrong() {
         assert_eq!(
             reason(MissingCredential::Password { rejected: true }.into()),
-            "用户名或密码错误"
+            "Incorrect username or password"
         );
         assert_eq!(
             reason(MissingCredential::Password { rejected: false }.into()),
-            "未填写密码"
+            "No password was entered"
         );
     }
 
@@ -619,12 +628,18 @@ mod tests {
             ConnectError::Handshake,
             Error::from(ErrorKind::ConnectionRefused),
         );
-        assert_eq!(reason(refused), "连接被拒绝，该端口上没有服务在监听");
+        assert_eq!(
+            reason(refused),
+            "The connection was refused; nothing is listening on that port"
+        );
         assert_eq!(
             reason(Error::from(ErrorKind::HostUnreachable).into()),
-            "主机不可达"
+            "The host is unreachable"
         );
-        assert_eq!(reason(russh::Error::ConnectionTimeout.into()), "连接超时");
+        assert_eq!(
+            reason(russh::Error::ConnectionTimeout.into()),
+            "The connection timed out"
+        );
     }
 
     #[test]
@@ -635,7 +650,7 @@ mod tests {
             },
             MissingCredential::Password { rejected: false },
         );
-        assert_eq!(reason(missing), "跳板主机「阿里云99」：未填写密码");
+        assert_eq!(reason(missing), "Jump host \"阿里云99\": No password was entered");
     }
 
     #[test]
@@ -650,7 +665,7 @@ mod tests {
         );
         assert_eq!(
             reason(mac),
-            "无法建立 SSH 连接：和服务器没有共同的消息校验（MAC）算法，服务器支持的是 hmac-sha1、hmac-md5"
+            "Cannot establish an SSH connection: no common message authentication (MAC) algorithm with the server, which offers hmac-sha1, hmac-md5"
         );
     }
 
@@ -661,10 +676,13 @@ mod tests {
         });
         assert_eq!(
             describe_error(&corrupt),
-            "主机信任文件已损坏：/data/known_hosts"
+            "The host trust file is damaged: /data/known_hosts"
         );
         let channel = wrap(ConnectError::Cancelled, ChannelError::PtyRefused);
-        assert_eq!(describe_chain(&channel), "连接已取消: 服务器拒绝创建终端");
+        assert_eq!(
+            describe_chain(&channel),
+            "The connection was cancelled: The server refused to create a terminal"
+        );
         let deep = channel.context("outer");
         assert_eq!(
             find_cause::<ConnectError>(&deep),
@@ -672,7 +690,7 @@ mod tests {
         );
         assert_eq!(
             reason(AuthError::KeyMissing.into()),
-            "保险库里没有这把私钥（可能已删除，或者保险库是从别的电脑拷来的），请重新导入"
+            "This private key is not in the vault (it may have been deleted, or the vault was copied from another computer). Import it again"
         );
         assert_eq!(reason(anyhow!("anything")), "anything");
     }

@@ -488,7 +488,10 @@ fn a_refused_connection_fails_the_terminal_with_the_reason_in_chinese() {
     let error = Terminal::open(&remote, 1, &target(closed_port()))
         .finish()
         .unwrap_err();
-    assert_eq!(error.to_string(), "连接被拒绝，该端口上没有服务在监听");
+    assert_eq!(
+        error.to_string(),
+        "The connection was refused; nothing is listening on that port"
+    );
     assert_eq!(remote.connection_count(), 0, "连不上的连接不留在表里");
 }
 
@@ -502,7 +505,7 @@ fn a_password_the_server_refuses_every_time_fails_the_login() {
     let error = Terminal::open(&remote, 1, &fixture.target())
         .finish()
         .unwrap_err();
-    assert!(error.to_string().starts_with("认证失败"), "{error}");
+    assert!(error.to_string().starts_with("Authentication failed"), "{error}");
 }
 
 pub(super) fn trusting(trusted: bool) -> TrustAsker {
@@ -521,7 +524,7 @@ fn a_connection_test_logs_in_with_the_typed_password() {
     assert_eq!(ok, Ok(()));
     let wrong =
         futures::executor::block_on(tester.test(LoginTest::new(login, "nope"), trusting(true)));
-    assert_eq!(wrong, Err("用户名或密码错误".into()));
+    assert_eq!(wrong, Err("Incorrect username or password".into()));
 }
 
 #[test]
@@ -532,7 +535,7 @@ fn a_connection_test_whose_host_key_is_declined_says_so() {
         LoginTest::new(fixture.target().login, TEST_PASSWORD),
         trusting(false),
     ));
-    assert_eq!(result, Err("未信任该主机的密钥".into()));
+    assert_eq!(result, Err("The host's key was not trusted".into()));
 }
 
 #[test]
@@ -542,5 +545,5 @@ fn a_connection_test_with_the_password_left_empty_asks_for_it() {
     let result = futures::executor::block_on(
         tester.test(LoginTest::new(fixture.target().login, ""), trusting(true)),
     );
-    assert_eq!(result, Err("未填写密码".into()));
+    assert_eq!(result, Err("No password was entered".into()));
 }

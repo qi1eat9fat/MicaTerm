@@ -29,17 +29,17 @@ use super::status_dot::{ACTIVE_FOR, StatusDot};
 use super::title_row::{CardPlace, Paint, TitleRow, render_title_row};
 use crate::app::{
     CloseCard, CloseFocusedCard, CopyCardAddress, DisconnectCard, HandCardToAgent,
-    MoveCardToNewTab, OpenCardSftp, ReconnectCard, TakeCardBack, ToggleZoomCard, ZoomCard,
+    MoveCardToNewTab, OpenCardSftp, ReconnectCard, TakeCardBack,
 };
 use crate::backend::{ConnectionId, RemoteTarget};
 use crate::i18n::t;
 use crate::programs::{Program, program_of, shell_program};
 use crate::theme::{Tokens, TypeScale};
 
-/// 终端文字离顶行、窗格左右两边的距离（26 号：顶行下面 `.term` 的上边距收到 4，左右 20）。
-/// 终端自己四周留 0.5 rem，上边距不会比它小。
-const TERMINAL_TOP: Pixels = px(8.);
-const TERMINAL_SIDE: Pixels = px(20.);
+/// 终端文字离顶行、窗格左右两边的距离。终端自己四周留 0.5 rem，上边距不会比它小；
+/// 左右尽量铺满，只留 8（原型窗格里的终端左右也很窄）。
+const TERMINAL_TOP: Pixels = px(6.);
+const TERMINAL_SIDE: Pixels = px(8.);
 
 /// 卡片告诉持有它的人（窗口壳）的事。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,7 +76,7 @@ pub struct TerminalCard {
     working_directory: Option<PathBuf>,
     /// 是不是所在标签的焦点卡片：顶行按钮常显。由标签按分屏树告诉它。
     focused: bool,
-    /// 是不是放大着：顶行多一个「还原」，右键菜单的「放大卡片」换成「还原卡片」。
+    /// 是不是放大着：顶行多一个「还原」。
     zoomed: bool,
     /// 是不是标签里唯一的一张：顶行不放「关闭」，右键菜单的「移到新标签」变灰。
     alone: bool,
@@ -221,7 +221,7 @@ impl TerminalCard {
         cx: &mut Context<Self>,
     ) -> Self {
         let focus = terminal.read(cx).focus_handle();
-        set_card_items(&terminal, id, false, true, cx);
+        set_card_items(&terminal, id, true, cx);
         // 查找浮卡按窗格的边摆，不是按终端的边。
         terminal.update(cx, |terminal, _| {
             terminal.set_text_inset(TERMINAL_TOP, TERMINAL_SIDE)
@@ -559,7 +559,7 @@ impl TerminalCard {
     pub fn set_place(&mut self, focused: bool, zoomed: bool, alone: bool, cx: &mut Context<Self>) {
         if (self.focused, self.zoomed, self.alone) != (focused, zoomed, alone) {
             if (self.zoomed, self.alone) != (zoomed, alone) {
-                set_card_items(&self.terminal, self.id, zoomed, alone, cx);
+                set_card_items(&self.terminal, self.id, alone, cx);
             }
             self.focused = focused;
             self.zoomed = zoomed;
@@ -740,7 +740,7 @@ impl TerminalCard {
         cx.notify();
     }
 
-    /// 头部和标签上的名称：本地卡片是 shell 名（`pwsh`），查到之前是 `…`；远程卡片是主机名。
+    /// 头部和标签上的名称：本地卡片是 shell 名（`PowerShell`），查到之前是 `…`；远程卡片是主机名。
     pub fn name(&self) -> SharedString {
         match &self.kind {
             CardKind::Local { info, .. } => info
@@ -795,7 +795,7 @@ impl TerminalCard {
     /// 顶行：名称和前台在跑的程序。
     fn title_row(&self) -> TitleRow {
         TitleRow {
-            remote: self.remote_part().is_some(),
+            tile: self.tile_program(),
             name: self.name(),
             program: self
                 .running_program()
@@ -805,7 +805,6 @@ impl TerminalCard {
 
     fn status_bar(&self, cx: &App) -> StatusBar {
         let status = self.terminal.read(cx).status(cx);
-        let (columns, rows) = (status.columns(), status.rows());
         match &self.kind {
             // 本地卡片：路径是 shell 所在的目录，没有连接状态和系统。
             CardKind::Local { .. } => StatusBar {
@@ -813,8 +812,6 @@ impl TerminalCard {
                 state: StatusState::Local,
                 os: None,
                 agent: None,
-                columns,
-                rows,
             },
             CardKind::Remote(remote) => StatusBar {
                 directory: remote
@@ -833,38 +830,24 @@ impl TerminalCard {
                 },
                 os: remote.os().map(|os| os.label().into()),
                 agent: self.agent.as_ref().map(|_| self.agent_running),
-                columns,
-                rows,
             },
         }
     }
 }
 
-/// 终端右键菜单的最后一组（spec 第 3 节：卡片没有头部，放大、移到新标签、关闭放在这里）。
+/// 终端右键菜单的最后一组（spec 第 3 节：卡片没有头部，移到新标签、关闭放在这里）。
+/// 放大 / 还原只在标题行按钮和 Ctrl+Shift+Enter 上，不进菜单。
 /// 标签里只有这一张时「移到新标签」变灰。
-fn set_card_items(
-    terminal: &Entity<TerminalView>,
-    id: CardId,
-    zoomed: bool,
-    alone: bool,
-    cx: &mut App,
-) {
-    let zoom = if zoomed {
-        t!("card.restore")
-    } else {
-        t!("card.zoom")
-    };
+fn set_card_items(terminal: &Entity<TerminalView>, id: CardId, alone: bool, cx: &mut App) {
     terminal.update(cx, |terminal, _| {
         terminal.set_card_items(Rc::new(move |menu| {
-            menu.menu(zoom.clone(), Box::new(ZoomCard(id)))
-                .keys_of(Box::new(ToggleZoomCard))
-                .menu_with_disabled(
-                    t!("card.move_to_new_tab"),
-                    Box::new(MoveCardToNewTab(id)),
-                    alone,
-                )
-                .menu(t!("card.close"), Box::new(CloseCard(id)))
-                .keys_of(Box::new(CloseFocusedCard))
+            menu.menu_with_disabled(
+                t!("card.move_to_new_tab"),
+                Box::new(MoveCardToNewTab(id)),
+                alone,
+            )
+            .menu(t!("card.close"), Box::new(CloseCard(id)))
+            .keys_of(Box::new(CloseFocusedCard))
         }))
     });
 }
@@ -891,13 +874,17 @@ fn ended_notice(reason: &str, time: &str) -> String {
 /// 远程终端右键菜单里卡片加的项：「复制」下面的复制 IP（域名时叫复制主机名），最后的重新连接、
 /// 断开连接（已经断开时不能点），和它们前面的打开 SFTP（工单 20）。
 fn remote_menu_items(id: CardId, host: &Host, agent: Rc<Cell<bool>>) -> TerminalMenuItems {
-    let copy_label = if host.address_is_ip() {
-        t!("card.menu.copy_ip")
-    } else {
-        t!("card.menu.copy_host_name")
-    };
+    // 文案在开菜单时再翻：卡片建好以后切语言，菜单也跟着变。
+    let address_is_ip = host.address_is_ip();
     TerminalMenuItems {
-        copy: Rc::new(move |menu, _| menu.menu(copy_label.clone(), Box::new(CopyCardAddress(id)))),
+        copy: Rc::new(move |menu, _| {
+            let label = if address_is_ip {
+                t!("card.menu.copy_ip")
+            } else {
+                t!("card.menu.copy_host_name")
+            };
+            menu.menu(label, Box::new(CopyCardAddress(id)))
+        }),
         commands: Rc::new(move |menu, lifecycle| {
             // 交给 Agent / 收回（Agent CLI 工单 06）。
             let menu = if agent.get() {
@@ -932,8 +919,8 @@ fn render_connecting(
         .aria_label(line.clone())
         .absolute()
         .top(px(14.))
-        .left(px(20.))
-        .right(px(20.))
+        .left(px(6.))
+        .right(px(6.))
         .truncate()
         .when_some(font.family, |line, family| line.font_family(family))
         .text_size(font.size)
@@ -952,7 +939,8 @@ impl Render for TerminalCard {
             focused,
             active: self.focused,
             zoomed: self.zoomed,
-            alone: self.alone,
+            // 只有远程卡片能交给 Agent；交出去以后按钮显示成按下的样子。
+            agent: matches!(self.kind, CardKind::Remote(_)).then_some(self.agent.is_some()),
         };
         let width = self.width.get();
         let paint = Paint {
@@ -986,7 +974,7 @@ impl Render for TerminalCard {
             })
             .child(render_title_row(id, &title, place, width, &paint))
             .child(
-                // 文字离顶行 8、左右 20。终端自己四周留 0.5 rem（rem 跟着界面字号），这里补上差的那些。
+                // 文字离顶行 6、左右 8。终端自己四周留 0.5 rem（rem 跟着界面字号），这里补上差的那些。
                 div()
                     .relative()
                     .flex()

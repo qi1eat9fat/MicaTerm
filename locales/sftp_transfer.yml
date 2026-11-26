@@ -1,170 +1,192 @@
 _version: 2
 
-# 传输（工单 22）：确认框、问题框、队列卡片。
+# 传输（工单 22）：问题框、队列卡片。上传和下载直接开始，不再先确认。
 # 部分文案来自 since2006/shell-rs @ b2a307a: locales/explorer.yml
 
 sftp_transfer.summary:
+  en: "This batch finished: %{done} done, %{skipped} skipped, %{failed} failed."
   zh-CN: 这一批结束了：完成 %{done} 项，跳过 %{skipped} 项，失败 %{failed} 项。
-sftp_transfer.confirm.upload_title:
-  zh-CN: 上传
-sftp_transfer.confirm.download_title:
-  zh-CN: 下载
-sftp_transfer.confirm.upload:
-  zh-CN: 上传
-sftp_transfer.confirm.download:
-  zh-CN: 下载
-sftp_transfer.confirm.cancel:
-  zh-CN: 取消
-sftp_transfer.confirm.upload_summary:
-  zh-CN: 上传 %{items}到 %{endpoint}
-sftp_transfer.confirm.download_summary:
-  zh-CN: 从 %{endpoint} 下载 %{items}
-sftp_transfer.confirm.files:
-  zh-CN: "%{count} 个文件"
-sftp_transfer.confirm.folders:
-  zh-CN: "%{count} 个文件夹"
-sftp_transfer.confirm.items:
-  zh-CN: "%{count} 个项目（%{folders}、%{files}）"
-sftp_transfer.confirm.in_folder:
-  zh-CN: 位于 %{folder}
-sftp_transfer.confirm.queued_note:
-  zh-CN: 当前有传输没结束，这一批会排在传输队列里，轮到时自动开始。
-sftp_transfer.confirm.target:
-  zh-CN: 目标目录
-sftp_transfer.confirm.download_to:
-  zh-CN: 下载到
-sftp_transfer.confirm.browse:
-  zh-CN: 浏览…
-sftp_transfer.confirm.choose_files:
+sftp_transfer.choose_files:
+  en: Choose files to upload
   zh-CN: 选择要上传的文件
-sftp_transfer.confirm.choose_download_folder:
-  zh-CN: 选择下载到的目录
-sftp_transfer.confirm.target_missing:
-  zh-CN: 请输入目标目录
-sftp_transfer.confirm.local_target_relative:
-  zh-CN: 请输入本机目录的完整路径
 sftp_transfer.question.conflict_title:
+  en: File Already Exists
   zh-CN: 文件已存在
 sftp_transfer.question.upload_subtitle:
+  en: "Upload %{count} items to %{target}"
+  zh-CN: 上传 %{count} 项到 %{target}
+sftp_transfer.question.upload_subtitle_one:
+  en: "Upload %{count} item to %{target}"
   zh-CN: 上传 %{count} 项到 %{target}
 sftp_transfer.question.download_subtitle:
+  en: "Download %{count} items to %{target}"
+  zh-CN: 下载 %{count} 项到 %{target}
+sftp_transfer.question.download_subtitle_one:
+  en: "Download %{count} item to %{target}"
   zh-CN: 下载 %{count} 项到 %{target}
 sftp_transfer.question.exists:
+  en: 'The target already has "%{name}":'
   zh-CN: 目标里已有「%{name}」：
 sftp_transfer.question.changed:
+  en: '"%{name}" changed during the transfer; it now looks like this:'
   zh-CN: 「%{name}」在传输期间变了，现在是这样：
 sftp_transfer.question.incoming:
+  en: Incoming
   zh-CN: 要传的
 sftp_transfer.question.existing:
+  en: Existing
   zh-CN: 已有的
 sftp_transfer.question.facts:
+  en: "%{size} (%{side})"
   zh-CN: "%{size}（%{side}）"
 sftp_transfer.question.facts_with_time:
+  en: "%{size} · %{time} (%{side})"
   zh-CN: "%{size} · %{time}（%{side}）"
 sftp_transfer.question.apply_to_all:
+  en: Apply this choice to the remaining conflicts in this batch
   zh-CN: 本批剩下的冲突都这样处理
 sftp_transfer.question.overwrite:
+  en: Overwrite
   zh-CN: 覆盖
 sftp_transfer.question.skip:
+  en: Skip
   zh-CN: 跳过
 sftp_transfer.question.cancel:
+  en: Cancel
   zh-CN: 取消
 sftp_transfer.question.retry:
+  en: Retry
   zh-CN: 重试
 sftp_transfer.question.resume_upload_title:
+  en: Unfinished Upload Found
   zh-CN: 发现未完成的上传
 sftp_transfer.question.resume_download_title:
+  en: Unfinished Download Found
   zh-CN: 发现未完成的下载
 sftp_transfer.question.resume_upload:
+  en: Resume Upload
   zh-CN: 继续上传
 sftp_transfer.question.resume_download:
+  en: Resume Download
   zh-CN: 继续下载
 sftp_transfer.question.restart_upload:
+  en: Upload Again
   zh-CN: 重新上传
 sftp_transfer.question.restart_download:
+  en: Download Again
   zh-CN: 重新下载
 sftp_transfer.question.invalid_resume_title:
+  en: Cannot Resume This File
   zh-CN: 无法继续此文件
 sftp_transfer.question.upload_failed_title:
+  en: Cannot Upload This Item
   zh-CN: 无法上传此项目
 sftp_transfer.question.download_failed_title:
+  en: Cannot Download This Item
   zh-CN: 无法下载此项目
 sftp_transfer.queue.title:
+  en: Transfers
   zh-CN: 传输
 sftp_transfer.queue.running:
+  en: "%{count} running"
   zh-CN: "%{count} 批进行中"
 sftp_transfer.queue.stopped:
+  en: "%{count} stopped"
   zh-CN: "%{count} 批已停止"
 sftp_transfer.queue.pending:
+  en: "%{count} waiting"
   zh-CN: "%{count} 批等待"
 sftp_transfer.queue.finished:
+  en: "%{count} finished"
   zh-CN: "%{count} 批已结束"
 sftp_transfer.queue.resume:
+  en: Resume
   zh-CN: 继续
 sftp_transfer.queue.stop:
+  en: Stop
   zh-CN: 停止
 sftp_transfer.queue.remove:
+  en: Remove from Queue
   zh-CN: 移出队列
 sftp_transfer.queue.discard:
+  en: Discard Resume Progress
   zh-CN: 丢弃续传进度
 sftp_transfer.queue.clear_finished:
+  en: Clear Finished
   zh-CN: 清除已完成
-sftp_transfer.queue.column.source:
-  zh-CN: 来源
-sftp_transfer.queue.column.target:
-  zh-CN: 目标
-sftp_transfer.queue.column.size:
-  zh-CN: 文件大小
-sftp_transfer.queue.column.remaining:
-  zh-CN: 剩余
-sftp_transfer.queue.column.speed:
-  zh-CN: 速度
-sftp_transfer.queue.column.progress:
-  zh-CN: 进度
+sftp_transfer.queue.expand_details:
+  en: Expand transfer details
+  zh-CN: 展开传输详情
+sftp_transfer.queue.collapse_details:
+  en: Collapse transfer details
+  zh-CN: 收起传输详情
 sftp_transfer.queue.upload:
+  en: Upload
   zh-CN: 上传
 sftp_transfer.queue.download:
+  en: Download
   zh-CN: 下载
 sftp_transfer.queue.speed:
+  en: "%{speed}/s"
   zh-CN: "%{speed}/s"
 sftp_transfer.queue.source_items:
+  en: "%{source} (%{count} items)"
   zh-CN: "%{source}（%{count} 项）"
 sftp_transfer.queue.not_started:
+  en: Not started yet
   zh-CN: 还没有开始
 sftp_transfer.queue.nothing_uploaded:
+  en: No items uploaded yet; each completed item will be listed here
   zh-CN: 还没有上传完的项目，每完成一项会列在这里
 sftp_transfer.queue.nothing_downloaded:
+  en: No items downloaded yet; each completed item will be listed here
   zh-CN: 还没有下载完的项目，每完成一项会列在这里
 sftp_transfer.queue.outcome.done:
+  en: Done
   zh-CN: 完成
 sftp_transfer.queue.outcome.skipped:
+  en: Skipped
   zh-CN: 已跳过
 sftp_transfer.queue.outcome.failed:
+  en: Failed
   zh-CN: 失败
 sftp_transfer.queue.several_places:
+  en: Multiple Locations
   zh-CN: 多个位置
 sftp_transfer.queue.status.pending:
+  en: Waiting
   zh-CN: 等待中
 sftp_transfer.queue.status.scanning:
+  en: Scanning
   zh-CN: 正在扫描
 sftp_transfer.queue.status.waiting:
+  en: Waiting for an Answer
   zh-CN: 等待回答
 sftp_transfer.queue.status.reconnecting:
+  en: Reconnecting
   zh-CN: 正在重连
 sftp_transfer.queue.status.stopped:
+  en: Stopped
   zh-CN: 已停止
 sftp_transfer.queue.status.done:
+  en: Done
   zh-CN: 已完成
 sftp_transfer.queue.status.done_skipped:
+  en: "Done (%{count} skipped)"
   zh-CN: 已完成（跳过 %{count} 项）
 sftp_transfer.queue.status.partly_failed:
+  en: "Partly Failed (%{count})"
   zh-CN: 部分失败（%{count} 项）
 sftp_transfer.queue.status.discarded:
+  en: Resume Progress Discarded
   zh-CN: 已丢弃续传进度
 sftp_transfer.queue.status.not_started:
+  en: "Cannot Start: %{reason}"
   zh-CN: 无法开始：%{reason}
 sftp_transfer.queue.status.removed:
+  en: Removed
   zh-CN: 已移出
 # 上传文件夹（工单 35）
-sftp_transfer.confirm.choose_folders:
+sftp_transfer.choose_folders:
+  en: Choose folders to upload
   zh-CN: 选择要上传的文件夹

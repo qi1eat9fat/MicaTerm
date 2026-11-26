@@ -13,7 +13,7 @@ use gpui_kit::*;
 
 use crate::i18n::t;
 use crate::programs::Program;
-use crate::theme::Tokens;
+use crate::theme::{Elevation, Tokens, size};
 
 /// 有输出之后，绿点亮多久。
 pub const ACTIVE_FOR: Duration = Duration::from_millis(1500);
@@ -66,27 +66,14 @@ impl StatusDot {
 
 /// 画状态点（原型 `.dot.busy`、`.dot.attn`）；`None` 什么都不画。`id` 给测试查，无障碍名称写明是哪种。
 pub fn render_status_dot(id: ElementId, dot: StatusDot, tokens: &Tokens) -> Option<AnyElement> {
-    let (size, color, label, halo) = match dot {
+    let (dot_size, color, label, halo) = match dot {
         StatusDot::None => return None,
-        StatusDot::Busy => (px(6.), tokens.ok, t!("card.dot.busy"), true),
-        StatusDot::Attention => (px(7.), tokens.warn, t!("card.dot.attention"), false),
+        StatusDot::Busy => (size::DOT, tokens.ok, t!("card.dot.busy"), true),
+        StatusDot::Attention => (size::DOT, tokens.warn, t!("card.dot.attention"), false),
     };
     Some(
-        div()
-            .flex_none()
-            .size(size)
-            .rounded_full()
-            .bg(color)
-            // 光晕：外面一圈 2.5px、22% 不透明的同色。
-            .when(halo, |dot| {
-                dot.shadow(vec![BoxShadow {
-                    color: color.opacity(0.22),
-                    offset: point(px(0.), px(0.)),
-                    blur_radius: px(0.),
-                    spread_radius: px(2.5),
-                    inset: false,
-                }])
-            })
+        crate::ui::dot(color, dot_size)
+            .when(halo, |dot| dot.shadow(Elevation::dot_halo(color)))
             .id(id)
             .test_support()
             .aria_label(label)

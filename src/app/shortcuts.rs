@@ -382,13 +382,6 @@ macro_rules! file_list_keys {
             file_list_key!("shift-pagedown", "shift-pagedown", $list, MoveCursor { side: $side, motion: CursorMotion::PageDown, extend: true }),
             file_list_key!("shift-home", "shift-home", $list, MoveCursor { side: $side, motion: CursorMotion::Home, extend: true }),
             file_list_key!("shift-end", "shift-end", $list, MoveCursor { side: $side, motion: CursorMotion::End, extend: true }),
-            // 显示隐藏文件：WinSCP 的 Ctrl+Alt+H，访达的 ⌘⇧.（macOS 报成 ⌘>）。
-            Shortcut {
-                keys: "ctrl-alt-h",
-                mac: "cmd->",
-                action: || Box::new(ToggleHiddenFiles($side)),
-                context: Some($list),
-            },
         ]
     };
 }

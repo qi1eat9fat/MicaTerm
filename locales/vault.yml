@@ -1,148 +1,227 @@
 _version: 2
 # 保险库界面（工单 13）：设置主密码、解锁小卡片、锁定、重置、设置 › 安全
 vault.setup.title:
+  en: Set Master Password
   zh-CN: 设置主密码
 vault.setup.first_intro:
+  en: This is the first time a password is saved. The master password encrypts data/vault.json and protects against the data folder being copied.
   zh-CN: 这是第一次保存密码。主密码用来加密 data/vault.json，防的是数据目录被拷走。
 vault.setup.intro:
+  en: The master password encrypts data/vault.json and protects against the data folder being copied. Secrets already stored do not need to be entered again.
   zh-CN: 主密码用来加密 data/vault.json，防的是数据目录被拷走。已经存的秘密不用重新输入。
 vault.setup.master:
+  en: Master Password
   zh-CN: 主密码
 vault.setup.again:
+  en: Enter Again
   zh-CN: 再输一次
 vault.setup.again_placeholder:
+  en: Confirm Master Password
   zh-CN: 确认主密码
 vault.setup.remember:
+  en: Remember on This Computer
   zh-CN: 在本机记住
 vault.setup.remember_note:
+  en: Stores the vault's data key in the system keychain and unlocks automatically on this computer. Other computers will ask for the master password.
   zh-CN: 把保险库的数据密钥存进系统钥匙串，之后在这台电脑上自动解锁。拷到别的电脑要输主密码。
 vault.setup.forget_note:
+  en: "If you forget the master password, you can only reset the vault: hosts and credentials are kept, but saved passwords, passphrases and private keys are cleared."
   zh-CN: 忘了主密码只能重置保险库：主机和凭据都保留，保存的密码、口令和私钥会清空。
 vault.setup.skip:
+  en: Don't Set
   zh-CN: 不设置
 vault.setup.cancel:
+  en: Cancel
   zh-CN: 取消
 vault.setup.save:
+  en: Set and Save
   zh-CN: 设置并保存
 vault.setup.confirm:
+  en: Set
   zh-CN: 设置
 vault.setup.working:
+  en: Setting…
   zh-CN: 设置中…
 vault.setup.empty:
+  en: The master password cannot be empty
   zh-CN: 主密码不能为空
 vault.setup.mismatch:
+  en: The two master passwords do not match
   zh-CN: 两次输入的主密码不一样
 vault.change.title:
+  en: Change Master Password
   zh-CN: 更换主密码
 vault.change.intro:
+  en: Changing it only rewraps the data key; individual secrets are not re-encrypted.
   zh-CN: 更换只重新包裹数据密钥，各条秘密不用重新加密。
 vault.change.current:
+  en: Current Master Password
   zh-CN: 当前主密码
 vault.change.new:
+  en: New Master Password
   zh-CN: 新主密码
 vault.change.confirm:
+  en: Change
   zh-CN: 更换
 vault.change.working:
+  en: Changing…
   zh-CN: 更换中…
 vault.unlock.title:
+  en: Unlock Vault
   zh-CN: 解锁保险库
 vault.unlock.reason:
+  en: Enter the master password to unlock the vault
   zh-CN: 输入主密码解锁保险库
 vault.unlock.for_host:
+  en: Connecting to %{host} needs the saved %{secret}
   zh-CN: 连接 %{host} 要用保存的%{secret}
 vault.unlock.secret.password:
+  en: password
   zh-CN: 密码
 vault.unlock.secret.credential:
+  en: credential
   zh-CN: 凭据
 vault.unlock.secret.proxy:
+  en: proxy password
   zh-CN: 代理密码
 vault.unlock.for_saving:
+  en: Unlock the vault before saving a password
   zh-CN: 保存密码之前要先解锁保险库
 vault.unlock.placeholder:
+  en: Master Password
   zh-CN: 主密码
 vault.unlock.cancel:
+  en: Cancel
   zh-CN: 取消
 vault.unlock.confirm:
+  en: Unlock
   zh-CN: 解锁
 vault.unlock.working:
+  en: Unlocking…
   zh-CN: 解锁中…
 vault.unlock.remember_note:
+  en: Unlock automatically on this computer from now on
   zh-CN: 之后在这台电脑上自动解锁
 vault.error.wrong_password:
+  en: Incorrect master password
   zh-CN: 主密码不对
 vault.error.failed:
+  en: "The vault operation failed: %{error}"
   zh-CN: 保险库操作失败：%{error}
 vault.error.damaged:
+  en: "The vault file is damaged: %{why}"
   zh-CN: 保险库文件已损坏：%{why}
 vault.error.too_new:
+  en: "The vault file comes from a newer MicaTerm (format %{format}) and cannot be opened by this version"
   zh-CN: 保险库文件来自更新版本的 MicaTerm（格式 %{format}），这个版本打不开
 vault.error.open_failed:
+  en: "The vault could not be opened. Passwords saved this session are kept in memory only and will be lost on exit: %{error}"
   zh-CN: 保险库打不开，这次运行保存的密码只在内存里，退出后丢失：%{error}
 vault.reset.title:
+  en: Reset Vault
   zh-CN: 重置保险库
 vault.reset.text:
+  en: Resetting clears all saved passwords, passphrases and private keys. Hosts and credentials are kept, and connections will ask for secrets when needed. The master password is cleared too and set again the next time a secret is saved. This cannot be undone.
   zh-CN: 重置后清空所有保存的密码、口令和私钥，主机和凭据都保留，之后连接时现场询问。主密码也一起清除，下次保存秘密时再设。这一步不能撤销。
 vault.reset.cancel:
+  en: Cancel
   zh-CN: 取消
 vault.reset.confirm:
+  en: Reset
   zh-CN: 重置
 vault.key_lost.title:
+  en: Vault Cannot Be Opened
   zh-CN: 保险库打不开
 vault.key_lost.text:
+  en: This vault was created on another computer without a master password and cannot be opened here. Resetting clears all saved passwords, passphrases and private keys while keeping hosts and credentials; without resetting, enter passwords when connecting this time.
   zh-CN: 这个保险库在另一台电脑上创建、没设主密码，这里打不开。重置后清空所有保存的密码、口令和私钥，主机和凭据都保留；不重置就这次现场输入密码。
 vault.key_lost.save_text:
+  en: This vault was created on another computer without a master password and cannot be opened here; reset it before saving passwords. Resetting clears all saved passwords, passphrases and private keys while keeping hosts and credentials.
   zh-CN: 这个保险库在另一台电脑上创建、没设主密码，这里打不开，要先重置才能保存密码。重置后清空所有保存的密码、口令和私钥，主机和凭据都保留。
 vault.key_lost.keep:
+  en: Enter Password Now
   zh-CN: 现场输入密码
 vault.key_lost.cancel:
+  en: Cancel
   zh-CN: 取消
 vault.key_lost.reset:
+  en: Reset Vault
   zh-CN: 重置保险库
 vault.title_bar.lock:
+  en: Lock Vault
   zh-CN: 锁定保险库
 vault.title_bar.unlock:
+  en: Unlock Vault
   zh-CN: 解锁保险库
+vault.title_bar.no_master_password:
+  en: Set a master password to lock the vault
+  zh-CN: 设置主密码后才能锁定保险库
+vault.title_bar.key_lost:
+  en: The vault cannot be opened; reset it in Settings › Security
+  zh-CN: 保险库打不开，先在设置 › 安全里重置
 vault.field.locked:
+  en: Saved; the vault is locked · unlock to edit
   zh-CN: 已保存，保险库锁定中 · 解锁后修改
 vault.field.unlock:
+  en: Unlock…
   zh-CN: 解锁…
 settings.category.security:
+  en: Security
   zh-CN: 安全
 settings.security.vault:
+  en: Vault
   zh-CN: 保险库
 settings.security.danger:
+  en: Danger Zone
   zh-CN: 危险操作
 settings.security.master:
+  en: Master Password
   zh-CN: 主密码
 settings.security.master_set:
+  en: Set. Changing it only rewraps the data key; individual secrets are not re-encrypted
   zh-CN: 已设置。更换只重新包裹数据密钥，各条秘密不用重新加密
 settings.security.master_unset:
+  en: "No master password: secrets are protected only by this computer's keychain and cannot be opened on another computer"
   zh-CN: 没设主密码：秘密只靠本机钥匙串保护，拷到别的电脑就打不开
 settings.security.master_lost:
+  en: This vault was created on another computer without a master password and cannot be opened here; reset it before saving secrets
   zh-CN: 这个保险库在另一台电脑上创建、没设主密码，这里打不开；重置后才能再保存秘密
 settings.security.set_master:
+  en: Set Master Password…
   zh-CN: 设置主密码…
 settings.security.change_master:
+  en: Change Master Password…
   zh-CN: 更换主密码…
 settings.security.remember:
+  en: Remember on This Computer
   zh-CN: 在本机记住
 settings.security.remember_note:
+  en: Stores the data key in Windows Credential Manager and unlocks automatically on this computer
   zh-CN: 数据密钥存进 Windows 凭据管理器，在这台电脑上自动解锁
 settings.security.lock:
+  en: Lock Vault
   zh-CN: 锁定保险库
 settings.security.lock_note:
+  en: Never locks automatically; after locking, the master password is asked the next time a secret is needed
   zh-CN: 不会自动锁定；锁定后下次用到秘密时再问主密码
 settings.security.lock_now:
+  en: Lock Now
   zh-CN: 立即锁定
 settings.security.unlock:
+  en: Unlock…
   zh-CN: 解锁…
 settings.security.reset:
+  en: Reset Vault
   zh-CN: 重置保险库
 settings.security.reset_note:
+  en: "The only option after forgetting the master password: hosts and credentials are kept; all saved passwords, passphrases and private keys are cleared"
   zh-CN: 忘了主密码只能这样做：主机和凭据都保留，清空所有保存的密码、口令和私钥
 settings.security.reset_button:
+  en: Reset Vault…
   zh-CN: 重置保险库…
 settings.security.vault_file:
+  en: "Vault file: data/vault.json (Argon2id key wrapping · XChaCha20-Poly1305 per-secret encryption)"
   zh-CN: 保险库文件：data/vault.json（Argon2id 派生包裹密钥 · XChaCha20-Poly1305 逐条加密）
 settings.security.no_vault:
+  en: No vault was opened this session; saved passwords are kept in memory only
   zh-CN: 这次运行没有打开保险库，保存的密码只在内存里

@@ -42,6 +42,13 @@ icon_assets!(
         // 设置标签：改过的设置标题后面的「恢复默认」，导航里的「终端」（UI 重做工单 12，26 号 `undo`、`term`）。
         Undo2,
         SquareTerminal,
+        // Muxy 空壳的标签栏、右侧面板和状态栏用到的 Lucide 图标。
+        GitFork,
+        GitPullRequest,
+        ArrowUpDown,
+        CircleArrowUp,
+        SquareArrowOutUpRight,
+        PinOff,
         // SFTP 标签、编辑器标签、预览（M3，工单 20 一次加全）。
         ArrowUpRight,
         // 编辑器查找浮卡的「替换」那一行（UI 重做工单 11，26 号 `replace`）。
@@ -167,17 +174,14 @@ fn os_icon(path: &str) -> Option<Cow<'static, [u8]>> {
         .map(|(_, bytes)| Cow::Borrowed(*bytes))
 }
 
-/// MicaTerm 自己的标志（30 号原型：两张错开叠放的薄片，前面那张里是提示符和实心块光标；
-/// 原图在 `.scratch/qishell-design/brand/micaterm/`），两种笔画粗细：
-/// 主机栏 18 的用 1.7，新标签页 88 的水印用 1.1。
+/// MicaTerm 彩色应用图标（棱光云母 M 标识 + 终端光标）：用于侧栏顶栏。
+pub const LOGO_IMAGE: &str = "logo/micaterm.png";
+const LOGO_IMAGE_BYTES: &[u8] = include_bytes!("../../assets/logo/micaterm.png");
+
+/// MicaTerm 线稿标志（与彩色应用图标同构的折叠 M + 终端光标，两种笔画粗细；
+/// 新标签页 72 的背景水印用细线版）。
 pub const MARK_ICON: &str = "icons/micaterm/mark.svg";
 pub const MARK_THIN_ICON: &str = "icons/micaterm/mark-thin.svg";
-/// 分组标题后面的实心小三角（26 号 `.gh .tri`）：展开时朝下、收起时朝右。
-pub const TRIANGLE_DOWN_ICON: &str = "icons/micaterm/triangle-down.svg";
-pub const TRIANGLE_RIGHT_ICON: &str = "icons/micaterm/triangle-right.svg";
-/// 主机栏顶部的「新建主机」：Lucide 的 server，下面那台截短，右下角一个加号（Lucide 里没有现成的，
-/// 照它的 24 格、2 线宽自己画的）。
-pub const SERVER_PLUS_ICON: &str = "icons/micaterm/server-plus.svg";
 const MARK_ICONS: &[(&str, &[u8])] = &[
     (
         MARK_ICON,
@@ -186,18 +190,6 @@ const MARK_ICONS: &[(&str, &[u8])] = &[
     (
         MARK_THIN_ICON,
         include_bytes!("../../assets/icons/micaterm/mark-thin.svg"),
-    ),
-    (
-        TRIANGLE_DOWN_ICON,
-        include_bytes!("../../assets/icons/micaterm/triangle-down.svg"),
-    ),
-    (
-        TRIANGLE_RIGHT_ICON,
-        include_bytes!("../../assets/icons/micaterm/triangle-right.svg"),
-    ),
-    (
-        SERVER_PLUS_ICON,
-        include_bytes!("../../assets/icons/micaterm/server-plus.svg"),
     ),
 ];
 
@@ -218,6 +210,9 @@ impl AssetSource for AppAssets {
         if let Some(bytes) = os_icon(path) {
             return Ok(Some(bytes));
         }
+        if path == LOGO_IMAGE {
+            return Ok(Some(Cow::Borrowed(LOGO_IMAGE_BYTES)));
+        }
         if let Some((_, bytes)) = MARK_ICONS.iter().find(|(name, _)| *name == path) {
             return Ok(Some(Cow::Borrowed(*bytes)));
         }
@@ -227,6 +222,9 @@ impl AssetSource for AppAssets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(ExtraIcons.list(path)?);
+        if LOGO_IMAGE.starts_with(path) {
+            paths.push(SharedString::from(LOGO_IMAGE));
+        }
         paths.extend(
             BRAND_ICONS
                 .iter()
@@ -265,7 +263,7 @@ mod tests {
         }
     }
 
-    /// MicaTerm 自己画的图标（标志、小三角、服务器加号）都加载得出来。
+    /// MicaTerm 自己画的图标（两种笔画粗细的标志）都加载得出来。
     #[test]
     fn every_own_icon_loads() {
         for (path, _) in super::MARK_ICONS {
@@ -275,11 +273,13 @@ mod tests {
                 "{path}"
             );
         }
-        assert!(
-            super::MARK_ICONS
-                .iter()
-                .any(|(path, _)| *path == super::SERVER_PLUS_ICON)
-        );
+    }
+
+    /// 彩色应用图标 PNG 加载得出来。
+    #[test]
+    fn logo_image_loads() {
+        let bytes = AppAssets.load(super::LOGO_IMAGE).unwrap();
+        assert!(bytes.is_some_and(|bytes| bytes.starts_with(b"\x89PNG\r\n\x1a\n")));
     }
 
     /// 程序名表里的每个图标都加载得出来：Lucide 的在 gpui-kit 的图标包里，品牌的是 MicaTerm 自带的。

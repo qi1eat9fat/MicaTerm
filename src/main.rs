@@ -18,6 +18,8 @@ fn main() {
         // 先读设置：外观决定窗口用浅色还是深色。
         let (settings, problem) = open_settings();
         micaterm::init(cx);
+        // 界面语言按保存的设置来：`init` 里先把语言设回默认，这里再换成设置里的那一种。
+        micaterm::i18n::set_language(settings.settings().language);
         cx.activate(true);
 
         // 窗口开在上次的地方（设置 › 应用 › 记住窗口大小和位置）。

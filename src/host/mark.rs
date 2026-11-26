@@ -1,15 +1,17 @@
 // 参考 since2006/shell-rs @ b2a307a: src/shared/host_mark.rs 重写
 // 裁剪：去掉 Telnet、串口、连接状态变灰和自带的提示框；尺寸按全部界面原型的 `.host .badge`。
 
-//! 主机栏里主机的系统徽章（原型 `.badge`）：探测出系统时是系统的标志，用品牌色；没探测出时是名称的
-//! 首字，颜色按地址从固定调色板取（同一个地址在哪台电脑、哪个版本上都是同一个颜色）。
-//! 是淡底：颜色铺薄薄一层做底，标志和首字用颜色本身（用户定，2026-11-14）。
-//! 标签上的图块是 `card::remote::host_badge`，和程序图块（vim、htop）站在一起，还是实色底。
+//! 主机栏里主机的系统徽章：探测出系统时是系统的标志，用品牌色；没探测出时是名称的首字，
+//! 颜色按地址从固定调色板取（同一个地址在哪台电脑、哪个版本上都是同一个颜色）。
+//! 照空壳的主机行：实色底，标志和首字用黑或白。标签上的图块是 `card::remote::host_badge`，
+//! 和程序图块（vim、htop）站在一起，也是实色底。
 
 use gpui_kit::component::Icon;
 use gpui_kit::*;
 
 use micaterm_hosts::{HostOs, mark_color};
+
+use crate::theme::{WEIGHT_SEMIBOLD, dark_ink_on};
 
 /// 画一个徽章要的东西，从主机上取。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,27 +52,28 @@ impl HostMark {
         }
     }
 
-    /// 边长为 `size` 的圆角方块徽章，淡底（用户定，2026-11-14）：底是这台主机的颜色铺薄薄一层，
-    /// 标志或首字用这个颜色本身。`dark` 是深色界面：底铺得厚一点，字提亮，免得深色品牌（MySQL 的藏青）
-    /// 在深底上看不见；浅色界面里浅色品牌（Linux 的黄）压暗，免得在浅底上看不见。
-    pub fn render(&self, id: ElementId, size: Pixels, dark: bool) -> impl IntoElement + use<> {
-        // 没有系统，或者是单色的标志（Apple）：用地址的颜色，徽章绝不会是灰的。
-        let color: Hsla = rgb(self
-            .os
-            .and_then(|os| os.brand_color())
-            .unwrap_or_else(|| mark_color(&self.address)))
-        .into();
-        let (background, ink) = soft(color, dark);
+    /// 边长为 `size` 的圆角方块徽章：底是这台主机的品牌色，标志或首字用黑或白。
+    /// 系统标志的边长由调用方按徽章所在的位置给出（`size::HOST_BADGE_GLYPH` 或
+    /// `size::TAB_BADGE_GLYPH`），两者都是统一配置里的常量。
+    pub fn render(
+        &self,
+        id: ElementId,
+        size: Pixels,
+        glyph_size: Pixels,
+    ) -> impl IntoElement + use<> {
+        let (background, ink) = badge_colors(self.os, &self.address);
+        let background: Hsla = rgb(background).into();
+        let ink: Hsla = rgb(ink).into();
         let glyph = match self.os {
             Some(os) => Icon::default()
                 .path(os.icon_path())
-                .size(size * 0.58)
+                .size(glyph_size)
                 .text_color(ink)
                 .into_any_element(),
             None => div()
-                .text_size(size * 0.64)
-                .line_height(size * 0.64)
-                .font_weight(FontWeight::BOLD)
+                .text_size(size * 0.46)
+                .line_height(size * 0.46)
+                .font_weight(WEIGHT_SEMIBOLD)
                 .child(self.glyph().unwrap_or_default())
                 .into_any_element(),
         };
@@ -83,38 +86,36 @@ impl HostMark {
             .items_center()
             .justify_center()
             .size(size)
-            .rounded(size * (4. / 14.))
+            .rounded(size * (6. / 28.))
             .bg(background)
             .text_color(ink)
             .child(glyph)
     }
 }
 
-/// 淡底徽章的底色和字色：底是 `color` 铺一层（浅色界面 14%，深色 22%），字是 `color` 本身，
-/// 亮度收进看得清的范围（浅色界面不高于 45%，深色不低于 74%）。
-fn soft(color: Hsla, dark: bool) -> (Hsla, Hsla) {
-    if dark {
-        (
-            color.opacity(0.22),
-            Hsla {
-                l: color.l.max(0.74),
-                ..color
-            },
-        )
+/// 徽章的底色和字色：有系统品牌色用它，否则按地址取地址色；品牌没给字色时按底色亮度选黑/白。
+pub(crate) fn badge_colors(os: Option<HostOs>, address: &str) -> (u32, u32) {
+    let own = mark_color(address);
+    match os {
+        Some(os) => match (os.brand_color(), os.brand_foreground()) {
+            (Some(background), Some(ink)) => (background, ink),
+            _ => (own, ink_on(own)),
+        },
+        None => (own, ink_on(own)),
+    }
+}
+
+fn ink_on(background: u32) -> u32 {
+    if dark_ink_on(rgb(background).into()) {
+        0x000000
     } else {
-        (
-            color.opacity(0.14),
-            Hsla {
-                l: color.l.min(0.45),
-                ..color
-            },
-        )
+        0xffffff
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::HostMark;
+    use super::{HostMark, badge_colors};
     use micaterm_hosts::HostOs;
 
     fn mark(name: &str, os: Option<HostOs>) -> HostMark {
@@ -137,5 +138,19 @@ mod tests {
         let ubuntu = mark("web-01", Some(HostOs::Ubuntu));
         assert_eq!(ubuntu.glyph(), None);
         assert_eq!(ubuntu.label().as_ref(), "Ubuntu");
+    }
+
+    #[test]
+    fn badge_colors_use_the_system_then_the_address() {
+        let own = micaterm_hosts::mark_color("10.0.1.12");
+        assert_eq!(badge_colors(None, "10.0.1.12"), (own, 0xffffff));
+        let ubuntu = HostOs::Ubuntu;
+        assert_eq!(
+            badge_colors(Some(ubuntu), "10.0.1.12"),
+            (
+                ubuntu.brand_color().unwrap(),
+                ubuntu.brand_foreground().unwrap()
+            )
+        );
     }
 }

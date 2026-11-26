@@ -304,7 +304,7 @@ fn a_deleted_jump_host_fails_before_anything_is_connected() {
 
     assert_eq!(
         error.to_string(),
-        "第 2 台跳板主机已被删除，请编辑这台主机的连接方式"
+        "Jump host 2 was deleted; edit this host's connection settings"
     );
     assert!(answers.prompts().is_empty(), "什么都没连，什么都不问");
     assert!(jump.seen().forwards.is_empty());
@@ -325,7 +325,7 @@ fn a_jump_host_that_cannot_reach_the_next_says_so() {
     assert_eq!(
         futures::executor::block_on(tester.test(request, trusting(true))),
         Err(format!(
-            "跳板主机「阿里云99」无法连接到 127.0.0.1:{closed}：连接失败"
+            "Jump host \"阿里云99\" cannot reach 127.0.0.1:{closed}: connection failed"
         ))
     );
 }
@@ -346,7 +346,7 @@ fn a_connection_test_through_a_jump_host_uses_the_jump_hosts_saved_password() {
     let unsaved = lab.tester(Arc::default());
     assert_eq!(
         futures::executor::block_on(unsaved.test(request(), trusting(true))),
-        Err("跳板主机「阿里云99」：未填写密码".into())
+        Err("Jump host \"阿里云99\": No password was entered".into())
     );
     let saved = lab.tester(saved(&[(SecretRef::password(2), TEST_PASSWORD)]));
     assert_eq!(
@@ -406,7 +406,7 @@ fn a_connection_test_uses_the_proxy_password_typed_in_the_form() {
 
     assert_eq!(
         futures::executor::block_on(tester.test(request("wrong"), trusting(true))),
-        Err("代理服务器拒绝了用户名或密码".into())
+        Err("The proxy rejected the username or password".into())
     );
     assert_eq!(
         futures::executor::block_on(tester.test(request("proxy-password"), trusting(true))),
@@ -445,7 +445,7 @@ fn a_proxy_that_is_not_there_is_named() {
     assert_eq!(
         futures::executor::block_on(tester.test(request, trusting(true))),
         Err(format!(
-            "无法连接代理服务器 127.0.0.1:{port}：连接被拒绝，该端口上没有服务在监听"
+            "Cannot connect to the proxy 127.0.0.1:{port}: The connection was refused; nothing is listening on that port"
         ))
     );
 }

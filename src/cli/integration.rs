@@ -1,6 +1,8 @@
 // 来自 since2006/shell-rs @ b2a307a: src/cli/integration.rs（Agent CLI 工单 05）
 // 改动：安装、移除也经它做（在后台跑，跑完重看一遍状态），设置页的按钮只管调它。
 
+use std::path::{Path, PathBuf};
+
 use gpui_kit::*;
 
 use super::agent_hooks::{HOOK_AGENTS, HookStatus, hook_status, install_hooks, remove_hooks};
@@ -31,8 +33,30 @@ pub struct IntegrationStatus {
     skills: Vec<(AgentKind, SkillStatus)>,
     /// 状态 hook 装没装（工单 09）：只有 Claude Code、Codex。
     hooks: Vec<(AgentKind, HookStatus)>,
-    /// 本机装了 WorkBuddy（用户目录下有 `.workbuddy`）。
-    pub workbuddy_found: bool,
+    /// 本机装了 Antigravity 的 CLI（`agy`）。
+    pub antigravity_found: bool,
+}
+
+/// Antigravity CLI（`agy`）的本机安装位置：安装脚本把它放在 Windows 的
+/// `%LOCALAPPDATA%\agy\bin`、macOS 和 Linux 的 `~/.local/bin` 里。没装是 `None`。
+/// `home` 是用户目录；Windows 的 `%LOCALAPPDATA%` 按它的 `AppData\Local` 算，
+/// 不读环境变量，测试用临时目录造。
+pub fn antigravity_cli_path(home: &Path) -> Option<PathBuf> {
+    let file = if cfg!(windows) {
+        home.join("AppData")
+            .join("Local")
+            .join("agy")
+            .join("bin")
+            .join("agy.exe")
+    } else {
+        home.join(".local").join("bin").join("agy")
+    };
+    file.is_file().then_some(file)
+}
+
+/// 本机装没装 Antigravity 的 CLI（`agy`）：设置页 Antigravity 那一行按它说检测到没有。
+pub fn antigravity_found(home: &Path) -> bool {
+    antigravity_cli_path(home).is_some()
 }
 
 impl IntegrationStatus {
@@ -55,7 +79,7 @@ impl IntegrationStatus {
                 .iter()
                 .map(|agent| (*agent, hook_status(paths, *agent)))
                 .collect(),
-            workbuddy_found: paths.home.join(".workbuddy").is_dir(),
+            antigravity_found: antigravity_found(&paths.home),
         }
     }
 
@@ -170,5 +194,34 @@ impl CliIntegration {
             });
             result.map_err(|error| error.to_string())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // 只拿这两个：`use super::*` 会把 `gpui_kit::*` 里的 `test` 宏也带进来，`#[test]` 就递归了。
+    use super::{antigravity_cli_path, antigravity_found};
+
+    /// 设置页的 Antigravity 那一行：安装脚本把 `agy` 放的位置有没有它。
+    #[test]
+    fn the_antigravity_cli_is_found_where_its_installer_puts_it() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path();
+        assert_eq!(antigravity_cli_path(home), None);
+        assert!(!antigravity_found(home));
+
+        let file = if cfg!(windows) {
+            home.join("AppData")
+                .join("Local")
+                .join("agy")
+                .join("bin")
+                .join("agy.exe")
+        } else {
+            home.join(".local").join("bin").join("agy")
+        };
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(antigravity_cli_path(home), Some(file));
+        assert!(antigravity_found(home));
     }
 }

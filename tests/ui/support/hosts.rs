@@ -93,16 +93,22 @@ pub fn saved_host(cx: &mut TestAppContext, workspace: &Entity<Workspace>, id: u6
 pub fn edit_hosts(
     cx: &mut TestAppContext,
     workspace: &Entity<Workspace>,
-    change: impl FnOnce(&mut micaterm::host::HostStore, &mut gpui_kit::Context<micaterm::host::HostStore>),
+    change: impl FnOnce(
+        &mut micaterm::host::HostStore,
+        &mut gpui_kit::Context<micaterm::host::HostStore>,
+    ),
 ) {
     let store = cx.update(|cx| workspace.read(cx).hosts().clone());
     store.update(cx, change);
     cx.run_until_parked();
 }
 
-/// 主机表单页（标签里的，UI 重做工单 07）放不下全部字段时要滚动：把 `id` 滚进看得见的地方。
+/// 主机对话框放不下全部字段时要滚动：把 `id` 滚进看得见的地方。
 pub fn reveal(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &ElementId) {
-    reveal_in(cx, handle, "host-dialog", id);
+    if matches!(id, ElementId::Name(name) if name.starts_with("host-dialog")) {
+        return;
+    }
+    reveal_in(cx, handle, "host-dialog-body", id);
 }
 
 /// 把 `id` 在能滚动的 `scroller` 里滚进看得见的地方（主机表单页、凭据对话框的正文）。

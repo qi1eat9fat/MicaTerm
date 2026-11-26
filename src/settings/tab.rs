@@ -1,4 +1,4 @@
-//! 设置标签（26 号「设置」，照 Zed settings_ui）：左边导航 200 宽，右边一列设置，列最宽 680、居中、可以滚动。
+//! 设置标签（照空壳的设置页）：左边导航 200 宽（侧栏底色、只有名字），右边一列设置，列最宽 680、居中、可以滚动。
 //! 改动立即写进设置存储（`SettingsStore`），窗口壳观察它、马上应用。
 //! 一个窗口只开一个设置标签：再按 Ctrl+, 或标题栏齿轮就切过去。
 //!
@@ -6,28 +6,27 @@
 
 use std::path::PathBuf;
 
-use gpui_kit::component::{Icon, scroll::ScrollableElement as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use micaterm_terminal::monospace_font_families;
 
 use super::SettingsStore;
-use super::controls::page_title;
 use super::agent_command_editor::AgentCommandEditor;
+use super::controls::page_title;
 use super::local_shell_editor::LocalShellEditor;
 use super::pages;
 use super::sftp::LocalDirectoryEditor;
-use crate::app::CatalogIcon;
 use crate::cli::{CliIntegration, CliStatus};
 use crate::i18n::t;
-use crate::theme::{Tokens, TypeScale, size};
+use crate::theme::space;
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, size};
 
 /// 左栏的一类设置。
 struct Category {
     /// 名称的文案键。
     title: &'static str,
-    icon: CatalogIcon,
     /// 这一类的内容：分组标题和设置行，从上到下。
     page: Page,
 }
@@ -39,38 +38,32 @@ type Page = fn(&SettingsTab, &Tokens, &mut Window, &mut Context<SettingsTab>) ->
 const CATEGORIES: &[Category] = &[
     Category {
         title: "settings.category.appearance",
-        icon: CatalogIcon::Palette,
         page: pages::appearance,
     },
     Category {
         title: "settings.category.terminal",
-        icon: CatalogIcon::SquareTerminal,
         page: pages::terminal,
     },
     Category {
         title: "settings.category.sftp",
-        icon: CatalogIcon::Folder,
         page: super::sftp::sftp,
     },
     Category {
         title: "settings.category.security",
-        icon: CatalogIcon::Shield,
         page: super::security::security,
     },
     Category {
         title: "settings.category.cli",
-        icon: CatalogIcon::Bot,
         page: super::cli_page::cli,
     },
     Category {
         title: "settings.category.app",
-        icon: CatalogIcon::AppWindow,
         page: super::app_page::app,
     },
 ];
 
-/// 右边那一列最宽多少（26 号 `.stg-col`：680 加左右各 32）。
-const COLUMN_WIDTH: Pixels = px(744.);
+/// 右边那一列最宽多少（680 加左右各 32）。
+const COLUMN_WIDTH: Pixels = size::SETTINGS_CONTENT_MAX;
 
 /// 设置页要显示的几个文件夹。
 #[derive(Clone, Debug, Default)]
@@ -231,8 +224,8 @@ impl Render for SettingsTab {
                             .flex_col()
                             .w_full()
                             .max_w(COLUMN_WIDTH)
-                            .px(px(32.))
-                            .pt(px(20.))
+                            .px(px(26.))
+                            .pt(space::SPACE_16)
                             .pb(px(40.))
                             .child(page_title(t!(category.title), scale, &tokens))
                             .children(page),
@@ -243,15 +236,16 @@ impl Render for SettingsTab {
 }
 
 /// 左栏一个条目的高。
-const NAV_ITEM_HEIGHT: Pixels = px(32.);
+const NAV_ITEM_HEIGHT: Pixels = size::SETTINGS_NAV_ITEM;
 /// 左栏条目之间的空。
 const NAV_ITEM_GAP: Pixels = px(2.);
 
-/// 左栏（26 号 `.stg-nav`）：宽 200、标签栏底色、右边一条线；条目高 32、圆角 8、选中 `--sel`，
-/// 条目之间空 2（用户 2026-11-16 嫌原来和主机栏一样的 28 高、不留空太挤；和新标签页列表同高）；
-/// 底部一行淡字「改动立即生效」，和主机栏左下角保险库那一行同高、同样贴底。
+/// 左栏（紧凑设置导航）：宽与上方页签对齐（`SETTINGS_NAV_WIDTH = TAB_WIDTH = 152`）、侧栏底色、右边一条细线；
+/// 条目高 24、圆角 6、字号 11px（选中正文色 + 前景 8% 底，未选中次要色），条目间距 2；
+/// 底部一行淡字「改动立即生效」，与状态栏等高贴底。
 fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsTab>) -> impl IntoElement {
     let hover = tokens.hover;
+    let scale = TypeScale::current(cx);
     div()
         .id("settings-categories")
         .test_support()
@@ -261,9 +255,9 @@ fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsTab>) -
         .w(size::SETTINGS_NAV_WIDTH)
         .h_full()
         .gap(NAV_ITEM_GAP)
-        .pt(px(10.))
-        .px(px(8.))
-        .bg(tokens.tabbar)
+        .pt(space::SPACE_6)
+        .px(space::SPACE_6)
+        .bg(tokens.side)
         .border_r(size::LINE)
         .border_color(tokens.line)
         .children(CATEGORIES.iter().enumerate().map(|(index, category)| {
@@ -278,26 +272,22 @@ fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsTab>) -
                 .flex()
                 .flex_none()
                 .items_center()
-                .gap(px(10.))
                 .h(NAV_ITEM_HEIGHT)
-                .px(px(8.))
-                .rounded(size::RADIUS_LG)
+                .px(space::SPACE_8)
+                .rounded(size::RADIUS_MD)
+                .text_size(scale.sm)
                 .cursor_pointer()
                 .map(|item| {
                     if chosen {
-                        item.bg(tokens.sel).text_color(tokens.text)
+                        item.bg(tokens.sel)
+                            .text_color(tokens.text)
+                            .font_weight(WEIGHT_NORMAL)
                     } else {
-                        item.text_color(tokens.label)
+                        item.text_color(tokens.text2)
                             .hover(move |style| style.bg(hover))
                     }
                 })
                 .on_click(cx.listener(move |this, _, _, cx| this.show_category(index, cx)))
-                .child(
-                    Icon::new(category.icon)
-                        .size(px(14.))
-                        .flex_none()
-                        .text_color(tokens.icon),
-                )
                 .child(div().line_height(NAV_ITEM_HEIGHT).child(title))
         }))
         .child(
@@ -311,7 +301,10 @@ fn navigation(selected: usize, tokens: &Tokens, cx: &mut Context<SettingsTab>) -
                 .h(size::STATUS_BAR)
                 .border_t(size::LINE)
                 .border_color(transparent_black())
-                .px(px(8.))
+                .px(space::SPACE_8)
+                .whitespace_nowrap()
+                .truncate()
+                .text_size(scale.xs)
                 .text_color(tokens.st_dim)
                 .child(t!("settings.tab.applies_at_once")),
         )

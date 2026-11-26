@@ -1,14 +1,13 @@
-//! 设置标签的通用件（26 号「设置」，照 Zed settings_ui）：页标题、分组标题（淡色小字 + 下面一条细线）、
+//! 设置标签的通用件（照空壳的设置页）：页标题（18/600）、分组标题（等宽小字 + 下面一条细线）、
 //! 一行设置（左边标题 + 一行说明，右边控件，下面一条细线）、改过时标题后面的「恢复默认」、
 //! 下拉框、输入框的样子、开关、切换按钮组。
 
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    FocusableExt as _, Icon, Sizable as _,
+    Icon, Sizable as _,
     input::Input,
     menu::{DropdownMenu, PopupMenuItem},
-    switch::Switch,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -18,19 +17,19 @@ use super::{AppSettings, SettingsStore};
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::{
-    MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY, WEIGHT_MEDIUM, baseline_shift, size,
-    ui_text,
+    Tokens, TypeScale, WEIGHT_NORMAL, WEIGHT_SEMIBOLD, size, space,
 };
 use crate::ui::icon_button::TextTooltip;
+use crate::ui::toggle::Toggle;
 
-/// 说明、分组标题这些一行字的行高（26 号 `.stg-row .d`、`.stg-sec`）。
+/// 说明、分组标题这些一行字的行高。
 const LINE_HEIGHT: Pixels = px(18.);
 /// 设置行里标题和说明那一栏至少多宽：再窄控件就换到下一行。
 const TEXT_MIN: Pixels = px(200.);
-/// 下拉框、输入框、切换按钮组的高（26 号 `.stg-dd`、`.stg-in`、`.stg-row .npm-seg span`）。
-pub const CONTROL_HEIGHT: Pixels = px(28.);
+/// 下拉框、输入框、切换按钮组的高（统一 `CONTROL_LG = 28px`）。
+pub const CONTROL_HEIGHT: Pixels = size::CONTROL_LG;
 
-/// 页标题（26 号 `.stg-title`）：高 32、页标题字号、500、下面留 12。
+/// 页标题：18 号 Semibold、下面留 6。
 pub fn page_title(title: SharedString, scale: TypeScale, tokens: &Tokens) -> AnyElement {
     div()
         .id("settings-title")
@@ -38,39 +37,42 @@ pub fn page_title(title: SharedString, scale: TypeScale, tokens: &Tokens) -> Any
         .aria_label(title.clone())
         .flex()
         .items_center()
-        .h(px(32.))
-        .mb(px(12.))
-        .text_size(scale.title)
-        .font_weight(WEIGHT_MEDIUM)
+        .h(px(24.))
+        .mb(space::SPACE_6)
+        .text_size(scale.page_title)
+        .font_weight(WEIGHT_SEMIBOLD)
         .text_color(tokens.text)
         .child(title)
         .into_any_element()
 }
 
-/// 分组标题（26 号 `.stg-sec`）：淡色字、下面一条细线，后面可以跟更淡的一句。
-/// 紧跟页标题的第一组不留上边距，其余的留 28。
+/// 分组标题：11px Regular 界面字体（不再用等宽），下面一条细线。
 pub fn section(
     title: SharedString,
     note: Option<SharedString>,
     first: bool,
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> AnyElement {
     let faint = tokens.faint;
     div()
         .flex()
-        .gap(px(8.))
-        .when(!first, |section| section.mt(px(28.)))
-        .pb(px(6.))
+        .gap(space::SPACE_8)
+        .when(first, |section| section.pt(space::SPACE_8))
+        .when(!first, |section| section.mt(space::SPACE_16))
+        .pb(space::SPACE_8)
         .border_b(size::LINE)
         .border_color(tokens.line)
-        .text_color(tokens.st_dim)
-        .line_height(LINE_HEIGHT)
+        .text_size(scale.sm)
+        .font_weight(WEIGHT_NORMAL)
+        .text_color(tokens.text2)
+        .line_height(px(16.))
         .child(div().flex_none().child(title))
         .children(note.map(|note| div().min_w_0().truncate().text_color(faint).child(note)))
         .into_any_element()
 }
 
-/// 一行设置（26 号 `.stg-row`）：左边标题（正文色）和一句说明（淡色），右边控件；至少 60 高，下面一条细线。
+/// 一行设置：左边标题（正文色）和一句说明（淡色），右边控件；上下留 12、至少 56 高，下面一条细线。
 /// `reset` 是标题后面的「恢复默认」，只在和默认不同时给。
 pub fn row(
     title: impl IntoElement,
@@ -97,10 +99,10 @@ pub fn row_with_note(
         .flex()
         .flex_wrap()
         .items_center()
-        .gap_x(px(24.))
+        .gap_x(px(20.))
         .gap_y(px(8.))
-        .min_h(px(60.))
-        .py(px(10.))
+        .min_h(px(56.))
+        .py(space::SPACE_12)
         .border_b(size::LINE)
         .border_color(tokens.line)
         .child(
@@ -111,13 +113,15 @@ pub fn row_with_note(
                 .flex_shrink(1.)
                 .flex_basis(TEXT_MIN)
                 .min_w(TEXT_MIN)
-                .gap(px(2.))
+                .gap(space::SPACE_4)
                 .child(
                     div()
                         .flex()
                         .items_center()
-                        .gap(px(4.))
+                        .gap(space::SPACE_4)
                         .h(LINE_HEIGHT)
+                        .text_size(TypeScale::from_base(crate::theme::INTERFACE_FONT_SIZE).emphasis)
+                        .font_weight(WEIGHT_NORMAL)
                         .text_color(tokens.text)
                         .child(div().line_height(LINE_HEIGHT).child(title))
                         .children(reset),
@@ -128,25 +132,14 @@ pub fn row_with_note(
         .into_any_element()
 }
 
-/// 设置标题下面那句说明的样子：淡色，行高 18。
+/// 设置标题下面那句说明的样子：次要色（前景 65%），行高 18。
 pub fn note(tokens: &Tokens) -> Div {
-    div().text_color(tokens.st_dim).line_height(LINE_HEIGHT)
+    div().text_color(tokens.text2).line_height(LINE_HEIGHT)
 }
 
-/// 一句说明，里面 `Ctrl+` 开头的词画成快捷键（26 号 `.kbd`）：等宽小字、淡色，
+/// 一句说明，里面 `Ctrl+` 开头的词画成快捷键（26 号 `.kbd`）：界面字体、和说明同号，
 /// 和文字按基线对齐再上移 0.5（用户定的全局规则）。说明只有一行，按词拼成一排。
-pub fn note_with_keys(
-    text: &str,
-    scale: TypeScale,
-    tokens: &Tokens,
-    window: &Window,
-) -> AnyElement {
-    let shift = baseline_shift(
-        window,
-        (UI_FONT_FAMILY, scale.ui),
-        (MONO_FONT_FAMILY, scale.mono_small),
-        LINE_HEIGHT,
-    ) - px(0.5);
+pub fn note_with_keys(text: &str, scale: TypeScale, tokens: &Tokens) -> AnyElement {
     let mut parts: Vec<(String, bool)> = Vec::new();
     for (index, word) in text.split(' ').enumerate() {
         let key = word.starts_with("Ctrl+");
@@ -172,12 +165,7 @@ pub fn note_with_keys(
         .children(parts.into_iter().map(|(part, key)| {
             div()
                 .line_height(LINE_HEIGHT)
-                .when(key, |part| {
-                    part.relative()
-                        .top(shift)
-                        .font_family(MONO_FONT_FAMILY)
-                        .text_size(scale.mono_small)
-                })
+                .when(key, |part| part.text_size(scale.body))
                 .child(part)
         }))
         .into_any_element()
@@ -185,7 +173,7 @@ pub fn note_with_keys(
 
 /// 页底的一句注释（26 号 `.stg-note`：设置 › 安全写保险库文件）。
 pub fn page_note(text: SharedString, tokens: &Tokens) -> AnyElement {
-    note(tokens).mt(px(14.)).child(text).into_any_element()
+    note(tokens).mt(space::SPACE_12).child(text).into_any_element()
 }
 
 /// 标题后面的「恢复默认」（26 号 `.stg-row .rs`，照 Zed 的 Undo 小图标按钮）：18 见方、圆角 4，
@@ -208,14 +196,14 @@ pub fn reset_button(
         .flex_none()
         .items_center()
         .justify_center()
-        .size(px(18.))
-        .rounded(px(4.))
+        .size(size::CONTROL_SM)
+        .rounded(size::RADIUS_SM)
         .text_color(tokens.st_dim)
         .cursor_pointer()
         .hover(move |style| style.bg(hover).text_color(text))
         .tooltip(move |_, cx| TextTooltip::view(label.clone(), cx))
         .on_click(move |_, _, cx| write(&store, cx, &reset))
-        .child(Icon::new(CatalogIcon::Undo2).size(px(12.)))
+        .child(Icon::new(CatalogIcon::Undo2).size(size::ICON_SM))
         .into_any_element()
 }
 
@@ -230,40 +218,31 @@ pub fn reset_if(
     changed.then(|| reset_button(id, store, reset, tokens))
 }
 
-/// 下拉框、输入框共用的框（26 号 `.stg-dd`、`.stg-in`）：高 28、左右 8、圆角 6、细边、输入框底。
+/// 下拉框、输入框共用的框：高 28、左右 10、圆角 6、细边、输入框底。
 pub fn field_box<E: Styled>(element: E, tokens: &Tokens) -> E {
-    element
-        .h(CONTROL_HEIGHT)
-        .px(px(8.))
-        .rounded(size::RADIUS)
-        .border_1()
-        .border_color(tokens.line)
-        .bg(tokens.input)
+    crate::ui::input::frame(element, tokens, false, false)
+        .px(crate::ui::input::INSET)
         .text_color(tokens.text)
 }
 
-/// 单行输入框照 26 号 `.stg-in` 的样子：高 28、左右 8、圆角 6、细边、输入框底，字是界面字号。
-/// `.small()` 只为左右 8；它的高（1.5rem）和字号（0.875rem）都不对，另外设。`Input::h` 只管多行，
-/// 单行的高要经 `Styled`。
-/// 聚焦时和编辑连接的输入框一样（`modal_input`）：还是一条细边，只是颜色深一档；
-/// 不要 gpui-component 自己的焦点环（细边外再套一圈，看着是双线）。
-pub fn field_input(input: Input, focused: bool, tokens: &Tokens) -> Input {
+/// 单行输入框：高 28、圆角 6、细边、输入框底，聚焦时品牌色边。
+pub fn field_input(input: Input, focused: bool, tokens: &Tokens, scale: TypeScale) -> Input {
     let input = input
         .small()
         .focus_bordered(false)
-        .text_size(ui_text())
-        .rounded(size::RADIUS)
+        .text_size(scale.sm)
+        .line_height(px(16.))
+        .rounded(size::RADIUS_MD)
         .bg(tokens.input)
-        .border_color(if focused { tokens.icon } else { tokens.line });
-    Styled::h(input, CONTROL_HEIGHT)
+        .border_color(crate::ui::input::border_color(tokens, false, focused));
+    Styled::h(input, size::INPUT)
 }
 
 /// 设置里下拉菜单每一项的元素 id 是 `(MENU_OPTION, 第几项)`，无障碍名是它的文字（测试靠它）。
 pub const MENU_OPTION: &str = "menu-option";
 
-/// 设置里下拉菜单一项的高（用户 2026-11-16 嫌 12 号字配菜单默认的 1.625rem 太挤）：
-/// 24，项之间菜单自己再空 2。
-const MENU_OPTION_HEIGHT: Pixels = px(24.);
+/// 设置里下拉菜单一项的高。
+const MENU_OPTION_HEIGHT: Pixels = size::MENU_ROW;
 
 /// 设置里下拉菜单的一项：字是界面字号。gpui-component 的菜单项写死了 `text_sm`（0.875rem，
 /// Windows 上约 10.5），比设置里的字小一圈，所以自己画文字；`checked` 的勾照旧由菜单画。
@@ -274,7 +253,7 @@ pub fn menu_option(
     checked: bool,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> PopupMenuItem {
-    PopupMenuItem::element(move |_, _| {
+    PopupMenuItem::element(move |_, cx| {
         div()
             .id((MENU_OPTION, index))
             .test_support()
@@ -282,14 +261,14 @@ pub fn menu_option(
             .flex()
             .items_center()
             .h(MENU_OPTION_HEIGHT)
-            .text_size(ui_text())
+            .text_size(TypeScale::current(cx).sm)
             .child(label.clone())
     })
     .checked(checked)
     .on_click(move |_, window, cx| on_click(window, cx))
 }
 
-/// 一项开关设置（26 号 `.stg-tg`：28×16 胶囊，开着是正文色底）：拨动时用 `set` 把新值写进设置。
+/// 一项开关设置（空壳的开关 36×20，同尺寸下约 28×16；开着是强调色底）：拨动时用 `set` 把新值写进设置。
 /// `label` 是无障碍名，测试也靠它。点过之后开关拿着焦点，gpui-component 会在胶囊外再套一圈焦点框；
 /// 设置里的控件都不要这圈框（和输入框一样），所以关掉。
 pub fn setting_switch(
@@ -298,35 +277,31 @@ pub fn setting_switch(
     checked: bool,
     store: &Entity<SettingsStore>,
     set: impl Fn(&mut AppSettings, bool) + 'static,
-) -> Switch {
+) -> Toggle {
     let store = store.clone();
-    Switch::new(id)
-        .small()
-        .focus_ring(false)
-        .checked(checked)
-        .accessibility_label(label)
-        .on_click(move |checked: &bool, _, cx| {
-            let checked = *checked;
-            write(&store, cx, |settings| set(settings, checked))
-        })
+    Toggle::new(id, label, checked).on_click(move |checked, _, cx| {
+        write(&store, cx, |settings| set(settings, checked))
+    })
 }
 
 /// 选中某一项时做的事。
 pub type OnChoose = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
-/// 切换按钮组（26 号 `.npm-seg`），高 30（主机表单）。
+/// 切换按钮组（主机表单），高 28。
 pub fn segmented(
     id: &'static str,
     options: Vec<SharedString>,
     selected: usize,
     on_choose: OnChoose,
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> Div {
-    segmented_with_height(id, options, selected, on_choose, size::INPUT, tokens)
+    segmented_with_height(id, options, selected, on_choose, size::INPUT, tokens, scale)
 }
 
-/// 切换按钮组：连成一组、圆角 6、细边，项之间一条竖线；选中的是 `--sel` 底、正文色，其余次要色。
-/// 每一项是 `(id, index)`，选中状态写在无障碍属性里，测试靠它断言。`height` 连外圈的线算在内。
+/// 切换按钮组（空壳的分段控件）：外圈前景 4% 的底、细边、圆角 8，里外各留 2、项之间空 2；
+/// 每一项圆角 6，选中的是强调色底、强调色上的字，其余次要色。每一项是 `(id, index)`，
+/// 选中状态写在无障碍属性里，测试靠它断言。`height` 连外圈的线算在内。
 pub fn segmented_with_height(
     id: &'static str,
     options: Vec<SharedString>,
@@ -334,17 +309,26 @@ pub fn segmented_with_height(
     on_choose: OnChoose,
     height: Pixels,
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> Div {
     let text = tokens.text;
-    let hover = tokens.hover;
+    let hover = tokens.sel;
+    let item_height = if height == size::INPUT {
+        size::SEGMENT_ITEM
+    } else {
+        height - px(6.)
+    };
     div()
         .flex()
         .flex_none()
+        .items_center()
         .self_start()
-        .rounded(size::RADIUS)
+        .gap(space::SPACE_2)
+        .p(space::SPACE_2)
+        .rounded(size::RADIUS_LG)
+        .bg(tokens.tab_active)
         .border_1()
         .border_color(tokens.line)
-        .overflow_hidden()
         .children(options.into_iter().enumerate().map(|(index, label)| {
             let on_choose = on_choose.clone();
             let chosen = index == selected;
@@ -356,15 +340,18 @@ pub fn segmented_with_height(
                 .aria_selected(chosen)
                 .flex()
                 .items_center()
-                .h(height - size::LINE * 2.)
-                .px(px(14.))
+                .h(item_height)
+                .px(space::SPACE_10)
+                .rounded(size::RADIUS_MD)
+                .text_size(scale.sm)
+                .line_height(px(16.))
                 .cursor_pointer()
-                .when(index > 0, |button| {
-                    button.border_l(size::LINE).border_color(tokens.line)
-                })
                 .map(|button| {
                     if chosen {
-                        button.bg(tokens.sel).text_color(text)
+                        button
+                            .bg(tokens.brand)
+                            .text_color(tokens.on_brand)
+                            .font_weight(WEIGHT_NORMAL)
                     } else {
                         button
                             .text_color(tokens.text2)
@@ -423,19 +410,22 @@ pub fn dropdown(
     on_choose: OnChoose,
     width: Pixels,
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> impl IntoElement + use<> {
     let base = field_box(div().id(id), tokens)
+        .text_size(scale.sm)
+        .line_height(px(16.))
         .aria_label(current.clone())
         .flex()
         .items_center()
         .justify_between()
-        .gap(px(6.))
+        .gap(space::SPACE_6)
         .w(width)
         .cursor_pointer()
         .child(div().min_w_0().truncate().child(current))
         .child(
             Icon::new(CatalogIcon::ChevronDown)
-                .size(px(12.))
+                .size(px(14.))
                 .flex_none()
                 .text_color(tokens.st_dim),
         );

@@ -10,7 +10,8 @@ use super::store::{VaultStore, describe};
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
-use crate::ui::form::{FieldErrors, typed_secret};
+use crate::theme::space;
+use crate::ui::form::{FieldErrors, FieldNote, typed_secret};
 use crate::ui::modal::{
     ModalButtonTone, ModalInputKind, OnClick, modal_button, modal_checkbox, modal_input,
     modal_question, modal_warn, render_modal,
@@ -119,12 +120,13 @@ impl Render for UnlockDialog {
         let body = div()
             .flex()
             .flex_col()
-            .gap(px(8.))
+            .gap(space::SPACE_8)
             .child(modal_warn(
                 CatalogIcon::Lock,
                 t!("vault.unlock.title"),
                 false,
                 &tokens,
+                cx,
             ))
             .child(
                 modal_question(self.reason.clone(), &tokens)
@@ -143,12 +145,12 @@ impl Render for UnlockDialog {
                 cx,
             ))
             .children(self.errors.get(FIELD_UNLOCK).map(|message| {
-                div()
-                    .id("vault-unlock-password-error")
-                    .test_support()
-                    .aria_label(message.clone())
-                    .text_color(tokens.err)
-                    .child(message.clone())
+                // 元素 id 由公共件按字段名生成：`vault-unlock-password-error`。
+                FieldNote::Error {
+                    field: FIELD_UNLOCK,
+                    message: message.clone(),
+                }
+                .render(&tokens)
             }))
             .child(modal_checkbox(
                 "vault-unlock-remember",
@@ -163,7 +165,7 @@ impl Render for UnlockDialog {
             ));
         let footer = div()
             .flex()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(modal_button(
                 "vault-unlock-cancel",
                 t!("vault.unlock.cancel"),

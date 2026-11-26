@@ -1,6 +1,6 @@
-//! 标签栏里的标签（26 号 `.tab`）：宽固定 176、高 32，右边一条竖线；前面是图块（终端标签里每张卡片一块、
-//! 叠放，焦点卡片在最前；SFTP、编辑器用类型图标），后面是名称、状态点和 ×（悬停或在前时出现）。
-//! 在前的标签是内容底色，盖住标签栏的下边线，和下面的内容连成一片。
+//! 标签栏里的标签：宽固定 184、高 29；前面是图块（终端标签里每张卡片一块、叠放，焦点卡片在最前；
+//! SFTP、编辑器用类型图标），后面是名称、状态点和 ×（悬停或在前时出现）。
+//! 在前的标签用前景 4% 的底，和别的标签分开。
 //! 标签里不止一张卡片时，悬停提示列出每张卡片的名称（焦点卡片排第一）。
 //! 点标签切过去；× 关闭整个标签；右键菜单三项；放不下时横向滚动。
 //! 按住标签左右拖动改顺序（工单 29）：标题栏里有插入线，拖到轨道两端自动横向滚动，
@@ -15,7 +15,7 @@ use gpui_kit::base::POPUP_PRIORITY;
 use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use micaterm_ui::Menu;
+use micaterm_ui::{Menu, WINDOW_MARGIN};
 
 use super::{TabDrop, TabId};
 use crate::app::{
@@ -24,7 +24,8 @@ use crate::app::{
 use crate::card::{StatusDot, render_status_dot, render_tab_tile};
 use crate::i18n::t;
 use crate::programs::Program;
-use crate::theme::{Tokens, TypeScale, size};
+use crate::theme::space;
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, size};
 use crate::ui::drag::{DragSlot, DropEdge, fade_while_dragged, render_drop_line};
 use crate::ui::icon_button::TextTooltip;
 
@@ -89,15 +90,15 @@ struct TabDrag {
     over_title_bar: bool,
 }
 
-/// × 按钮的边长（`.tab .x`）。
-const CLOSE_BUTTON: Pixels = px(20.);
+/// × 按钮的边长。
+const CLOSE_BUTTON: Pixels = px(16.);
 /// 叠放的图块最多画几块。
 const MAX_TILES: usize = 3;
 /// 后一块比前一块往右错开多少；每块外面一圈标签底色的宽度。
 const TILE_STEP: Pixels = px(6.);
 const TILE_RING: Pixels = px(1.5);
 /// 图块的边长（`render_tab_tile`）。
-const TILE: Pixels = px(14.);
+const TILE: Pixels = size::TAB_BADGE;
 /// 拖到离轨道两端这么近（或者过了两端）时自动横向滚动。
 const AUTO_SCROLL_EDGE: Pixels = px(32.);
 /// 自动滚动每帧滚多少。
@@ -133,7 +134,7 @@ impl TabRail {
             drop.destination(&order, drag.source)?;
             line_position(drop, &order)
         });
-        let text_size = TypeScale::current(cx).ui;
+        let text_size = TypeScale::current(cx).sm;
         let children: Vec<AnyElement> = tabs
             .into_iter()
             .enumerate()
@@ -163,7 +164,7 @@ impl TabRail {
                     deferred(
                         anchored()
                             .position(menu.position)
-                            .snap_to_window_with_margin(px(8.))
+                            .snap_to_window_with_margin(WINDOW_MARGIN)
                             .child(menu.view.clone()),
                     )
                     .with_priority(POPUP_PRIORITY)
@@ -352,10 +353,20 @@ fn render_tab(
         .aria_label(format!("{} {}", tab.name, tab.directory))
         .relative()
         .cursor_pointer()
-        .border_r(size::LINE)
-        .border_color(tokens.line)
         .when(!active, |this| {
-            this.hover(move |style| style.text_color(text))
+            this.hover(move |style| style.bg(tokens.hover).text_color(text))
+        })
+        // 在前的标签底下一条 1.5px 强调色线（150% DPI 下正好 2 物理像素，与官网一致）。
+        .when(active, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .left(px(0.))
+                    .right(px(0.))
+                    .bottom(px(0.))
+                    .h(px(1.5))
+                    .bg(tokens.brand),
+            )
         })
         // 被右键的标签描一圈细边（和主机右键一样，在前的标签底色不变）。
         .when(look.pressed, |this| {
@@ -419,25 +430,26 @@ fn render_tab_face(
             .test_support()
             .flex_none()
             .text_color(tokens.icon)
-            .child(Icon::new(*icon).size(px(14.)))
+            .child(Icon::new(*icon).size(size::ICON_SM))
             .into_any_element(),
     };
     div()
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(10.))
+        .gap(space::SPACE_6)
         .w(size::TAB_WIDTH)
         .h_full()
-        .pl(px(16.))
-        .pr(px(6.))
+        .pl(space::SPACE_10)
+        .pr(space::SPACE_6)
         .text_size(text_size)
         .text_color(if tab.active {
             tokens.text
         } else {
             tokens.text2
         })
-        .when(tab.active, |face| face.bg(tokens.content))
+        .font_weight(WEIGHT_NORMAL)
+        .when(tab.active, |face| face.bg(tokens.tab_active))
         .child(leading)
         .child(
             div()
@@ -468,7 +480,7 @@ fn render_tiles(
         .first()
         .map(|program| program.name.clone())
         .unwrap_or_default();
-    // 每块绝对定位、往右错开 6；后画的压在上面，所以从最后一块画起，最前那块最后画。
+    let stacked = shown.len() > 1;
     let tiles = shown.iter().enumerate().rev().map(|(index, program)| {
         div()
             .absolute()
@@ -478,8 +490,8 @@ fn render_tiles(
             .items_center()
             .justify_center()
             .p(TILE_RING)
-            .rounded(px(5.5))
-            .bg(ring)
+            .rounded(size::RADIUS_SM)
+            .when(stacked, |slot| slot.bg(ring))
             .child(render_tab_tile(("tab-tile", index).into(), program, tokens))
     });
     let count = shown.len().max(1) as f32;
@@ -508,12 +520,13 @@ fn render_close_button(
         .id(("tab-close", id.0 as usize))
         .test_support()
         .aria_label(t!("tabs.close"))
+        .tooltip(|_, cx| TextTooltip::view(t!("tabs.close"), cx))
         .flex()
         .flex_none()
         .items_center()
         .justify_center()
         .size(CLOSE_BUTTON)
-        .rounded(px(4.))
+        .rounded(size::RADIUS_SM)
         .text_color(tokens.faint)
         .when(!active, |close| {
             close
@@ -526,7 +539,7 @@ fn render_close_button(
             cx.stop_propagation();
             target.dispatch_action(&CloseTab(id), window, cx);
         })
-        .child(Icon::new(CatalogIcon::Close).size(px(12.)))
+        .child(Icon::new(CatalogIcon::Close).size(px(11.)))
 }
 
 /// 拖着的标签，和跟着鼠标的那块预览：标签本身的样子，浮起来。
@@ -545,7 +558,7 @@ impl Render for DraggedTab {
         render_tab_face(
             &tab,
             ("tab-drag-tiles", tab.id.0 as usize).into(),
-            TypeScale::current(cx).ui,
+            TypeScale::current(cx).sm,
             &tokens,
         )
         .h(size::TAB_BAR)

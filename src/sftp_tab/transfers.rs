@@ -1,19 +1,16 @@
 // 参考 since2006/shell-rs @ b2a307a: src/explorer/explorer_panel.rs 改写
-//! 传输：把确认框、问题框和队列串起来。框的内容在 `transfer_dialog`，队列卡片在 `queue_card`，
+//! 传输：把问题框和队列串起来。问题框的内容在 `transfer_dialog`，队列卡片在 `queue_card`，
 //! 排队的记账在 `transfer_queue`。
 //!
 //! 引擎一次跑一批（一批内的并发数是设置里的 `parallel`，`settings::apply` 设给引擎），标签把下一批交给它；
 //! 引擎说 `Idle` 才能交下一批。停着的一批占着队头，等「继续」「移出队列」或「丢弃续传进度」。
 
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::path::PathBuf;
 
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::*;
 
-use super::transfer_dialog::{
-    TransferForm, TransferSources, choice_of, open_form_dialog, question_choice,
-};
+use super::transfer_dialog::{choice_of, question_choice};
 use super::{CardSide, ConnectionState, QueueState, Removal, SftpTab, TransferJob, TransferQueue};
 use crate::app::{SftpAction, SftpDispatch as _, SftpTabCommand};
 use crate::backend::sftp::{
@@ -38,8 +35,6 @@ pub struct TransferState {
     pub(super) queue: TransferQueue,
     /// 引擎正在忙一条命令（一批、继续、丢弃、忘掉），`Idle` 清掉，那时才能交下一批。
     pub(super) engine_busy: bool,
-    /// 开着的确认框，开着时不再叠一个。
-    confirmation: Option<DialogLayer>,
     question: Option<OpenQuestion>,
     /// 队列表格滚到哪了。
     pub(super) scroll: gpui_kit::UniformListScrollHandle,
@@ -117,7 +112,7 @@ impl SftpTab {
         }
     }
 
-    /// 把确认过的一批放进队列，轮到了就开始。框开着时连接断了：`execute` 已经问过要不要重新连接；
+    /// 把一批放进队列，轮到了就开始。连接断了时 `execute` 已经问过要不要重新连接；
     /// 正在连接时先排着，连上就走。
     pub(super) fn enqueue(
         &mut self,
@@ -234,12 +229,9 @@ impl SftpTab {
         }
     }
 
-    /// 标签要关了：这个标签的框都收起来，引擎的连接跟着断。
+    /// 标签要关了：这个标签的问题框收起来，引擎的连接跟着断。
     pub(super) fn close_transfer_dialogs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_question(window, cx);
-        if let Some(layer) = self.transfers.confirmation.take() {
-            layer.close(window, cx);
-        }
     }
 
     /// 引擎这条命令做完了（`SftpEvent::Idle`）。
@@ -248,7 +240,7 @@ impl SftpTab {
         self.start_next_if_idle(window, cx);
     }
 
-    /// F5：问要不要上传本地选中的，或者下载远程选中的，目标是另一侧的当前目录。
+    /// F5：上传本地选中的，或者下载远程选中的，目标是另一侧的当前目录。
     pub(super) fn open_transfer(
         &mut self,
         side: CardSide,
@@ -271,7 +263,7 @@ impl SftpTab {
         }
     }
 
-    /// 问要不要把这些本地路径上传到 `target`。
+    /// 把这些本地路径直接排进上传队列，目标是远程一侧现在的目录（或拖放落到的目录）。
     pub(super) fn open_upload(
         &mut self,
         paths: Vec<PathBuf>,
@@ -279,22 +271,13 @@ impl SftpTab {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if paths.is_empty() {
+        if paths.is_empty() || self.state != ConnectionState::Connected {
             return;
         }
-        let sources = self.transfer_sources(
-            CardSide::Local,
-            paths.iter().map(|path| path.to_string_lossy().into_owned()),
-            cx,
-        );
-        let job = move |target| TransferJob::Upload {
-            paths: paths.clone(),
-            target,
-        };
-        self.open_confirmation(TransferDirection::Upload, sources, target, job, window, cx);
+        self.enqueue(TransferJob::Upload { paths, target }, window, cx);
     }
 
-    /// 问要不要把这些远程路径下载到 `target`。
+    /// 把这些远程路径直接排进下载队列，目标是本地一侧现在的目录（或拖放落到的目录）。
     pub(super) fn open_download(
         &mut self,
         paths: Vec<String>,
@@ -302,103 +285,20 @@ impl SftpTab {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if paths.is_empty() {
+        if paths.is_empty() || self.state != ConnectionState::Connected {
             return;
         }
-        let sources = self.transfer_sources(CardSide::Remote, paths.iter().cloned(), cx);
-        let job = move |target| TransferJob::Download {
-            paths: paths.clone(),
-            target,
-        };
-        self.open_confirmation(
-            TransferDirection::Download,
-            sources,
-            target,
-            job,
-            window,
-            cx,
-        );
+        self.enqueue(TransferJob::Download { paths, target }, window, cx);
     }
 
-    /// 两个方向共用的确认框。`job` 用用户定下的目录做出这一批。
-    fn open_confirmation(
-        &mut self,
-        direction: TransferDirection,
-        sources: TransferSources,
-        target: String,
-        job: impl Fn(String) -> TransferJob + 'static,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.state != ConnectionState::Connected
-            || self
-                .transfers
-                .confirmation
-                .as_ref()
-                .is_some_and(|layer| layer.is_open(window, cx))
-        {
-            return;
-        }
-        let queued = self.unfinished_transfers() > 0;
-        let endpoint = format!("{}@{}", self.login().user, self.login().host);
-        let form = cx
-            .new(|cx| TransferForm::new(direction, queued, sources, target, endpoint, window, cx));
-        let (dispatch, tab) = (self.dispatch.clone(), self.id());
-        let job = Rc::new(job);
-        let layer = DialogLayer::new();
-        open_form_dialog(
-            form,
-            layer.clone(),
-            Rc::new(move |target, window, cx| {
-                // 不带连接的代号：连接换过，这一批照样要传。
-                dispatch.dispatch_sftp_action(
-                    &SftpAction::new(tab, SftpTabCommand::Enqueue(job(target))),
-                    window,
-                    cx,
-                );
-            }),
-            window,
-            cx,
-        );
-        self.transfers.confirmation = Some(layer);
-    }
-
-    /// 确认框为 `paths` 列什么。文件夹和文件靠列着它们的卡片分；卡片没列的本地路径
-    /// （从资源管理器拖来的、选择框挑的）看磁盘。
-    fn transfer_sources(
-        &self,
-        side: CardSide,
-        paths: impl Iterator<Item = String>,
-        cx: &App,
-    ) -> TransferSources {
-        let card = self.card(side).read(cx);
-        let listed: std::collections::HashMap<String, bool> = card
-            .listed_entries(cx)
-            .iter()
-            .filter(|entry| !entry.is_parent())
-            .map(|entry| (card.child_path_of(&entry.name), entry.is_dir()))
-            .collect();
-        TransferSources::new(
-            paths
-                .map(|path| {
-                    let is_dir = listed
-                        .get(&path)
-                        .copied()
-                        .unwrap_or_else(|| !side.is_remote() && Path::new(&path).is_dir());
-                    (path, side, is_dir)
-                })
-                .collect(),
-        )
-    }
-
-    /// 用原生选择框挑要上传的，再走同一个确认框。Windows 的选择框只能选文件或者只能选文件夹，
+    /// 用原生选择框挑要上传的，挑好直接上传到远程当前目录。Windows 的选择框只能选文件或者只能选文件夹，
     /// 那里只选文件：文件夹走「上传文件夹…」（`choose_folder`）。
     pub(super) fn choose_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let options = PathPromptOptions {
             files: true,
             directories: cx.can_select_mixed_files_and_dirs(),
             multiple: true,
-            prompt: Some(t!("sftp_transfer.confirm.choose_files")),
+            prompt: Some(t!("sftp_transfer.choose_files")),
         };
         self.choose_upload_sources(options, window, cx);
     }
@@ -409,12 +309,12 @@ impl SftpTab {
             files: false,
             directories: true,
             multiple: true,
-            prompt: Some(t!("sftp_transfer.confirm.choose_folders")),
+            prompt: Some(t!("sftp_transfer.choose_folders")),
         };
         self.choose_upload_sources(options, window, cx);
     }
 
-    /// 开原生选择框，选好了问要不要上传到远程当前目录。
+    /// 开原生选择框，选好了直接上传到远程当前目录。
     fn choose_upload_sources(
         &mut self,
         options: PathPromptOptions,

@@ -12,7 +12,7 @@ use super::{
 };
 use gpui_kit::*;
 
-use crate::theme::Tokens;
+use crate::theme::{Tokens, size};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -157,9 +157,10 @@ impl ListMarquee {
                 .top(origin.y)
                 .w(size.width)
                 .h(size.height)
+                .rounded(size::RADIUS_SM)
                 .border_1()
-                .border_color(tokens.line_strong)
-                .bg(tokens.sel.opacity(0.5)),
+                .border_color(tokens.brand_ring)
+                .bg(tokens.brand_soft),
         )
     }
 }

@@ -156,20 +156,43 @@ impl TerminalColors {
         self
     }
 
+    /// The active terminal color configuration (theme plus optional background override).
+    pub fn active(cx: &App) -> Self {
+        cx.try_global::<Self>()
+            .copied()
+            .unwrap_or_else(|| Self::new(TerminalTheme::default_for(cx.theme().mode)))
+    }
+
     /// The theme in effect; before the settings set one, the default for
     /// the app's appearance.
     pub fn current(cx: &App) -> &'static TerminalTheme {
-        cx.try_global::<Self>()
-            .map(|colors| colors.theme)
-            .unwrap_or_else(|| TerminalTheme::default_for(cx.theme().mode))
+        Self::active(cx).theme
     }
 
     /// The background terminals draw on now: the app's, when it set one,
     /// else the theme's.
     pub fn background(cx: &App) -> Hsla {
-        cx.try_global::<Self>()
-            .and_then(|colors| colors.background)
-            .unwrap_or_else(|| Self::current(cx).background())
+        let active = Self::active(cx);
+        active
+            .background
+            .unwrap_or_else(|| active.theme.background())
+    }
+
+    /// Answer a program's color query (OSC 4 / 10 / 11 / 12): reports the app's
+    /// overridden background for OSC 11 when set, otherwise delegates to the theme.
+    pub fn query_color(&self, index: usize) -> Rgb {
+        if index == NamedColor::Background as usize
+            && let Some(background) = self.background
+        {
+            let rgba = background.to_rgb();
+            let byte = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
+            return Rgb {
+                r: byte(rgba.r),
+                g: byte(rgba.g),
+                b: byte(rgba.b),
+            };
+        }
+        self.theme.query_color(index)
     }
 
     pub fn theme(&self) -> &'static TerminalTheme {
@@ -177,58 +200,56 @@ impl TerminalColors {
     }
 }
 
-// 内置 4 对主题：Ayu Light / Dark（默认）、Tokyo Day / Night、Catppuccin Latte / Mocha、
-// Rosé Pine Dawn / Moon。key 写进 `settings.json`，发布后不能改：所以 Rosé Pine Moon 的 key 仍是 `rose-pine`。
-// 默认这一对原来的 key 是 `micaterm-light` / `micaterm-dark`，换成 `ayu-light` / `ayu-dark` 后，
-// 旧设置里存着旧 key 会落回默认，也就是新的 Ayu。
-// 背景平时被界面的内容底盖掉（`TerminalColors::on_background`），这里的背景只在没设时用，
-// 也是程序用 OSC 11 问背景色时的回答，所以和界面的内容底一致。
+// 内置 4 对主题：Air Neutral Light / Dark（默认，与界面 Air Neutral 无缝一体）、
+// Tokyo Day / Night、Catppuccin Latte / Mocha、Rosé Pine Dawn / Moon。
+// key 写进 `settings.json`，发布后不能改：Rosé Pine Moon 的 key 沿用 `rose-pine`；
+// 旧配置里存着已移除的 `ayu-light` / `ayu-dark` 或 `micaterm-*` 时会自动落回默认 Air Neutral。
 
-/// Ayu Light：取自 Ayu 的终端调色板（ayu-theme；与 iTerm2-Color-Schemes 的 Ayu Light 同源），
-/// 背景和选中底跟随界面。红、绿、黄、青按 Ayu 原值在浅底上只有 1.9–2.9:1，压暗到 3:1 以上，色相不变；
-/// 蓝、紫保持原值。
-const AYU_LIGHT: TerminalTheme = TerminalTheme {
-    key: "ayu-light",
-    name: "Ayu Light",
+/// Air Neutral Light：专为 Air Neutral 浅色纯白画布校准的清透 16 色调色板，
+/// 普通色与亮色有清晰阶梯，全部核心 ANSI 色在 `#FFFFFF` 上可读。
+const AIR_LIGHT: TerminalTheme = TerminalTheme {
+    key: "air-light",
+    name: "Air Neutral Light",
     mode: ThemeMode::Light,
-    foreground: 0x5c6166,
-    background: 0xfcfcfc,
-    cursor: 0xf29718,
-    selection: 0xdcdfe3,
+    foreground: 0x14171f,
+    background: 0xffffff,
+    cursor: 0x2563eb,
+    selection: 0xdbeafe,
     ansi: [
-        0x000000, 0xd45555, 0x6b8a00, 0xa06800, 0x2a80c0, 0x9e75c7, 0x27876a, 0xbababa, 0x686868,
-        0xc44444, 0x5b7a00, 0x9c6400, 0x2d8fd5, 0xa37acc, 0x208a6c, 0xd1d1d1,
+        0x1e222b, 0xcf303c, 0x157f49, 0x9e6007, 0x2563eb, 0x8c3fd1, 0x0e7c86, 0x5c6473, 0x6b7280,
+        0xe0424e, 0x169454, 0xb56d05, 0x3b76f6, 0xa152e6, 0x12919c, 0x374151,
     ],
 };
 
-/// Ayu Dark：取自 Ayu 的终端调色板（ayu-theme），全部原值；背景和选中底跟随界面。
-const AYU_DARK: TerminalTheme = TerminalTheme {
-    key: "ayu-dark",
-    name: "Ayu Dark",
+/// Air Neutral Dark：专为 Air Neutral 黑曜石底色 `#101216` 校准的清透 16 色调色板，
+/// 补全纯正紫红通道（ANSI 5/13）与可读暗黑（ANSI 0），亮色阶梯鲜明。
+const AIR_DARK: TerminalTheme = TerminalTheme {
+    key: "air-dark",
+    name: "Air Neutral Dark",
     mode: ThemeMode::Dark,
-    foreground: 0xb3b1ad,
-    background: 0x10141c,
-    cursor: 0xe6b450,
-    selection: 0x263041,
+    foreground: 0xeceff4,
+    background: 0x101216,
+    cursor: 0x5b9bf8,
+    selection: 0x24344d,
     ansi: [
-        0x000000, 0xea6c73, 0x91b362, 0xf9af4f, 0x53bdfa, 0xfae994, 0x90e1c6, 0xc7c7c7, 0x686868,
-        0xf07178, 0xc2d94c, 0xffb454, 0x59c2ff, 0xffee99, 0x95e6cb, 0xffffff,
+        0x2a2f3a, 0xf05c65, 0x38c17a, 0xeab348, 0x5b9bf8, 0xc084fc, 0x3ec6d3, 0xcbd2dd, 0x6c7484,
+        0xff7d85, 0x5ee09b, 0xf7cd6b, 0x82b7ff, 0xd8a8ff, 0x6ce0eb, 0xffffff,
     ],
 };
 
 /// 每一栏按列出的顺序，默认的在前；同一行是同一主题的浅色版和深色版。
 static THEMES: [TerminalTheme; 8] = [
-    AYU_LIGHT,
+    AIR_LIGHT,
     TOKYO_DAY,
     CATPPUCCIN_LATTE,
     ROSE_PINE_DAWN,
-    AYU_DARK,
+    AIR_DARK,
     TOKYO_NIGHT,
     CATPPUCCIN_MOCHA,
     ROSE_PINE,
 ];
 
-// 其余各取自己项目的终端配色。
+// 其余各取自己项目的终端配色，并确保 Catppuccin / Rosé Pine 的亮色（ANSI 9–14）与普通色（1–6）有清晰区分。
 
 /// https://raw.githubusercontent.com/folke/tokyonight.nvim/main/extras/ghostty/tokyonight_day (Apache-2.0).
 /// The project calls it Tokyo Night Day.
@@ -247,6 +268,7 @@ const TOKYO_DAY: TerminalTheme = TerminalTheme {
 };
 
 /// https://raw.githubusercontent.com/catppuccin/ghostty/main/themes/catppuccin-latte.conf (MIT).
+/// 亮色 9–14 按同色相略微提亮提纯，避免与普通色 1–6 完全重合。
 const CATPPUCCIN_LATTE: TerminalTheme = TerminalTheme {
     key: "catppuccin-latte",
     name: "Catppuccin Latte",
@@ -257,11 +279,12 @@ const CATPPUCCIN_LATTE: TerminalTheme = TerminalTheme {
     selection: 0xd8dae1,
     ansi: [
         0x5c5f77, 0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xacb0be, 0x6c6f85,
-        0xd20f39, 0x40a02b, 0xdf8e1d, 0x1e66f5, 0xea76cb, 0x179299, 0xbcc0cc,
+        0xe62950, 0x4fb336, 0xeb9e2f, 0x3878ff, 0xf28cd9, 0x22a8b0, 0xbcc0cc,
     ],
 };
 
 /// https://raw.githubusercontent.com/rose-pine/ghostty/main/dist/rose-pine-dawn (MIT).
+/// 亮色 9–14 按同色相略微提亮，避免与普通色 1–6 完全重合。
 const ROSE_PINE_DAWN: TerminalTheme = TerminalTheme {
     key: "rose-pine-dawn",
     name: "Rosé Pine Dawn",
@@ -272,7 +295,7 @@ const ROSE_PINE_DAWN: TerminalTheme = TerminalTheme {
     selection: 0xdfdad9,
     ansi: [
         0xf2e9e1, 0xb4637a, 0x286983, 0xea9d34, 0x56949f, 0x907aa9, 0xd7827e, 0x575279, 0x9893a5,
-        0xb4637a, 0x286983, 0xea9d34, 0x56949f, 0x907aa9, 0xd7827e, 0x575279,
+        0xc9738c, 0x347d99, 0xf2ae4e, 0x67a8b3, 0xa58ec0, 0xe39490, 0x575279,
     ],
 };
 
@@ -292,6 +315,7 @@ const TOKYO_NIGHT: TerminalTheme = TerminalTheme {
 };
 
 /// https://raw.githubusercontent.com/catppuccin/ghostty/main/themes/catppuccin-mocha.conf (MIT).
+/// 亮色 9–14 按同色相略微提亮，避免与普通色 1–6 完全重合。
 const CATPPUCCIN_MOCHA: TerminalTheme = TerminalTheme {
     key: "catppuccin-mocha",
     name: "Catppuccin Mocha",
@@ -302,12 +326,12 @@ const CATPPUCCIN_MOCHA: TerminalTheme = TerminalTheme {
     selection: 0x353749,
     ansi: [
         0x45475a, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xa6adc8, 0x585b70,
-        0xf38ba8, 0xa6e3a1, 0xf9e2af, 0x89b4fa, 0xf5c2e7, 0x94e2d5, 0xbac2de,
+        0xf8a5bc, 0xbeefba, 0xfcedc8, 0xa8c8ff, 0xfad4f0, 0xafeee4, 0xbac2de,
     ],
 };
 
 /// https://raw.githubusercontent.com/rose-pine/ghostty/main/dist/rose-pine-moon (MIT).
-/// 深色用 Moon（用户定）；key 沿用原来 Rosé Pine 的 `rose-pine`，写进设置文件的不用改。
+/// 深色用 Moon；key 沿用 `rose-pine`，亮色 9–14 按同色相略微提亮。
 const ROSE_PINE: TerminalTheme = TerminalTheme {
     key: "rose-pine",
     name: "Rosé Pine Moon",
@@ -318,7 +342,7 @@ const ROSE_PINE: TerminalTheme = TerminalTheme {
     selection: 0x44415a,
     ansi: [
         0x393552, 0xeb6f92, 0x3e8fb0, 0xf6c177, 0x9ccfd8, 0xc4a7e7, 0xea9a97, 0xe0def4, 0x6e6a86,
-        0xeb6f92, 0x3e8fb0, 0xf6c177, 0x9ccfd8, 0xc4a7e7, 0xea9a97, 0xe0def4,
+        0xf489a8, 0x52a6c7, 0xfad296, 0xb5dfe6, 0xd6bef2, 0xf3b3b0, 0xe0def4,
     ],
 };
 
@@ -349,9 +373,9 @@ mod tests {
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
     }
 
-    /// spec 第 5 节：只内置 4 对，浅色栏和深色栏按行配对，Ayu 在前（默认）。
+    /// 内置 4 对主题，浅色栏和深色栏按行配对，Air Neutral 在前（默认），Ayu 已移除。
     #[test]
-    fn four_pairs_are_built_in_with_ayu_first() {
+    fn four_pairs_are_built_in_with_air_neutral_first() {
         let names = |mode| {
             TerminalTheme::for_mode(mode)
                 .map(|theme| (theme.key, theme.name))
@@ -360,7 +384,7 @@ mod tests {
         assert_eq!(
             names(ThemeMode::Light),
             [
-                ("ayu-light", "Ayu Light"),
+                ("air-light", "Air Neutral Light"),
                 ("tokyo-day", "Tokyo Day"),
                 ("catppuccin-latte", "Catppuccin Latte"),
                 ("rose-pine-dawn", "Rosé Pine Dawn"),
@@ -369,31 +393,49 @@ mod tests {
         assert_eq!(
             names(ThemeMode::Dark),
             [
-                ("ayu-dark", "Ayu Dark"),
+                ("air-dark", "Air Neutral Dark"),
                 ("tokyo-night", "Tokyo Night"),
                 ("catppuccin-mocha", "Catppuccin Mocha"),
                 ("rose-pine", "Rosé Pine Moon"),
             ]
         );
         assert_eq!(TerminalTheme::all().len(), 8);
+        assert_eq!(TerminalTheme::find("ayu-light"), None);
+        assert_eq!(TerminalTheme::find("ayu-dark"), None);
         assert_eq!(
             TerminalTheme::default_for(ThemeMode::Light).key,
-            "ayu-light"
+            "air-light"
         );
-        assert_eq!(TerminalTheme::default_for(ThemeMode::Dark).key, "ayu-dark");
+        assert_eq!(TerminalTheme::default_for(ThemeMode::Dark).key, "air-dark");
     }
 
-    /// Ayu 这一对的底色跟随界面，浅色的红绿黄青压暗过，深色是 Ayu 原值。
+    /// Air Neutral 这一对与界面底色/前景一致，且深浅 16 色均具备清晰紫红通道与普通/亮色阶梯。
     #[test]
-    fn the_ayu_pair_takes_the_ayu_terminal_palette() {
-        let light = TerminalTheme::find("ayu-light").unwrap();
-        assert_eq!((light.background, light.foreground), (0xfcfcfc, 0x5c6166));
-        assert_eq!(light.ansi[1..=4], [0xd45555, 0x6b8a00, 0xa06800, 0x2a80c0]);
-        assert_eq!(light.ansi[8], 0x686868);
-        let dark = TerminalTheme::find("ayu-dark").unwrap();
-        assert_eq!((dark.background, dark.foreground), (0x10141c, 0xb3b1ad));
-        assert_eq!(dark.ansi[1..=4], [0xea6c73, 0x91b362, 0xf9af4f, 0x53bdfa]);
-        assert_eq!(dark.ansi[8], 0x686868);
+    fn the_air_neutral_pair_matches_the_air_neutral_palette() {
+        let light = TerminalTheme::find("air-light").unwrap();
+        assert_eq!((light.background, light.foreground), (0xffffff, 0x14171f));
+        assert_eq!(light.ansi[4], 0x2563eb);
+        assert_eq!(light.ansi[5], 0x8c3fd1);
+        let dark = TerminalTheme::find("air-dark").unwrap();
+        assert_eq!((dark.background, dark.foreground), (0x101216, 0xeceff4));
+        assert_eq!(dark.ansi[4], 0x5b9bf8);
+        assert_eq!(dark.ansi[5], 0xc084fc);
+    }
+
+    /// 每一套内置主题的亮色（ANSI 9–14）都必须与普通色（ANSI 1–6）有区分，避免高亮层级丢失。
+    #[test]
+    fn every_theme_distinguishes_bright_from_normal_ansi_colors() {
+        for theme in TerminalTheme::all() {
+            for index in 1..=6 {
+                assert_ne!(
+                    theme.ansi[index],
+                    theme.ansi[index + 8],
+                    "{} bright ANSI {} duplicates normal ANSI {index}",
+                    theme.name,
+                    index + 8
+                );
+            }
+        }
     }
 
     #[test]
@@ -462,7 +504,7 @@ mod tests {
         // vim asks for the background to choose its light or dark colors.
         assert_eq!(
             light.query_color(NamedColor::Background as usize),
-            rgb(0xfcfcfc)
+            rgb(0xffffff)
         );
         assert_eq!(
             light.query_color(NamedColor::Foreground as usize),
@@ -477,7 +519,27 @@ mod tests {
         let dark = TerminalTheme::default_for(ThemeMode::Dark);
         assert_eq!(
             dark.query_color(NamedColor::Background as usize),
-            rgb(0x10141c)
+            rgb(0x101216)
         );
+    }
+
+    #[test]
+    fn overridden_background_is_reported_to_osc_11() {
+        let colors = super::TerminalColors::new(TerminalTheme::default_for(ThemeMode::Dark))
+            .on_background(gpui_kit::rgb(0x1a1b26).into());
+        assert_eq!(
+            colors.query_color(NamedColor::Background as usize),
+            Rgb {
+                r: 0x1a,
+                g: 0x1b,
+                b: 0x26,
+            }
+        );
+        // Foreground and ANSI queries still come from the terminal theme itself.
+        assert_eq!(
+            colors.query_color(NamedColor::Foreground as usize),
+            colors.theme().query_color(NamedColor::Foreground as usize)
+        );
+        assert_eq!(colors.query_color(1), colors.theme().query_color(1));
     }
 }

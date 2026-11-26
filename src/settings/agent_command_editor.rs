@@ -96,6 +96,7 @@ impl Render for AgentCommandEditor {
                 .aria_label(t!("settings.cli.agent_command")),
             focused,
             &tokens,
+            crate::theme::TypeScale::current(cx),
         ))
     }
 }

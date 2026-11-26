@@ -12,23 +12,20 @@ use gpui_kit::base::POPUP_PRIORITY;
 use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use micaterm_ui::Menu;
+use micaterm_ui::{Menu, WINDOW_MARGIN};
 
 use super::file_listing::{ListPlaceholder, accept_drops, offer_drop};
 use super::file_menu::{CardMenuState, directory_menu, item_menu};
 use super::marquee::{self, ListMarquee, MarqueeList};
 use super::path_bar::PathEdit;
-use super::{
-    ClickMode, CursorMotion, FileEntry, FileListing, Selection, SftpTabId, ShowHiddenFiles,
-    child_path,
-};
+use super::{ClickMode, CursorMotion, FileEntry, FileListing, Selection, SftpTabId, child_path};
 use crate::app::{
     CatalogIcon, LOCAL_FILE_LIST_CONTEXT, REMOTE_FILE_LIST_CONTEXT, SftpAction, SftpDispatch as _,
     SftpTabCommand,
 };
 use crate::backend::sftp::{DirectoryListing, RemotePath, SharedLocalDirectoryProvider};
 use crate::i18n::t;
-use crate::theme::{Tokens, TypeScale, size};
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, size, space};
 use crate::ui::table;
 
 /// 目录读多久还没回来，状态栏才说「正在读取」：大多数目录一下就到，说了只会闪。
@@ -98,6 +95,14 @@ impl CardSide {
         match self {
             Self::Local => "local-file-list",
             Self::Remote => "remote-file-list",
+        }
+    }
+
+    /// 没有行时列表占位的元素 id：两个窗格同时为空时不会撞在一起。
+    pub(super) fn placeholder_id(self) -> &'static str {
+        match self {
+            Self::Local => "local-placeholder",
+            Self::Remote => "remote-placeholder",
         }
     }
 
@@ -204,7 +209,6 @@ pub struct FileCard {
     /// 路径栏的输入态。
     pub(super) path_edit: Option<PathEdit>,
     pub(super) dispatch: FocusHandle,
-    _subscriptions: Vec<Subscription>,
     load_task: Option<Task<()>>,
 }
 
@@ -217,10 +221,7 @@ impl FileCard {
         dispatch: FocusHandle,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut listing = FileListing::new(side);
-        listing.set_show_hidden(ShowHiddenFiles::get(side, cx));
-        let subscriptions =
-            vec![cx.observe_global::<ShowHiddenFiles>(|card, cx| card.sync_hidden_files(cx))];
+        let listing = FileListing::new(side);
         Self {
             side,
             tab,
@@ -256,7 +257,6 @@ impl FileCard {
             busy: false,
             path_edit: None,
             dispatch,
-            _subscriptions: subscriptions,
             load_task: None,
         }
     }
@@ -322,16 +322,6 @@ impl FileCard {
     /// 目录里的全部，隐藏文件也在：新名字不能和它们撞。
     pub fn listed_entries(&self, _: &App) -> Vec<FileEntry> {
         self.listing.listed().to_vec()
-    }
-
-    /// 这一侧的隐藏文件显示或不显示了：重新列行。隐藏起来的文件也从选中项里去掉。
-    fn sync_hidden_files(&mut self, cx: &mut Context<Self>) {
-        let show = ShowHiddenFiles::get(self.side, cx);
-        if self.listing.shows_hidden() == show {
-            return;
-        }
-        self.listing.set_show_hidden(show);
-        self.update_selection(cx, |selection, order| selection.retain(order));
     }
 
     /// 文件列表的焦点：键盘命令在它上面。
@@ -408,14 +398,11 @@ impl FileCard {
 
     /// 没有行时列表写什么：读到过目录才写「空目录」，之前写正在干什么。
     /// 空目录在重读时一直写「空目录」，读得久了才改口，免得快速刷新时闪。
-    /// 只有隐藏文件、又不显示的目录不算空。
     fn placeholder(&self) -> ListPlaceholder {
         if self.connection == ConnectionState::Connecting {
             ListPlaceholder::Connecting
         } else if self.loading && (!self.listed || self.slow_load) {
             ListPlaceholder::Reading
-        } else if self.listed && self.listing.hidden_count() > 0 {
-            ListPlaceholder::OnlyHidden
         } else if self.listed {
             ListPlaceholder::Empty
         } else if self.connection == ConnectionState::Disconnected {
@@ -665,7 +652,6 @@ impl FileCard {
             can_go_up: self.parent_path() != self.path,
             can_modify: self.takes_commands() && !self.busy,
             can_transfer: self.transfer_enabled,
-            show_hidden: ShowHiddenFiles::get(self.side, cx),
             has_properties: self.is_remote() || !cfg!(windows),
         }
     }
@@ -702,8 +688,9 @@ impl FileCard {
         cx.notify();
     }
 
-    /// 状态栏（26 号 `.status`，用户定只留「本机 / 主机名」和「共几项 · 已选几项」）。
-    /// 正在连接、断开、读不出来、读得久了时名字后面写一句，平时不写连接状态。
+    /// 状态栏（26 号 `.status`）：左边「共几项 · 已选几项」，右边「本机 / 主机名」，
+    /// 远程窗格再在最右边写连接状态（和终端卡片状态栏一样：点 + 字）。
+    /// 读不出来、读得久、正在打开时在中间补一句。
     fn status(&self) -> CardStatus {
         let items = self
             .listing
@@ -713,46 +700,192 @@ impl FileCard {
             .count();
         let selected = self.selection.targets(&self.listing.order()).len();
         let counts = self.listed.then(|| {
-            t!(
-                "sftp_tab.status.items_selected",
-                count = items,
-                selected = selected
-            )
+            if items == 1 {
+                t!(
+                    "sftp_tab.status.items_selected_one",
+                    count = items,
+                    selected = selected
+                )
+            } else {
+                t!(
+                    "sftp_tab.status.items_selected",
+                    count = items,
+                    selected = selected
+                )
+            }
         });
-        let note = if let Some(name) = &self.opening {
-            Some(t!("sftp_tab.status.opening", name = name))
-        } else if self.slow_load {
-            Some(t!("sftp_tab.list.reading"))
+        let note = if self.connection == ConnectionState::Connected {
+            if let Some(name) = &self.opening {
+                Some(t!("sftp_tab.status.opening", name = name))
+            } else if self.slow_load {
+                Some(t!("sftp_tab.list.reading"))
+            } else {
+                None
+            }
         } else {
             None
         };
-        let (state, problem, note) = match self.connection {
-            ConnectionState::Connecting => (Some(t!("sftp_tab.status.connecting")), None, None),
-            ConnectionState::Disconnected => (
-                Some(t!("sftp_tab.status.disconnected")),
-                self.error.clone().map(SharedString::from),
-                None,
-            ),
-            ConnectionState::Connected => (None, self.error.clone().map(SharedString::from), note),
-        };
         CardStatus {
-            disconnected: self.connection == ConnectionState::Disconnected,
-            state,
-            problem,
+            // 本机没有连接状态（和终端卡片一样）。
+            connection: self.is_remote().then_some(self.connection),
+            selected_count: selected,
+            problem: self.error.clone().map(SharedString::from),
             note,
             counts,
         }
     }
 
-    fn render_status(&self, tokens: &Tokens, scale: TypeScale) -> impl IntoElement + use<> {
-        let status = self.status();
-        let icon = if self.is_remote() {
+    /// Pane header styled exactly like a tab (`24px` `DOCK_HEADER`): leading side icon + `11px`
+    /// title, active pane raised with `tokens.tab_active` and a `1.5px` brand underline, inactive
+    /// panes dimmed with a hover fill. Actions stay in the context menu and shortcuts; the header
+    /// only surfaces `Reconnect` while disconnected.
+    fn render_pane_header(&self, tokens: &Tokens, scale: TypeScale) -> impl IntoElement + use<> {
+        let remote = self.is_remote();
+        let active = self.current;
+        let icon = if remote {
             CatalogIcon::Server
         } else {
             CatalogIcon::Monitor
         };
-        let segment = |text: SharedString| div().min_w_0().truncate().child(text);
+        let list_focus = self.list_focus.clone();
+        let prefix = if remote { "remote" } else { "local" };
+        let hover = tokens.hover;
+
+        div()
+            .id(SharedString::from(format!("{prefix}-header")))
+            .test_support()
+            .aria_label(self.name.clone())
+            .relative()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(space::SPACE_6)
+            .h(size::DOCK_HEADER)
+            .pl(space::SPACE_10)
+            .pr(space::SPACE_6)
+            .bg(tokens.tabbar)
+            .when(active, |header| header.bg(tokens.tab_active))
+            .when(!active, |header| header.hover(move |style| style.bg(hover)))
+            .cursor_pointer()
+            .whitespace_nowrap()
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                window.focus(&list_focus, cx);
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(tokens.icon)
+                    .child(Icon::new(icon).size(size::ICON_SM)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(scale.sm)
+                    .line_height(size::DOCK_HEADER)
+                    .text_color(if active { tokens.text } else { tokens.text2 })
+                    .child(self.name.clone()),
+            )
+            // 底边一条细线，和标签栏一样；在前的窗格再压一条重点色线（150% DPI 下正好 2 物理像素）。
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .h(size::LINE)
+                    .bg(tokens.line),
+            )
+            .when(active, |header| {
+                header.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(px(1.5))
+                        .bg(tokens.brand),
+                )
+            })
+            .child(
+                div()
+                    .ml_auto()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(space::SPACE_2)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .when(
+                        remote && self.connection == ConnectionState::Disconnected,
+                        |tools| {
+                            let label = t!("sftp_tab.connection.reconnect");
+                            let dispatch = self.dispatch.clone();
+                            let tab = self.tab;
+                            let hover = tokens.brand_soft_hover;
+                            tools.child(
+                                div()
+                                    .id("remote-action-reconnect")
+                                    .test_support()
+                                    .aria_label(label.clone())
+                                    .flex()
+                                    .flex_none()
+                                    .items_center()
+                                    .gap(space::SPACE_4)
+                                    .h(size::CONTROL_SM)
+                                    .px(space::SPACE_6)
+                                    .mr(space::SPACE_2)
+                                    .rounded(size::RADIUS_SM)
+                                    .bg(tokens.brand_soft)
+                                    .text_size(scale.xs)
+                                    .font_weight(WEIGHT_NORMAL)
+                                    .text_color(tokens.brand)
+                                    .cursor_pointer()
+                                    .hover(move |style| style.bg(hover))
+                                    .on_click(move |_, window, cx| {
+                                        cx.stop_propagation();
+                                        dispatch.dispatch_sftp_action(
+                                            &SftpAction::new(tab, SftpTabCommand::Reconnect),
+                                            window,
+                                            cx,
+                                        );
+                                    })
+                                    .child(Icon::new(CatalogIcon::RefreshCw).size(px(10.)))
+                                    .child(label),
+                            )
+                        },
+                    ),
+            )
+    }
+
+    /// Segmented bottom status bar (`22px` `STATUS_BAR`, aligned with Muxy's compact status bar
+    /// and `card/status_bar.rs`): counts on the left, the side name on the right, and — for the
+    /// remote pane — the same dot + label connection status the terminal cards show at the end.
+    fn render_status(&self, tokens: &Tokens, scale: TypeScale) -> impl IntoElement + use<> {
+        let status = self.status();
+        let dim = !self.current;
+        let base_text = if dim { tokens.st_dim } else { tokens.text2 };
         let bad = tokens.err;
+        let has_middle = status.problem.is_some() || status.note.is_some();
+        // 连接状态：绿点「已连接」、橙点「正在连接」、红点「已断开」，和终端卡片一致。
+        let connection = status.connection.map(|connection| {
+            let (dot_color, text_color, label) = match connection {
+                ConnectionState::Connected => {
+                    (tokens.ok, tokens.ok_text, t!("card.remote.connected"))
+                }
+                ConnectionState::Connecting => {
+                    (tokens.warn, base_text, t!("sftp_tab.status.connecting"))
+                }
+                ConnectionState::Disconnected => {
+                    (tokens.err, tokens.err, t!("sftp_tab.status.disconnected"))
+                }
+            };
+            (
+                dot_color,
+                if dim { tokens.st_dim } else { text_color },
+                label,
+            )
+        });
+
         div()
             .id(self.side.status_id())
             .test_support()
@@ -760,66 +893,113 @@ impl FileCard {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(10.))
             .h(size::STATUS_BAR)
-            .pl(px(12.))
-            .pr(px(10.))
             .border_t(size::LINE)
             .border_color(tokens.line)
             .bg(tokens.tabbar)
-            .text_size(scale.ui)
-            .text_color(tokens.text2)
+            .text_size(scale.sm)
+            .text_color(base_text)
             .whitespace_nowrap()
             .overflow_hidden()
-            .child(
+            // 最左：共几项 · 已选几项（读到过目录才有）。
+            .when_some(status.counts.clone(), |bar, counts| {
+                bar.child(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .h_full()
+                        .items_center()
+                        .px(space::SPACE_10)
+                        .text_color(if status.selected_count > 0 && !dim {
+                            tokens.text
+                        } else {
+                            base_text
+                        })
+                        .child(counts),
+                )
+            })
+            // 接着：出错原因、正在读取 / 打开。
+            .when(has_middle, |bar| {
+                bar.child(
+                    div()
+                        .flex()
+                        .flex_shrink(1.)
+                        .min_w_0()
+                        .h_full()
+                        .items_center()
+                        .gap(space::SPACE_6)
+                        .px(space::SPACE_8)
+                        .border_l(size::LINE)
+                        .border_color(tokens.line)
+                        .when_some(status.problem.clone(), |seg, problem| {
+                            seg.child(div().min_w_0().truncate().text_color(bad).child(problem))
+                        })
+                        .when_some(status.note.clone(), |seg, note| {
+                            seg.child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(tokens.st_dim)
+                                    .child(note),
+                            )
+                        }),
+                )
+            })
+            .child(div().flex_1().min_w_0())
+            // 本机：最右写名称（太长时自己截断）。远程的名称标签和窗格标题里已经有了，不重复。
+            .when(!self.is_remote(), |bar| {
+                bar.child(
+                    div()
+                        .flex()
+                        .flex_shrink(1.)
+                        .min_w_0()
+                        .h_full()
+                        .items_center()
+                        .px(space::SPACE_10)
+                        .child(div().min_w_0().truncate().child(self.name.clone())),
+                )
+            })
+            // 远程窗格：最右只有连接状态（和终端卡片状态栏一样）。
+            .children(connection.map(|(dot_color, text_color, label)| {
                 div()
                     .flex()
                     .flex_none()
+                    .h_full()
                     .items_center()
-                    .gap(px(6.))
-                    // 13 的图标，和窗格状态栏一样往下挪半个像素才和字面居中（真程序 150% 实测）。
-                    .child(
-                        div()
-                            .flex_none()
-                            .relative()
-                            .top(px(0.5))
-                            .text_color(tokens.icon)
-                            .child(Icon::new(icon).size(px(13.))),
-                    )
-                    .child(self.name.clone()),
-            )
-            .when_some(status.state.clone(), |bar, state| {
-                bar.child(segment(state).text_color(if status.disconnected {
-                    bad
-                } else {
-                    tokens.st_dim
-                }))
-            })
-            .when_some(status.problem.clone(), |bar, problem| {
-                bar.child(segment(problem).text_color(bad))
-            })
-            .when_some(status.note.clone(), |bar, note| bar.child(segment(note)))
-            .child(div().ml_auto().flex_none().children(status.counts.clone()))
+                    .gap(space::SPACE_5)
+                    .px(space::SPACE_10)
+                    .child(crate::ui::dot(dot_color, size::DOT))
+                    .child(div().flex_none().text_color(text_color).child(label))
+            }))
     }
 }
 
 /// 状态栏显示的东西。
 struct CardStatus {
-    disconnected: bool,
-    /// 「正在连接」「已断开」：只有远程一侧有，连着时不写。
-    state: Option<SharedString>,
+    /// 远程一侧的连接状态；本机没有。
+    connection: Option<ConnectionState>,
+    selected_count: usize,
     /// 红字：断开的原因，或者读目录的错误。
     problem: Option<SharedString>,
     /// 正在读取、正在打开。
     note: Option<SharedString>,
-    /// 右边的「4 项 · 已选 1 项」，读到过目录才有。
+    /// 左边的「4 项 · 已选 1 项」，读到过目录才有。
     counts: Option<SharedString>,
 }
 
 impl CardStatus {
-    /// 无障碍名称：名字后面的每一段和右边的计数，用「 · 」隔开。测试靠它断言。
+    /// 连接状态那一组写什么。
+    fn connection_text(&self) -> Option<SharedString> {
+        self.connection.map(|connection| match connection {
+            ConnectionState::Connected => t!("card.remote.connected"),
+            ConnectionState::Connecting => t!("sftp_tab.status.connecting"),
+            ConnectionState::Disconnected => t!("sftp_tab.status.disconnected"),
+        })
+    }
+
+    /// 无障碍名称：连接状态、出错原因、正在做什么、计数，用「 · 」隔开。测试靠它断言。
     fn label(&self) -> String {
-        self.state
+        self.connection_text()
             .iter()
             .chain(&self.problem)
             .chain(&self.note)
@@ -864,9 +1044,13 @@ impl Render for FileCard {
         let remote = self.is_remote();
         let list_focus = self.list_focus.clone();
         let menu_hit = self.menu_hit.clone();
-        let drop_highlight = tokens.sel;
-        // 上一帧列表有多宽决定显示哪几列；宽度变了下一帧生效。
-        self.listing.fit(self.list_width.get());
+        let drop_highlight = tokens.brand_soft;
+        // Subtract horizontal table inset (`2 * ROW_INSET`) when fitting visible columns.
+        self.listing.fit(
+            self.list_width
+                .get()
+                .map(|w| (w - table::ROW_INSET * 2.).max(px(0.))),
+        );
         let measure_list = {
             let (width, card) = (self.list_width.clone(), cx.entity_id());
             canvas(
@@ -885,7 +1069,7 @@ impl Render for FileCard {
         };
         let rows = self.listing.rows().len();
         let list = if rows == 0 {
-            self.render_placeholder(self.placeholder(), &tokens)
+            self.render_placeholder(self.placeholder(), &tokens, scale)
         } else {
             table::body(side.rows_id(), rows, &self.scroll, cx, Self::render_rows)
                 .into_any_element()
@@ -901,7 +1085,8 @@ impl Render for FileCard {
             .min_h_0()
             .overflow_hidden()
             .bg(tokens.content)
-            .text_size(scale.ui)
+            .text_size(scale.body)
+            .child(self.render_pane_header(&tokens, scale))
             .child(self.render_path_bar(window, &tokens, cx))
             .child(
                 // 行和标题在按下冒泡时说一声，剩下的就是空白：从那里拖是框选，点一下或者右键清掉选中。
@@ -969,7 +1154,7 @@ impl Render for FileCard {
                 deferred(
                     anchored()
                         .position(menu.position)
-                        .snap_to_window_with_margin(px(8.))
+                        .snap_to_window_with_margin(WINDOW_MARGIN)
                         .child(menu.view.clone()),
                 )
                 .with_priority(POPUP_PRIORITY)

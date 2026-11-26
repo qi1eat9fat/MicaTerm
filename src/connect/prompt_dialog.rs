@@ -8,7 +8,6 @@
 //! 对话框不点遮罩关闭、没有右上角的 ×，只能经下面的按钮或 Esc（= 取消）离开，所以每个问题一定有回答。
 
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::CatalogIcon;
@@ -18,9 +17,9 @@ use crate::backend::{
     host_key_changed_lead, unknown_host_lead,
 };
 use crate::i18n::t;
-use crate::theme::{MONO_FONT_FAMILY, Tokens};
+use crate::theme::{Tokens, space};
 use crate::ui::DialogLayer;
-use crate::ui::form::typed_secret;
+use crate::ui::form::{form_field, typed_secret};
 use crate::ui::modal::{
     FingerprintRow, ModalButtonTone, ModalHead, ModalInputKind, OnClick, modal_button,
     modal_dialog, modal_fingerprint, modal_input, modal_note, modal_question, modal_warn,
@@ -193,7 +192,7 @@ impl PromptDialog {
             ConnectionPromptKind::UnknownHost(prompt) => div()
                 .flex()
                 .flex_col()
-                .gap(px(8.))
+                .gap(space::SPACE_8)
                 .child(modal_question(self.lead(), tokens))
                 .child(modal_fingerprint(
                     Self::fingerprint_rows(prompt.algorithm(), prompt.fingerprint()),
@@ -223,8 +222,8 @@ impl PromptDialog {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(8.))
-                    .child(modal_warn(CatalogIcon::ShieldX, self.title(), true, tokens))
+                    .gap(space::SPACE_8)
+                    .child(modal_warn(CatalogIcon::ShieldX, self.title(), true, tokens, cx))
                     .child(modal_question(self.lead(), tokens))
                     .child(modal_fingerprint(rows, tokens, cx))
                     .into_any_element()
@@ -239,7 +238,7 @@ impl PromptDialog {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(8.))
+                    .gap(space::SPACE_8)
                     .child(modal_question(self.lead(), tokens))
                     .children(
                         self.fields
@@ -254,19 +253,9 @@ impl PromptDialog {
                                 } else {
                                     ModalInputKind::Text
                                 };
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(6.))
-                                    .when(server_asks, |field| {
-                                        field.child(
-                                            div()
-                                                .font_family(MONO_FONT_FAMILY)
-                                                .text_color(tokens.text)
-                                                .child(label.clone()),
-                                        )
-                                    })
-                                    .child(modal_input(
+                                form_field(
+                                    server_asks.then(|| label.clone()),
+                                    modal_input(
                                         ("prompt-field", index),
                                         label,
                                         input,
@@ -275,7 +264,10 @@ impl PromptDialog {
                                         tokens,
                                         window,
                                         cx,
-                                    ))
+                                    ),
+                                    Vec::new(),
+                                    tokens,
+                                )
                             }),
                     )
                     .into_any_element()
@@ -336,7 +328,7 @@ impl PromptDialog {
         };
         // 「取消」在左、做事的在右；主机密钥变了也一样，「更新并连接」在最右（2026-11-13 用户定，
         // 改了 26 号的危险按钮在左），默认按钮仍是「取消」。
-        div().flex().gap(px(6.)).child(cancel).child(confirm)
+        div().flex().gap(space::SPACE_6).child(cancel).child(confirm)
     }
 }
 
@@ -402,7 +394,11 @@ pub fn open_prompt_dialog(
     let first_field = view.read(cx).fields.first().map(|(_, input)| input.clone());
     let focus = view.read(cx).focus_handle.clone();
     layer.open(
-        move |dialog, _, _| modal_dialog(dialog).keyboard(false).child(view.clone()),
+        move |dialog, _, cx| {
+            modal_dialog(dialog, &Tokens::current(cx))
+                .keyboard(false)
+                .child(view.clone())
+        },
         window,
         cx,
     );

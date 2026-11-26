@@ -1,6 +1,7 @@
-//! 外观 › 终端主题：左栏浅色、右栏深色，同一行是同一主题的浅色版和深色版。
+//! 外观 › 终端主题：只列当前界面明暗那一色的主题（浅色界面看浅色，深色界面看深色），
+//! 分两列排开；另一色不出现——它跟当前界面不搭，看着突兀（2026-11-26 用户定）。
 //! 每张卡片用主题自己的颜色画一小段 shell；选中的描正文色边（26 号 `.thc.on`）。
-//! 点一张就写进设置：它属于哪一栏就换哪一栏。
+//! 点一张就写进设置：它属于哪一色就换哪一色。
 // 参考 since2006/shell-rs @ b2a307a: src/settings/terminal_themes.rs（改成原型的两栏卡片）
 
 use gpui_kit::component::ThemeMode;
@@ -12,6 +13,7 @@ use micaterm_terminal::{DEFAULT_FONT_FAMILY, TerminalTheme};
 use super::{SettingsStore, TerminalThemeSettings};
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::theme::space;
 
 /// 卡片里的字（26 号 `.thc`）：卡片是一小块终端的样子，三档界面字号都是 12，大了 64 高放不下。
 const CARD_TEXT: Pixels = px(12.);
@@ -38,33 +40,37 @@ pub fn theme_card_id(theme: &TerminalTheme) -> ElementId {
     ElementId::Name(format!("terminal-theme-{}", theme.key()).into())
 }
 
-/// 两栏主题卡片（26 号 `.stg-th`）：上面一行「浅色」「深色」，下面每行一对；行距 10、栏距 12。
-pub fn terminal_theme_grid(store: &Entity<SettingsStore>, tokens: &Tokens, cx: &App) -> Div {
+/// `mode` 那色的主题卡片（26 号 `.stg-th`）：分两列、按顺序填，左列是前半、右列是后半；
+/// 行距 10、栏距 12。另一色的主题不列。
+pub fn terminal_theme_grid(
+    store: &Entity<SettingsStore>,
+    mode: ThemeMode,
+    tokens: &Tokens,
+    cx: &App,
+) -> Div {
     let chosen = store.read(cx).settings().terminal_theme;
-    let column = |mode, title: SharedString| {
+    let themes: Vec<&'static TerminalTheme> = TerminalTheme::for_mode(mode).collect();
+    let split = themes.len().div_ceil(2);
+    let column = |themes: &[&'static TerminalTheme]| {
         div()
             .flex()
             .flex_col()
             .flex_1()
             .min_w_0()
-            .gap(px(10.))
-            .child(
-                div()
-                    .text_color(tokens.st_dim)
-                    .line_height(px(18.))
-                    .child(title),
-            )
+            .gap(space::SPACE_10)
             .children(
-                TerminalTheme::for_mode(mode).map(|theme| card(theme, &chosen, store, tokens)),
+                themes
+                    .iter()
+                    .map(|theme| card(theme, &chosen, store, tokens)),
             )
     };
     div()
         .flex()
-        .gap(px(12.))
-        .pt(px(12.))
-        .pb(px(4.))
-        .child(column(ThemeMode::Light, t!("settings.appearance.light")))
-        .child(column(ThemeMode::Dark, t!("settings.appearance.dark")))
+        .gap(space::SPACE_12)
+        .pt(space::SPACE_12)
+        .pb(space::SPACE_4)
+        .child(column(&themes[..split]))
+        .child(column(&themes[split..]))
 }
 
 /// 一张主题卡片（26 号 `.thc`）：就是一小块终端。高 64、圆角 6、细边；底色是那种深浅的界面内容底
@@ -99,8 +105,8 @@ fn card(
         .flex_col()
         .justify_center()
         .h(px(64.))
-        .px(px(10.) - border)
-        .rounded(crate::theme::size::RADIUS)
+        .px(space::SPACE_10 - border)
+        .rounded(crate::theme::size::RADIUS_MD)
         .overflow_hidden()
         .bg(background)
         .text_color(theme.foreground())
@@ -114,7 +120,7 @@ fn card(
                 store.update(|settings| settings.terminal_theme.choose(theme), cx)
             });
         })
-        .child(div().mb(px(2.)).opacity(0.75).child(theme.name()))
+        .child(div().mb(space::SPACE_2).opacity(0.75).child(theme.name()))
         .child(
             div()
                 .font_family(DEFAULT_FONT_FAMILY)

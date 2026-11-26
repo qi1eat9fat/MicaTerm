@@ -20,8 +20,9 @@ mod store;
 pub use micaterm_hosts::*;
 
 pub use describe::ErrorMessage;
-pub use dialog::{HostDialog, HostFormEvent, open_delete_host_dialog};
-pub use list::{HostCards, HostLink, HostList};
+pub use dialog::{HostDialog, open_delete_host_dialog, open_host_dialog};
+pub use list::HostList;
+pub(crate) use mark::badge_colors;
 pub use mark::HostMark;
 pub use store::{HostStore, HostStoreEvent};
 

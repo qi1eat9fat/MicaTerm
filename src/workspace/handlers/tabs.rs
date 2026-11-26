@@ -642,8 +642,6 @@ impl Workspace {
                 sftp.update(cx, |sftp, cx| sftp.close(window, cx));
             }
             Tab::Editor(_) | Tab::Settings(_) => {}
-            // 表单的标签关了（保存、取消、点 ×）：密码框里的明文现在就放掉。
-            Tab::Host(form) => form.update(cx, |form, cx| form.forget_secrets(window, cx)),
         }
         self.focus_active_tab(window, cx);
     }

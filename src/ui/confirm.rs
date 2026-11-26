@@ -16,7 +16,7 @@ use super::DialogLayer;
 use super::modal::{
     ModalButtonTone, OnClick, modal_button, modal_checkbox, modal_dialog, render_modal,
 };
-use crate::theme::{Tokens, WEIGHT_MEDIUM};
+use crate::theme::{Tokens, TypeScale, WEIGHT_SEMIBOLD};
 
 /// 确认框里的一行话。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,7 +54,8 @@ impl ConfirmLine {
                 .child(
                     div()
                         .flex_none()
-                        .w(px(52.))
+                        .w(px(88.))
+                        .whitespace_nowrap()
                         .text_color(tokens.st_dim)
                         .child(label.clone()),
                 )
@@ -64,8 +65,13 @@ impl ConfirmLine {
     }
 }
 
-/// 正文最上面一行：标题（500），后面可以跟淡色的说明（主机名、文件名）。
-fn render_title(title: SharedString, subtitle: Option<SharedString>, tokens: &Tokens) -> Div {
+/// 正文最上面一行：标题（15px Semibold），后面可以跟淡色的说明（主机名、文件名）。
+fn render_title(
+    title: SharedString,
+    subtitle: Option<SharedString>,
+    tokens: &Tokens,
+    scale: TypeScale,
+) -> Div {
     div()
         .flex()
         .items_baseline()
@@ -73,7 +79,8 @@ fn render_title(title: SharedString, subtitle: Option<SharedString>, tokens: &To
         .child(
             div()
                 .flex_none()
-                .font_weight(WEIGHT_MEDIUM)
+                .text_size(scale.title)
+                .font_weight(WEIGHT_SEMIBOLD)
                 .text_color(tokens.text)
                 .child(title),
         )
@@ -81,6 +88,7 @@ fn render_title(title: SharedString, subtitle: Option<SharedString>, tokens: &To
             div()
                 .min_w_0()
                 .truncate()
+                .text_size(scale.body)
                 .text_color(tokens.st_dim)
                 .child(subtitle)
         }))
@@ -174,13 +182,14 @@ impl Focusable for ConfirmDialog {
 impl Render for ConfirmDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
+        let scale = TypeScale::current(cx);
         let id = self.confirm.id;
         let working = self.working.is_some();
         let body = div()
             .flex()
             .flex_col()
             .gap(px(8.))
-            .child(render_title(self.confirm.title.clone(), None, &tokens))
+            .child(render_title(self.confirm.title.clone(), None, &tokens, scale))
             .child(render_lines(
                 SharedString::from(format!("{id}-text")),
                 &self.confirm.lines,
@@ -240,7 +249,7 @@ pub fn open_confirm_dialog(
     });
     let focus = view.read(cx).focus_handle.clone();
     layer.open_dismissable(
-        move |dialog, _, _| modal_dialog(dialog).child(view.clone()),
+        move |dialog, _, cx| modal_dialog(dialog, &Tokens::current(cx)).child(view.clone()),
         move |window, cx| cancelled(&on_cancel, window, cx),
         window,
         cx,
@@ -381,6 +390,7 @@ impl Focusable for ChoiceDialog {
 impl Render for ChoiceDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
+        let scale = TypeScale::current(cx);
         let id = self.choice.id;
         let left: Vec<_> = self
             .choice
@@ -417,6 +427,7 @@ impl Render for ChoiceDialog {
                 self.choice.title.clone(),
                 self.choice.subtitle.clone(),
                 &tokens,
+                scale,
             ))
             .child(render_lines(
                 SharedString::from(format!("{id}-text")),
@@ -456,7 +467,7 @@ pub fn open_choice_dialog(
     });
     let focus = view.read(cx).focus_handle.clone();
     layer.open_dismissable(
-        move |dialog, _, _| modal_dialog(dialog).child(view.clone()),
+        move |dialog, _, cx| modal_dialog(dialog, &Tokens::current(cx)).child(view.clone()),
         move |window, cx| {
             let outcome = ChoiceOutcome {
                 button: None,

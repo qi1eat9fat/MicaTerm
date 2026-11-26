@@ -156,7 +156,7 @@ fn the_close_button_collapses_the_panel_keeping_the_agent(cx: &mut TestAppContex
     let launches = provider.launches().len();
 
     in_frame(cx, handle, |window, cx| {
-        assert_eq!(window.find("agent-panel-close").label(), Some("关闭"));
+        assert_eq!(window.find("agent-panel-close").label(), Some("Close"));
         window.click("agent-panel-close", cx);
     });
     cx.run_until_parked();
@@ -254,7 +254,7 @@ fn the_start_dialog_picks_the_folder_and_the_conversation(cx: &mut TestAppContex
     );
     assert_eq!(
         label(cx, handle, "agent-prep-new").as_deref(),
-        Some("新对话（已选）")
+        Some("New Conversation (selected)")
     );
     assert!(!has(cx, handle, ("agent-prep-conversation", 0usize)));
 
@@ -291,7 +291,7 @@ fn the_start_dialog_picks_the_folder_and_the_conversation(cx: &mut TestAppContex
     assert_eq!(
         titles,
         [
-            Some("加启动框（已选）".to_string()),
+            Some("加启动框 (selected)".to_string()),
             Some("SFTP 续传".to_string()),
             Some("修登录页".to_string()),
         ],
@@ -299,7 +299,7 @@ fn the_start_dialog_picks_the_folder_and_the_conversation(cx: &mut TestAppContex
     );
     assert_eq!(
         label(cx, handle, "agent-prep-new").as_deref(),
-        Some("新对话")
+        Some("New Conversation")
     );
     assert_eq!(stored_folder(cx, &workspace), None, "启动前不记");
 
@@ -310,7 +310,7 @@ fn the_start_dialog_picks_the_folder_and_the_conversation(cx: &mut TestAppContex
     cx.run_until_parked();
     assert_eq!(
         label(cx, handle, ("agent-prep-conversation", 2usize)).as_deref(),
-        Some("修登录页（已选）")
+        Some("修登录页 (selected)")
     );
     in_frame(cx, handle, |window, cx| {
         window.click("agent-prep-start", cx)
@@ -330,7 +330,7 @@ fn the_start_dialog_picks_the_folder_and_the_conversation(cx: &mut TestAppContex
     assert_eq!(label(cx, handle, "agent-prep-folder"), Some(full));
     assert_eq!(
         label(cx, handle, ("agent-prep-conversation", 0usize)).as_deref(),
-        Some("加启动框（已选）")
+        Some("加启动框 (selected)")
     );
     start_new_agent(cx, handle);
     let launch = provider.launches()[before + 1].clone();
@@ -355,7 +355,7 @@ fn an_agent_that_cannot_resume_only_starts_new_conversations(cx: &mut TestAppCon
     dispatch(cx, handle, ShowAgent);
     assert_eq!(
         label(cx, handle, "agent-prep-conversation-note").as_deref(),
-        Some("Codex 只能开新对话")
+        Some("Codex can only start a new conversation")
     );
     assert!(!has(cx, handle, ("agent-prep-conversation", 0usize)));
     let before = provider.launches().len();
@@ -380,7 +380,7 @@ fn a_disabled_cli_is_turned_on_after_asking(cx: &mut TestAppContext) {
         assert_eq!(window.find("modal-title").label(), Some("Claude Code"));
         assert_eq!(
             window.find(("agent-prep-step", 0usize)).label(),
-            Some("启用外部 Agent")
+            Some("Enable External Agents")
         );
         assert!(
             window.try_find(("agent-prep-step", 1usize)).is_none(),
@@ -423,11 +423,11 @@ fn the_command_and_the_skill_are_installed_before_starting(cx: &mut TestAppConte
     in_frame(cx, handle, |window, cx| {
         assert_eq!(
             window.find(("agent-prep-step", 0usize)).label(),
-            Some("安装命令行工具")
+            Some("Install the command-line tool")
         );
         assert_eq!(
             window.find(("agent-prep-step", 1usize)).label(),
-            Some("安装 Claude Code 的 Skill")
+            Some("Install the Claude Code Skill")
         );
         window.click("agent-prep-start", cx);
     });

@@ -167,6 +167,7 @@ impl Render for LocalShellEditor {
                 .suffix(menu),
             self.input.read(cx).focus_handle(cx).is_focused(window),
             &tokens,
+            crate::theme::TypeScale::current(cx),
         ))
     }
 }

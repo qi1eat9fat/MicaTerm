@@ -148,7 +148,10 @@ fn after_unlocking_the_connections_question_is_answered_by_typing_straight_away(
     // 解开后卡片接着连，连接问验证码：焦点在问答框里，直接打字、回车就答了。
     let code = remote.ask(1, verification_code());
     cx.run_until_parked();
-    assert!(prompt_label(cx, handle).is_some_and(|text| text.starts_with("输入验证码")));
+    assert!(
+        prompt_label(cx, handle)
+            .is_some_and(|text| text.starts_with("Enter Verification Code"))
+    );
     assert!(prompt_field_focused(cx, handle));
     type_text(cx, handle, "4821");
     press(cx, handle, "enter");

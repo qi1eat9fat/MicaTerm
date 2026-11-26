@@ -2,10 +2,10 @@
 // 裁剪：去掉分组、协议（Telnet、串口）、临时连接；版式改成 spec 的变体 B（宽约 500、圆角 14、
 // 单页分组可以滚动）；校验出错不再弹通知，而是字段描红、下面写原因。
 
-//! 主机表单：新建和编辑主机共用，在标签页里打开（26 号「新建主机」，用户定：不再是居中的对话框）。
-//! 一列宽 480 居中：标题，名称，地址 + 端口；认证方式（切换按钮）、用户名 + 密码；连接方式；备注（一行）；
-//! 按钮紧跟表单：左边「测试连接」（描边），右边「取消 Esc」「保存 Enter」。保存、取消后发
-//! [`HostFormEvent::Close`]，窗口壳关掉这个标签。
+//! 主机表单：新建和编辑主机共用，照空壳的「添加主机」做成标签页里居中的卡片（背后压暗）。
+//! 宽 410、内边距 19、圆角 13：标题 + 说明，名称，地址 + 端口；认证方式（切换按钮）、用户名 + 密码；
+//! 连接方式；备注（一行）；按钮在右下角：左边「测试连接」（描边），右边「取消 Esc」「保存 Enter」。
+//! 保存、取消后发 [`HostFormEvent::Close`]，窗口壳关掉这个标签。
 //!
 //! 每组一个文件、一个结构，`commit` 依次调它们的 `fill` 把值写进 `HostDraft`、记下出错的字段：
 //! - `general`：名称（留空用地址）、地址、端口；
@@ -60,25 +60,18 @@ use crate::backend::{
 };
 use crate::connect::open_prompt_dialog;
 use crate::i18n::t;
-use crate::theme::{Tokens, TypeScale, WEIGHT_MEDIUM, size};
-use crate::ui::form::{FieldErrors, form_divider};
-use crate::ui::modal::{ModalButtonTone, ModalHead, OnClick, modal_button};
+use crate::theme::space;
+use crate::theme::{Tokens, TypeScale, size};
+use crate::ui::DialogLayer;
+use crate::ui::form::FieldErrors;
+use crate::ui::modal::{
+    ModalButtonTone, ModalHead, OnClick, modal_button, modal_dialog_wide, render_modal,
+};
 
 /// 对话框的键上下文。
 pub const HOST_DIALOG_KEY_CONTEXT: &str = "HostDialog";
 
-/// 表单那一列的宽和左右留白（26 号 `.hp-tight`：一列 480 + 左右 32）。
-const COLUMN: Pixels = px(480.);
-const COLUMN_PADDING: Pixels = px(32.);
-
-/// 表单告诉窗口壳的事。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HostFormEvent {
-    /// 保存好了或者取消了：关掉这个标签。
-    Close,
-}
-
-/// 主机对话框的内容。每次打开新建一个。
+/// 主机对话框的内容。每次打开新建一个，经 [`open_host_dialog`] 在窗口根层居中弹出。
 pub struct HostDialog {
     store: Entity<HostStore>,
     /// 编辑的主机；新建时是 `None`。
@@ -97,6 +90,10 @@ pub struct HostDialog {
     testing: Option<Task<()>>,
     /// 上一次测试的结果：成功，或者给用户看的原因。
     tested: Option<Result<(), SharedString>>,
+    /// 用户是否改过表单里的字（没改过且没在测试时允许点遮罩关闭）。
+    dirty: bool,
+    layer: DialogLayer,
+    previous_focus: Option<FocusHandle>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -109,6 +106,8 @@ impl HostDialog {
         store: Entity<HostStore>,
         editing: Option<HostId>,
         tester: SharedConnectionTester,
+        layer: DialogLayer,
+        previous_focus: Option<FocusHandle>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -129,7 +128,7 @@ impl HostDialog {
         let route = RouteSection::new(&draft, editing, &store, window, cx);
         let notes = NotesSection::new(&draft, window, cx);
         let advanced = AdvancedSection::new(&draft);
-        // 改了哪个字段，就先收起它的错误。
+        // 改了哪个字段，就先收起它的错误，并标记为已改动。
         let subscriptions = general
             .inputs()
             .into_iter()
@@ -139,7 +138,9 @@ impl HostDialog {
                 cx.subscribe(
                     &input,
                     move |this, _: Entity<InputState>, event: &InputEvent, cx| {
-                        if matches!(event, InputEvent::Change) && this.errors.clear(field) {
+                        if matches!(event, InputEvent::Change) {
+                            this.dirty = true;
+                            this.errors.clear(field);
                             cx.notify();
                         }
                     },
@@ -159,6 +160,9 @@ impl HostDialog {
             tester,
             testing: None,
             tested: None,
+            dirty: false,
+            layer,
+            previous_focus,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -352,16 +356,28 @@ impl HostDialog {
         }
     }
 
-    /// 不要这个表单了（保存好了、取消、Esc）：密码现在就放掉，请窗口壳关掉标签。
+    /// 关闭弹窗：立即清理密码明文并归还焦点。
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.forget_secrets(window, cx);
-        cx.emit(HostFormEvent::Close);
+        let focus = self.previous_focus.clone();
+        self.layer.close(window, cx);
+        if let Some(focus) = focus {
+            window.focus(&focus, cx);
+        }
     }
 
     /// 表单要关了：密码框里的明文现在就放掉，不等实体回收。
     pub fn forget_secrets(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.auth.forget_secrets(window, cx);
         self.route.forget_secrets(window, cx);
+    }
+
+    fn head(&self) -> ModalHead {
+        ModalHead {
+            icon: CatalogIcon::Server,
+            title: self.tab_name(),
+            detail: None,
+        }
     }
 
     fn render_actions(&self, tokens: &Tokens, window: &Window, cx: &mut Context<Self>) -> Div {
@@ -376,9 +392,9 @@ impl HostDialog {
         };
         div()
             .flex()
+            .flex_1()
             .items_center()
-            .gap(px(6.))
-            .mt(px(10.))
+            .gap(space::SPACE_8)
             .child(button(
                 "host-test-connection",
                 if testing {
@@ -442,46 +458,40 @@ fn field_of(error: HostDraftError) -> &'static str {
     }
 }
 
+/// 弹窗正文的最大高度：窗口高度去掉顶部偏移、头部和底部，保留滚动余量。
+fn max_body_height(window: &Window) -> Pixels {
+    let available = window.viewport_size().height - size::MODAL_TOP - px(160.);
+    available.max(px(240.))
+}
+
 impl Focusable for HostDialog {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl EventEmitter<HostFormEvent> for HostDialog {}
-
 impl Render for HostDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let scale = TypeScale::current(cx);
-        let title = self.tab_name();
-        // 26 号「新建主机」：标签页里一列宽 480（左右各留 32），居中；标题，然后一组一组往下排，
-        // 组之间细线；按钮紧跟在表单下面。
-        let column = div()
+        let body = div()
+            .id("host-dialog-body")
+            .test_support()
             .flex()
             .flex_col()
-            .w(COLUMN + COLUMN_PADDING * 2.)
-            .px(COLUMN_PADDING)
-            .pt(px(12.))
-            .pb(px(48.))
-            .gap(px(14.))
+            .gap(space::SPACE_12)
+            .max_h(max_body_height(window))
+            // 用原生滚动：`overflow_y_scrollbar` 会把这里的 id 换成自己的，测试按
+            // `host-dialog-body` 滚到看不见的字段就找不到了。
+            .overflow_y_scroll()
             .child(
                 div()
-                    .id("host-dialog-title")
-                    .test_support()
-                    .aria_label(title.clone())
-                    .flex()
-                    .items_center()
-                    .h(size::TAB_BAR)
-                    .mb(px(2.))
-                    .text_size(scale.title)
-                    .font_weight(WEIGHT_MEDIUM)
-                    .child(title),
+                    .text_size(scale.body)
+                    .text_color(tokens.text2)
+                    .child(t!("host.dialog.subtitle")),
             )
             .child(self.general.render(&self.errors, &tokens, window, cx))
-            .child(form_divider(&tokens))
             .child(self.auth.render(&self.errors, &tokens, window, cx))
-            .child(form_divider(&tokens))
             .child(self.route.render(
                 &self.errors,
                 &tokens,
@@ -490,15 +500,13 @@ impl Render for HostDialog {
                 cx,
             ))
             .child(self.notes.render(&self.errors, &tokens, window, cx))
-            .child(self.advanced.render(&tokens, cx))
-            .child(self.render_actions(&tokens, window, cx));
-        div()
+            .child(self.advanced.render(&tokens, cx));
+        let footer = self.render_actions(&tokens, window, cx);
+        render_modal(Some(self.head()), body, footer, &tokens, window, cx)
             .id("host-dialog")
             .test_support()
             .key_context(HOST_DIALOG_KEY_CONTEXT)
             .track_focus(&self.focus_handle)
-            // 回车保存、Esc 取消（26 号「保存 Enter」「取消 Esc」；备注是一行，回车不用换行）。
-            // 凭据、跳板的下拉开着时 Esc 先收起下拉。
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.modifiers.modified() {
                     return;
@@ -521,23 +529,53 @@ impl Render for HostDialog {
                     _ => {}
                 }
             }))
-            .flex()
-            .flex_1()
-            .min_w_0()
-            .min_h_0()
-            .bg(tokens.content)
-            .text_size(scale.ui)
-            .text_color(tokens.text)
-            .child(
-                div()
-                    .id("host-dialog-body")
-                    .flex()
-                    .flex_1()
-                    .justify_center()
-                    // 列按内容的高，不被拉成和页面一样高：多出来的才归这里滚动。
-                    .items_start()
-                    .overflow_y_scroll()
-                    .child(column),
-            )
     }
+}
+
+/// 打开新建（`editing` 为 `None`）或编辑主机的模态弹窗。
+pub fn open_host_dialog(
+    store: Entity<HostStore>,
+    editing: Option<HostId>,
+    tester: SharedConnectionTester,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let layer = DialogLayer::new();
+    let previous_focus = window.focused(cx);
+    let view = cx.new(|cx| {
+        HostDialog::new(
+            store,
+            editing,
+            tester,
+            layer.clone(),
+            previous_focus.clone(),
+            window,
+            cx,
+        )
+    });
+    let name = view.read(cx).general.name.clone();
+    let dismissed = view.downgrade();
+    let restore = previous_focus;
+    layer.open_dismissable(
+        move |dialog, _, cx| {
+            let state = view.read(cx);
+            let closable = !state.dirty && state.testing.is_none();
+            modal_dialog_wide(dialog, &Tokens::current(cx))
+                .overlay_closable(closable)
+                .keyboard(false)
+                .on_ok(|_, _, _| false)
+                .child(view.clone())
+        },
+        move |window, cx| {
+            dismissed
+                .update(cx, |dialog, cx| dialog.forget_secrets(window, cx))
+                .ok();
+            if let Some(focus) = &restore {
+                window.focus(focus, cx);
+            }
+        },
+        window,
+        cx,
+    );
+    name.update(cx, |name, cx| name.focus(window, cx));
 }

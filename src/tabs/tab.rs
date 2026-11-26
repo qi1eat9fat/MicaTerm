@@ -10,7 +10,6 @@ use super::{TabId, TabLeading, TabSnapshot, TerminalTab};
 use crate::app::CatalogIcon;
 use crate::card::StatusDot;
 use crate::editor::EditorTab;
-use crate::host::HostDialog;
 use crate::settings::SettingsTab;
 use crate::sftp_tab::SftpTab;
 
@@ -19,9 +18,7 @@ pub enum Tab {
     Terminal(TerminalTab),
     Sftp(Entity<SftpTab>),
     Editor(Entity<EditorTab>),
-    /// 新建或编辑主机的表单页（UI 重做工单 07）。
-    Host(Entity<HostDialog>),
-    /// 设置（UI 重做工单 12）：一个窗口只有一个。
+    /// 设置：一个窗口只有一个。
     Settings(Entity<SettingsTab>),
 }
 
@@ -50,13 +47,6 @@ impl Tab {
     pub fn as_editor(&self) -> Option<&Entity<EditorTab>> {
         match self {
             Self::Editor(tab) => Some(tab),
-            _ => None,
-        }
-    }
-
-    pub fn as_host(&self) -> Option<&Entity<HostDialog>> {
-        match self {
-            Self::Host(form) => Some(form),
             _ => None,
         }
     }
@@ -115,23 +105,6 @@ impl Tab {
                     dot: tab.rail_dot(),
                 }
             }
-            // 新建是「+」，编辑是笔（26 号「新建主机」标签前是 plus）。
-            Self::Host(form) => {
-                let form = form.read(cx);
-                TabSnapshot {
-                    id,
-                    name: form.tab_name(),
-                    directory: SharedString::default(),
-                    active,
-                    leading: TabLeading::Icon(if form.editing().is_some() {
-                        CatalogIcon::SquarePen
-                    } else {
-                        CatalogIcon::Plus
-                    }),
-                    members: Vec::new(),
-                    dot: StatusDot::None,
-                }
-            }
             // 26 号设置标签前是齿轮。
             Self::Settings(settings) => TabSnapshot {
                 id,
@@ -151,18 +124,18 @@ impl Tab {
             Self::Terminal(tab) => tab.dot(cx),
             Self::Sftp(tab) => tab.read(cx).rail_dot(),
             Self::Editor(tab) => tab.read(cx).rail_dot(),
-            Self::Host(_) | Self::Settings(_) => StatusDot::None,
+            Self::Settings(_) => StatusDot::None,
         }
     }
 
     /// 标签代表的程序：终端标签是焦点卡片的（标签前那一块画的就是它），SFTP、编辑器是自己的；
-    /// 表单和设置没有。
+    /// 设置没有。
     pub fn tile(&self, cx: &App) -> Option<crate::programs::Program> {
         match self {
             Self::Terminal(tab) => Some(tab.focused_card().read(cx).tile_program()),
             Self::Sftp(tab) => Some(tab.read(cx).rail_tile()),
             Self::Editor(tab) => Some(tab.read(cx).rail_tile()),
-            Self::Host(_) | Self::Settings(_) => None,
+            Self::Settings(_) => None,
         }
     }
 
@@ -172,7 +145,6 @@ impl Tab {
             Self::Terminal(tab) => tab.content(),
             Self::Sftp(tab) => tab.clone().into_any_element(),
             Self::Editor(tab) => tab.clone().into_any_element(),
-            Self::Host(form) => form.clone().into_any_element(),
             Self::Settings(settings) => settings.clone().into_any_element(),
         }
     }
@@ -183,7 +155,6 @@ impl Tab {
             Self::Terminal(tab) => tab.focused_card().read(cx).focus_handle(),
             Self::Sftp(tab) => tab.read(cx).focus_target(cx),
             Self::Editor(tab) => tab.read(cx).focus_target(cx),
-            Self::Host(form) => form.read(cx).focus_target(cx),
             Self::Settings(settings) => settings.read(cx).focus_target(),
         }
     }

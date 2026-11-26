@@ -1,27 +1,29 @@
-// 参考 since2006/shell-rs @ b2a307a: src/explorer/path_label.rs 改写
-// 改造：样子照 26 号 `.sf-path`；点空白处或 Ctrl+O 变成输入框，取代 WinSCP 的「打开目录」对话框。
-//! 文件列表上面的路径栏（高 32、下边一条线）：平时是可点的分段路径，段之间是淡色的分隔符，
-//! 当前目录那一段是正文色，指针下的一段有底色；远程的根是开头那个淡色的 `/`。
-//! 点空白处或按 Ctrl+O 变成输入框，回车切换，Esc 取消；去不了就描红写原因，不切换。
+//! SFTP path breadcrumb bar (aligned with Muxy's panel sub-headers): `24px` tall, same as the
+//! pane header above and the table header below, with a bottom `1px` hairline. Displays clickable rounded folder crumbs separated by `ChevronRight` glyphs,
+//! with the active directory in foreground text. Clicking blank space (or `Ctrl+O`)
+//! switches to an inline Muxy input field; `Enter` navigates, `Esc` cancels, and an unreadable
+//! target highlights the input border and error hint in `tokens.err`.
 
 use std::ops::Range;
 
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::{CardSide, FileCard, path_ancestors};
-use crate::app::SftpTabCommand;
+use crate::app::{CatalogIcon, SftpTabCommand};
 use crate::i18n::t;
-use crate::theme::{Tokens, TypeScale, size};
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, size, space};
 
-/// 路径栏的高（`.sf-path`）、一段的高和左右留白（`.sf-path .cr`）。
-const BAR_HEIGHT: Pixels = px(32.);
-const CRUMB_HEIGHT: Pixels = px(22.);
-const CRUMB_PADDING: Pixels = px(4.);
+/// Path bar height (same as the pane header and table header) and crumb geometry.
+const BAR_HEIGHT: Pixels = size::DOCK_HEADER;
+const CRUMB_HEIGHT: Pixels = px(20.);
+const CRUMB_PADDING: Pixels = px(5.);
+const CHEVRON_SIZE: Pixels = px(10.);
 
-/// 路径栏的一段：名字（`/home/tester` 是 `/`、`home`、`tester`；本地的根是 `C:`），和它打开的目录。
+/// One clickable directory segment in the path breadcrumb bar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathPart {
     pub label: String,
@@ -34,7 +36,7 @@ pub fn path_parts(path: &str, side: CardSide) -> Vec<PathPart> {
         .into_iter()
         .enumerate()
         .map(|(ix, (title, path))| PathPart {
-            // 本地的根（`C:\`）去掉后面的分隔符，分隔符另外画；远程的根就是 `/`。
+            // Strip trailing slash from local drive roots (`C:\` -> `C:`); remote root stays `/`.
             label: if ix == 0 && side == CardSide::Local && title.len() > 1 {
                 title.trim_end_matches(separator).to_string()
             } else {
@@ -45,11 +47,6 @@ pub fn path_parts(path: &str, side: CardSide) -> Vec<PathPart> {
         .collect()
 }
 
-/// 第 `ix` 段前面有没有分隔符：第一段没有；远程的根本身就是 `/`，它后面也没有。
-fn separated(ix: usize, side: CardSide) -> bool {
-    ix > 0 && !(side.is_remote() && ix == 1)
-}
-
 fn separator(side: CardSide) -> char {
     if side.is_remote() {
         '/'
@@ -58,8 +55,7 @@ fn separator(side: CardSide) -> char {
     }
 }
 
-/// 放不下时把哪几段折叠成 `…`：根留着，然后是 `…`，然后是放得下的最后几段。全放得下时是空的。
-/// 连最后一段都放不下时，根和它之间全折叠，最后一段截断。
+/// Computes the middle slice `1..end` to collapse into `…` when all segments do not fit.
 pub fn folded_parts(widths: &[f32], ellipsis: f32, available: f32) -> Range<usize> {
     if widths.len() < 3 || widths.iter().sum::<f32>() <= available {
         return 0..0;
@@ -73,16 +69,16 @@ pub fn folded_parts(widths: &[f32], ellipsis: f32, available: f32) -> Range<usiz
     1..start
 }
 
-/// 路径栏的输入态。
+/// Active inline path-editing state.
 pub struct PathEdit {
     input: Entity<InputState>,
-    /// 上一次回车为什么没去成：描红写在右边。一改文字就清掉。
+    /// Error from the last failed navigation attempt; cleared on edit.
     error: Option<SharedString>,
     _subscription: Subscription,
 }
 
 impl FileCard {
-    /// 路径栏变成输入框，选中当前路径（点空白处、Ctrl+O）。已经是输入框就把焦点给它。
+    /// Enters inline path-edit mode and selects the full path (`Ctrl+O` or clicking path bar).
     pub fn begin_path_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(edit) = &self.path_edit {
             let input = edit.input.clone();
@@ -105,7 +101,6 @@ impl FileCard {
                         cx.notify();
                     }
                 }
-                // 点了别处就不改了。窗口切走不算：切回来还接着输入。
                 InputEvent::Blur if window.is_window_active() => {
                     this.path_edit = None;
                     cx.notify();
@@ -135,9 +130,8 @@ impl FileCard {
         self.dispatch_command(SftpTabCommand::SubmitPath { side, text }, window, cx);
     }
 
-    /// 关掉输入框，焦点回到文件列表（Esc，或者已经切过去了）。
+    /// Exits inline path editing and restores focus to the file list.
     pub(super) fn close_path_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // 先放掉，失焦事件才不会再关一次。
         if self.path_edit.take().is_some() {
             let focus = self.focus_handle(cx);
             window.focus(&focus, cx);
@@ -145,7 +139,7 @@ impl FileCard {
         }
     }
 
-    /// 路径栏输入的目录去不了：描红写原因，留在输入框，不切换。
+    /// Keeps inline path editing open and displays `reason` in danger color.
     pub(super) fn path_edit_failed(&mut self, reason: SharedString, cx: &mut Context<Self>) {
         if let Some(edit) = &mut self.path_edit {
             edit.error = Some(reason);
@@ -153,17 +147,17 @@ impl FileCard {
         }
     }
 
-    /// 路径栏上的错误，测试用。
+    /// Current path-bar error message (used by UI tests).
     pub fn path_edit_error(&self) -> Option<SharedString> {
         self.path_edit.as_ref().and_then(|edit| edit.error.clone())
     }
 
-    /// 路径栏是不是输入框。
+    /// Whether the path bar is currently in inline input mode.
     pub fn is_editing_path(&self) -> bool {
         self.path_edit.is_some()
     }
 
-    /// 路径栏（26 号 `.sf-path`）。
+    /// Sub-header breadcrumb / inline path input bar.
     pub(super) fn render_path_bar(
         &self,
         window: &mut Window,
@@ -178,10 +172,11 @@ impl FileCard {
             .flex_none()
             .items_center()
             .h(BAR_HEIGHT)
-            .px(px(8.))
+            .px(space::SPACE_8)
             .border_b(size::LINE)
             .border_color(tokens.line)
-            .text_size(scale.ui)
+            .bg(tokens.content)
+            .text_size(scale.body)
             .whitespace_nowrap()
             .overflow_hidden();
         match &self.path_edit {
@@ -190,7 +185,7 @@ impl FileCard {
         }
     }
 
-    /// 输入态：整条变成输入框（比栏深一档的底），右边一句提示，去不了时是红字。
+    /// Inline path input capsule with focus/error ring and right-aligned hint.
     fn render_path_input(
         &self,
         bar: Stateful<Div>,
@@ -204,11 +199,7 @@ impl FileCard {
             .clone()
             .unwrap_or_else(|| t!("sftp_tab.path.hint"));
         let failed = edit.error.is_some();
-        bar.gap(px(8.))
-            .pl(px(12.))
-            .bg(tokens.input)
-            .when(failed, |bar| bar.border_color(tokens.err))
-            // Esc 取消。按键先过输入框自己的绑定，所以在捕获阶段拦下来。
+        bar.px(space::SPACE_6)
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
                     cx.stop_propagation();
@@ -216,25 +207,46 @@ impl FileCard {
                 }
             }))
             .child(
-                div().flex_1().min_w_0().child(
-                    Input::new(&edit.input)
-                        .id(self.side.path_input_id())
-                        .appearance(false)
-                        .small()
-                        .px_0()
-                        .text_size(scale.ui),
-                ),
-            )
-            .child(
                 div()
-                    .id(self.side.path_hint_id())
-                    .test_support()
-                    .aria_label(hint.clone())
-                    .flex_none()
-                    .max_w(relative(0.6))
-                    .truncate()
-                    .text_color(if failed { tokens.err } else { tokens.st_dim })
-                    .child(hint),
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap(space::SPACE_6)
+                    .h(px(22.))
+                    .px(space::SPACE_8)
+                    .rounded(size::RADIUS_MD)
+                    .bg(tokens.input)
+                    .border_1()
+                    .border_color(if failed { tokens.err } else { tokens.brand })
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(if failed { tokens.err } else { tokens.brand })
+                            .child(Icon::new(CatalogIcon::Folder).size(size::ICON_SM)),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Input::new(&edit.input)
+                                .id(self.side.path_input_id())
+                                .appearance(false)
+                                .small()
+                                .px_0()
+                                .text_size(scale.body),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .id(self.side.path_hint_id())
+                            .test_support()
+                            .aria_label(hint.clone())
+                            .flex_none()
+                            .max_w(relative(0.58))
+                            .truncate()
+                            .text_size(scale.sm)
+                            .text_color(if failed { tokens.err } else { tokens.st_dim })
+                            .child(hint),
+                    ),
             )
             .test_support()
             .into_any_element()
@@ -250,32 +262,41 @@ impl FileCard {
     ) -> AnyElement {
         let side = self.side;
         let enabled = self.takes_commands();
-        let parts = self.shown_parts(window, scale.ui);
+        let parts = self.shown_parts(window, scale.body);
+        let has_parts = !parts.is_empty();
         let last = parts.len().saturating_sub(1);
         let (text, text2, faint, hover) = (tokens.text, tokens.text2, tokens.faint, tokens.hover);
         let width = self.label_width.clone();
         let card = cx.entity_id();
-        let separator = separator(side).to_string();
-        bar
-            // 窗口列表这一侧现在的目录，读完了才写。
+        bar.gap(space::SPACE_2)
             .when(!self.loading, |this| this.aria_value(self.path.clone()))
             .aria_selected(self.current)
             .text_color(text2)
-            // 点路径栏的空白处变成输入框（点某一级时那一级把冒泡拦下了）。
             .when(enabled, |this| {
-                this.on_click(cx.listener(move |this, _, window, cx| {
-                    this.dispatch_command(SftpTabCommand::EditPath { side }, window, cx);
-                }))
+                this.cursor_text()
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.dispatch_command(SftpTabCommand::EditPath { side }, window, cx);
+                    }))
+            })
+            .when(has_parts, |this| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .pl(space::SPACE_2)
+                        .pr(space::SPACE_2)
+                        .text_color(tokens.st_dim)
+                        .child(Icon::new(CatalogIcon::Folder).size(size::ICON_SM)),
+                )
             })
             .children(parts.into_iter().enumerate().flat_map(|(ix, part)| {
                 let current = ix == last;
-                // 远程的根就是开头那个分隔符，和分隔符一样淡。
-                let root = side.is_remote() && ix == 0;
-                let sep = separated(ix, side).then(|| {
+                let sep = (ix > 0).then(|| {
                     div()
+                        .flex()
                         .flex_none()
+                        .items_center()
                         .text_color(faint)
-                        .child(separator.clone())
+                        .child(Icon::new(IconName::ChevronRight).size(CHEVRON_SIZE))
                         .into_any_element()
                 });
                 let crumb = div()
@@ -285,15 +306,10 @@ impl FileCard {
                     .flex()
                     .items_center()
                     .h(CRUMB_HEIGHT)
-                    .px(if root { px(0.) } else { CRUMB_PADDING })
-                    .rounded(px(4.))
-                    .text_color(if current {
-                        text
-                    } else if root {
-                        faint
-                    } else {
-                        text2
-                    })
+                    .px(CRUMB_PADDING)
+                    .rounded(size::RADIUS_SM)
+                    .text_color(if current { text } else { text2 })
+                    .when(current, |this| this.font_weight(WEIGHT_NORMAL))
                     .map(|this| {
                         if current {
                             this.min_w_0()
@@ -321,7 +337,6 @@ impl FileCard {
                     .into_any_element();
                 sep.into_iter().chain(std::iter::once(crumb))
             }))
-            // 上一帧有多宽决定折叠哪几段；宽度变了下一帧生效。
             .child(
                 canvas(
                     move |bounds, window, _| {
@@ -339,7 +354,7 @@ impl FileCard {
             .into_any_element()
     }
 
-    /// 要显示的段：上一帧放不下时中间折叠成 `…`。
+    /// Computes visible segments, collapsing middle segments into `…` when narrow.
     fn shown_parts(&self, window: &mut Window, font_size: Pixels) -> Vec<PathPart> {
         let side = self.side;
         let parts = path_parts(&self.path, side);
@@ -366,28 +381,26 @@ impl FileCard {
             f32::from(line.width)
         };
         let padding = f32::from(CRUMB_PADDING) * 2.;
-        let separator = measure(&separator(side).to_string());
-        // 每段连同它前面的分隔符一起算。
+        let chevron = f32::from(CHEVRON_SIZE) + 4.;
         let widths: Vec<f32> = parts
             .iter()
             .enumerate()
             .map(|(ix, part)| {
-                let sep = if separated(ix, side) { separator } else { 0. };
+                let sep = if ix > 0 { chevron } else { 0. };
                 measure(&part.label) + padding + sep
             })
             .collect();
         let ellipsis = "\u{2026}";
-        // 留一点余量，量的和排的舍入可能不一样；路径栏左右还有 8 的内边距。
+        // Account for horizontal bar padding (`16`), leading folder icon (`18`), and trailing edit button (`24`).
         let folded = folded_parts(
             &widths,
-            measure(ellipsis) + padding + separator,
-            f32::from(available) - 17.,
+            measure(ellipsis) + padding + chevron,
+            (f32::from(available) - 58.).max(0.),
         );
         if folded.is_empty() {
             return parts;
         }
         let mut shown = vec![parts[0].clone()];
-        // `…` 打开它藏起来的最后一级。
         shown.push(PathPart {
             label: ellipsis.into(),
             path: parts[folded.end - 1].path.clone(),
@@ -421,7 +434,6 @@ mod tests {
     fn folding_keeps_the_root_and_as_many_last_parts_as_fit() {
         let widths = [10., 50., 50., 50.];
         assert_eq!(folded_parts(&widths, 10., 160.), 0..0, "全放得下");
-        // `/…/b/c/` 是 10 + 10 + 50 + 50。
         assert_eq!(folded_parts(&widths, 10., 125.), 1..2);
         assert_eq!(folded_parts(&widths, 10., 80.), 1..3, "只放得下最后一段");
         assert_eq!(folded_parts(&widths, 10., 10.), 1..3, "最后一段截断");

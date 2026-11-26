@@ -9,9 +9,7 @@
 use gpui_kit::component::{WindowExt as _, notification::Notification};
 use gpui_kit::*;
 
-use crate::app::{
-    OpenCardSftp, OpenHostSftp, OpenSftp, SftpAction, SftpShortcut, ToggleHiddenFiles,
-};
+use crate::app::{OpenCardSftp, OpenHostSftp, OpenSftp, SftpAction, SftpShortcut};
 use crate::backend::RemoteTarget;
 use crate::card::TerminalCard;
 use crate::host::{Host, HostId};
@@ -29,14 +27,13 @@ pub(in crate::workspace) fn bind_sftp_actions(
         .on_action(cx.listener(Workspace::on_open_card_sftp))
         .on_action(cx.listener(Workspace::on_sftp_action))
         .on_action(cx.listener(Workspace::on_sftp_shortcut))
-        .on_action(cx.listener(Workspace::on_toggle_hidden_files))
 }
 
 impl Workspace {
     /// 右侧栏「文件」现在是什么样：`OpenSftp` 按同一个规则做事。
     pub fn files_button(&self, cx: &App) -> FilesButton {
         match self.tabs.active_content() {
-            None | Some(Tab::Host(_)) | Some(Tab::Settings(_)) => {
+            None | Some(Tab::Settings(_)) => {
                 FilesButton::Unavailable(t!("sftp_tab.files.no_remote_files"))
             }
             Some(Tab::Terminal(tab)) => {
@@ -79,7 +76,7 @@ impl Workspace {
                     return;
                 }
             }
-            None | Some(Tab::Host(_)) | Some(Tab::Settings(_)) => {}
+            None | Some(Tab::Settings(_)) => {}
         }
         // 按键也要有个交代：图标是灰的，悬停才看得到为什么。
         if let FilesButton::Unavailable(reason) = self.files_button(cx) {
@@ -253,18 +250,6 @@ impl Workspace {
         if let Some(tab) = self.active_sftp_tab() {
             tab.update(cx, |tab, cx| tab.execute(command, window, cx));
         }
-    }
-
-    /// 显示隐藏文件：写进设置（经 `apply` 设全局量），所有 SFTP 标签的这一侧都跟着变。
-    fn on_toggle_hidden_files(
-        &mut self,
-        &ToggleHiddenFiles(side): &ToggleHiddenFiles,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.settings.update(cx, |store, cx| {
-            store.update(|settings| settings.sftp.show_hidden.toggle(side), cx)
-        });
     }
 
     /// 开一个编辑器标签（`sftp_tab::file_open` 读好文件后经 `on_file_read` 到这里）。

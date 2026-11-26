@@ -12,6 +12,7 @@ use super::{CardSide, FileOperation, NewEntryKind, SftpTab};
 use crate::app::CatalogIcon;
 use crate::i18n::t;
 use crate::theme::Tokens;
+use crate::theme::space;
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{Confirm, ConfirmLine, open_confirm_dialog};
 use crate::ui::form::{FieldNote, form_field};
@@ -169,7 +170,7 @@ impl Render for NameForm {
         let cancel: OnClick = Box::new(cx.listener(|this, _, window, cx| this.close(window, cx)));
         let footer = div()
             .flex()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(modal_button(
                 "entry-name-cancel",
                 t!("sftp_files.cancel"),
@@ -350,8 +351,8 @@ impl SftpTab {
             }
         });
         layer.open_dismissable(
-            move |dialog, _, _| {
-                modal_dialog(dialog)
+            move |dialog, _, cx| {
+                modal_dialog(dialog, &Tokens::current(cx))
                     // 回车由名称框自己处理（校验过了才关）。
                     .on_ok(|_, _, _| false)
                     .child(form.clone())
@@ -379,13 +380,13 @@ mod tests {
         let existing = vec!["a.txt".to_string(), "目录".to_string()];
         let check = |name, original| validate_entry_name(name, original, &existing, false);
         assert!(check("b.txt", None).is_ok());
-        assert_eq!(check("  ", None).unwrap_err(), "名称不能为空");
+        assert_eq!(check("  ", None).unwrap_err(), "Name is required");
         assert!(check("..", None).is_err());
         assert!(check("a/b", None).is_err());
-        assert_eq!(check("a.txt", Some("a.txt")).unwrap_err(), "名称未改变");
+        assert_eq!(check("a.txt", Some("a.txt")).unwrap_err(), "The name did not change");
         assert_eq!(
             check("目录", Some("a.txt")).unwrap_err(),
-            "已有名为「目录」的项目"
+            "An item named \"目录\" already exists"
         );
         // 只改大小写不算撞名。
         assert!(check("A.txt", Some("a.txt")).is_ok());

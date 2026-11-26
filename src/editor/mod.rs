@@ -35,6 +35,7 @@ use crate::card::StatusDot;
 use crate::i18n::t;
 use crate::programs::Program;
 use crate::sftp_tab::{SftpTab, format_changed, format_size};
+use crate::theme::space;
 use crate::theme::{Tokens, TypeScale, size};
 use crate::ui::DialogLayer;
 use crate::ui::confirm::{
@@ -46,6 +47,8 @@ use crate::ui::icon_button::IconButton;
 const LINE_HEIGHT: f32 = 1.6;
 /// 代码区上下留的边（26 号 `.ed-code` 的 padding 10，减去编辑器自己留的）。
 const CODE_TOP: Pixels = px(4.);
+/// 状态栏每一段左右的内边距（和终端状态栏一致）。
+const SEGMENT_PAD: f32 = 7.;
 
 /// 编辑器标签打开的文件在哪里。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -620,11 +623,18 @@ impl EditorTab {
             .chain(right.iter().map(ToString::to_string))
             .collect::<Vec<_>>()
             .join(" \u{b7} ");
-        let rule = || div().flex_none().w(size::LINE).h(px(12.)).bg(tokens.line);
-        let (icon, reload_tip) = if self.location.is_remote() {
-            (CatalogIcon::Server, t!("editor.command.reload_remote"))
+        let reload_tip = if self.location.is_remote() {
+            t!("editor.command.reload_remote")
         } else {
-            (CatalogIcon::Monitor, t!("editor.command.reload_local"))
+            t!("editor.command.reload_local")
+        };
+        // 和终端状态栏同一种分段：段与段之间是贯通整条高度的 1px 竖线，每段左右各留 7。
+        let segment = || {
+            div()
+                .flex()
+                .items_center()
+                .h_full()
+                .px(px(SEGMENT_PAD))
         };
         div()
             .id("editor-status")
@@ -633,52 +643,41 @@ impl EditorTab {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(10.))
             .h(size::STATUS_BAR)
-            // 左边距和代码的行号对齐（26 号 `.status` padding-left 20）。
-            .pl(px(20.))
-            .pr(px(4.))
+            // 和终端状态栏一样从内容区左边开始，段自己留内边距；右边留 4 给重新加载按钮。
+            .pr(space::SPACE_4)
             .border_t(size::LINE)
             .border_color(tokens.line)
             .bg(tokens.tabbar)
-            .text_size(scale.ui)
+            .text_size(scale.sm)
             .text_color(tokens.text2)
             .whitespace_nowrap()
             .overflow_hidden()
+            // 左边：主机名 | 路径。没有图标，和终端状态栏一样用竖线分开。
             .child(
                 div()
                     .flex()
                     .min_w_0()
                     .items_center()
-                    .gap(px(6.))
-                    // 13 的图标往下挪半个像素才和字面居中（和窗格状态栏一样，真程序实测）。
+                    .h_full()
+                    .child(segment().flex_none().child(self.place.clone()))
                     .child(
-                        div()
-                            .flex_none()
-                            .relative()
-                            .top(px(0.5))
-                            .text_color(tokens.icon)
-                            .child(Icon::new(icon).size(px(13.))),
-                    )
-                    .child(div().flex_none().child(self.place.clone()))
-                    .child(div().flex_none().text_color(tokens.faint).child("/"))
-                    .child(div().min_w_0().truncate().child(path)),
+                        segment()
+                            .min_w_0()
+                            .border_l(size::LINE)
+                            .border_color(tokens.line)
+                            .child(div().min_w_0().truncate().child(path)),
+                    ),
             )
             .when_some(state, |bar, state| {
                 bar.child(
-                    div()
-                        .flex()
+                    segment()
                         .flex_none()
-                        .items_center()
-                        .gap(px(6.))
+                        .gap(space::SPACE_6)
+                        .border_l(size::LINE)
+                        .border_color(tokens.line)
                         .when(self.unsaved && self.phase == Phase::Idle, |group| {
-                            group.child(
-                                div()
-                                    .flex_none()
-                                    .size(size::DOT)
-                                    .rounded_full()
-                                    .bg(tokens.warn),
-                            )
+                            group.child(crate::ui::dot(tokens.warn, size::DOT))
                         })
                         .child(state),
                 )
@@ -689,25 +688,26 @@ impl EditorTab {
                     .flex()
                     .flex_none()
                     .items_center()
-                    .gap(px(10.))
-                    .children(right.into_iter().enumerate().flat_map(|(ix, part)| {
-                        let rule = (ix > 0).then(|| rule().into_any_element());
-                        rule.into_iter()
-                            .chain(std::iter::once(div().child(part).into_any_element()))
+                    .h_full()
+                    .children(right.into_iter().enumerate().map(|(ix, part)| {
+                        segment()
+                            .when(ix > 0, |seg| {
+                                seg.border_l(size::LINE).border_color(tokens.line)
+                            })
+                            .child(part)
+                            .into_any_element()
                     }))
                     .child(
-                        IconButton::new(
-                            "editor-reload",
-                            Icon::new(CatalogIcon::RefreshCw),
-                            reload_tip.clone(),
-                        )
-                        .size(px(22.), px(13.))
-                        .tooltip(reload_tip)
-                        .dimmed(self.phase != Phase::Idle)
-                        .dispatch(
-                            Box::new(ReloadEditor),
-                            &self.dispatch,
-                            tokens,
+                        segment().flex_none().child(
+                            IconButton::new(
+                                "editor-reload",
+                                Icon::new(CatalogIcon::RefreshCw),
+                                reload_tip.clone(),
+                            )
+                            .sm()
+                            .tooltip(reload_tip)
+                            .dimmed(self.phase != Phase::Idle)
+                            .dispatch(Box::new(ReloadEditor), &self.dispatch, tokens),
                         ),
                     ),
             )

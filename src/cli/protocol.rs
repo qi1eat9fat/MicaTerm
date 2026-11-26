@@ -262,7 +262,7 @@ pub enum Reply {
 /// A host as the CLI lists it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostInfo {
-    /// The host's public ID, the one 复制 ID copies.
+    /// The host's public ID, as `micaterm hosts list` prints it.
     pub id: String,
     pub name: String,
     pub user: String,

@@ -2,7 +2,7 @@
 //! （启动时，或关掉最后一个标签后）标签区显示它，标签栏这时是空的。取代原来的开始卡片。
 //!
 //! - 上面一个极淡的大标志（没有标题和标语）；
-//! - 下面一列宽 320、行高 32：图标 + 名字，快捷键靠右（Maple Mono、`Ctrl+Shift+T` 写法）；
+//! - 下面一列宽 300、行高 32：图标 + 名字，快捷键靠右（等宽、`Ctrl+Shift+T` 写法）；
 //!   没有默认底色，悬停才出底色；没有最近连接，没有「导入 SSH 配置」（用户定）。
 //!
 //! 没有标签时它持有焦点（`new_tab_focus`），快捷键才有焦点路径可走；行经窗口壳的焦点派发 action。
@@ -13,15 +13,16 @@ use gpui_kit::*;
 
 use crate::app::{CatalogIcon, MARK_THIN_ICON, NewHost, NewLocalTerminalTab};
 use crate::i18n::t;
-use crate::theme::{MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY, baseline_shift, size};
+use crate::theme::space;
+use crate::theme::{Tokens, TypeScale, size};
 use crate::workspace::Workspace;
 
 /// 大标志的边长（26 号 `.wd-logo`）。
-const LOGO: Pixels = px(88.);
+const LOGO: Pixels = px(72.);
 /// 标志和第一行之间。
-const LOGO_GAP: Pixels = px(28.);
-/// 整列往上提一点，看着在正中（26 号 `.wd` 的 margin-top: -48px）。
-const LIFT: Pixels = px(48.);
+const LOGO_GAP: Pixels = px(24.);
+/// 整列往上提一点，看着在正中。
+const LIFT: Pixels = px(40.);
 
 impl Workspace {
     /// 新标签页。
@@ -36,7 +37,7 @@ impl Workspace {
         let row =
             |id: &'static str, icon: CatalogIcon, label: SharedString, action: Box<dyn Action>| {
                 let keys = shortcut_text(action.as_ref(), window);
-                render_row(id, icon, label, keys, action, target, tokens, scale, window)
+                render_row(id, icon, label, keys, action, target, tokens, scale)
             };
         div()
             .id("new-tab-page")
@@ -97,14 +98,7 @@ fn render_row(
     target: &FocusHandle,
     tokens: &Tokens,
     scale: TypeScale,
-    window: &Window,
 ) -> impl IntoElement {
-    let keys_shift = baseline_shift(
-        window,
-        (UI_FONT_FAMILY, scale.ui),
-        (MONO_FONT_FAMILY, scale.mono_small),
-        size::NEW_TAB_ROW,
-    );
     let target = target.clone();
     let hover = tokens.hover;
     let text = tokens.text;
@@ -114,11 +108,11 @@ fn render_row(
         .aria_label(label.clone())
         .flex()
         .items_center()
-        .gap(px(10.))
+        .gap(space::SPACE_10)
         .h(size::NEW_TAB_ROW)
-        .px(px(8.))
-        .rounded(size::RADIUS)
-        .text_size(scale.ui)
+        .px(space::SPACE_8)
+        .rounded(size::RADIUS_MD)
+        .text_size(scale.body)
         .text_color(tokens.label)
         .cursor_pointer()
         .hover(move |style| style.bg(hover).text_color(text))
@@ -127,7 +121,7 @@ fn render_row(
             div()
                 .flex_none()
                 .text_color(tokens.icon)
-                .child(Icon::new(icon).size(px(14.))),
+                .child(Icon::new(icon).size(size::ICON_MD)),
         )
         .child(
             div()
@@ -141,15 +135,10 @@ fn render_row(
                 .test_support()
                 .aria_label(keys.clone())
                 .ml_auto()
-                .pl(px(12.))
+                .pl(space::SPACE_12)
                 .flex_none()
-                .relative()
-                // 基线对齐后再上移 0.5（用户定的全局规则：Maple Mono 大写比中文字面矮，只对基线看着偏低；
-                // 150% 真程序实测上移前低 0.5、上移后高 0.25 个设备像素）。
-                .top(keys_shift - px(0.5))
                 .line_height(size::NEW_TAB_ROW)
-                .font_family(MONO_FONT_FAMILY)
-                .text_size(scale.mono_small)
+                .text_size(scale.body)
                 .text_color(tokens.st_dim)
                 .child(keys)
         }))

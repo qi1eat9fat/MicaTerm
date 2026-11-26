@@ -1,5 +1,5 @@
-//! 主机表单（工单 11；UI 重做工单 07 起在标签页里打开）的 UI 测试：新建的入口、保存、校验出错、编辑、
-//! 密码进保险库，以及表单标签的开关。
+//! 主机表单（工单 11；按 `docs/ui-standard.md` 改为 `MODAL_MD` 模态）的 UI 测试：新建的入口、
+//! 保存、校验出错、编辑、密码进保险库，以及模态的开关。
 
 use micaterm::app::{EditHost, NewHost};
 
@@ -51,7 +51,7 @@ fn the_plus_after_the_host_count_opens_a_new_host_dialog(cx: &mut TestAppContext
 
     assert!(dialog_open(cx, handle));
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("host-dialog-title").label(), Some("新建主机"));
+        assert_eq!(window.find("modal-title").label(), Some("New Host"));
         // 焦点先给「名称」。
         assert_eq!(window.find("host-name").focused(), Some(true));
         for id in [
@@ -65,9 +65,9 @@ fn the_plus_after_the_host_count_opens_a_new_host_dialog(cx: &mut TestAppContext
         }
         // 认证默认「密码」（「使用凭据」「无密码」见 `credentials.rs`）；连接方式默认「直接」
         // （跳板和代理见 `route.rs`）。
-        assert_eq!(window.find(("host-auth", 0usize)).label(), Some("密码"));
+        assert_eq!(window.find(("host-auth", 0usize)).label(), Some("Password"));
         assert_eq!(window.find(("host-auth", 0usize)).selected(), Some(true));
-        assert_eq!(window.find(("host-route", 0usize)).label(), Some("直接"));
+        assert_eq!(window.find(("host-route", 0usize)).label(), Some("Direct"));
     });
 
     in_frame(cx, handle, |window, cx| {
@@ -153,11 +153,11 @@ fn a_wrong_field_turns_red_says_why_and_keeps_the_dialog_open(cx: &mut TestAppCo
     assert!(host_names(cx, &workspace).is_empty());
     assert_eq!(
         error_of(cx, handle, "host-address").as_deref(),
-        Some("地址不能为空")
+        Some("Address is required")
     );
     assert_eq!(
         error_of(cx, handle, "host-port").as_deref(),
-        Some("端口必须是 1 到 65535 之间的数字")
+        Some("Port must be a number from 1 to 65535")
     );
 
     // 改了哪个字段，那个字段的错误先收起来；另一个还在。
@@ -187,8 +187,8 @@ fn editing_a_host_starts_from_what_it_has_and_saves_the_change(cx: &mut TestAppC
     dispatch(cx, handle, EditHost(HostId(4)));
     in_frame(cx, handle, |window, _| {
         assert_eq!(
-            window.find("host-dialog-title").label(),
-            Some("编辑 staging-api")
+            window.find("modal-title").label(),
+            Some("Edit staging-api")
         );
     });
 
@@ -231,37 +231,40 @@ fn clearing_the_saved_password_deletes_it(cx: &mut TestAppContext) {
     assert!(secrets.get(&web01.password_secret()).unwrap().is_none());
 }
 
-/// 新建主机在标签页里打开（26 号「新建主机」）：标签写「新建主机」；再要新建就切回这个标签，
-/// 不再开一个；Esc 关掉标签。
+/// 新建主机是叠在窗口上的模态（`MODAL_MD`），不占标签；已经有了就不再开第二个；Esc 关掉。
 #[gpui_kit::test]
-fn new_host_opens_one_tab_and_escape_closes_it(cx: &mut TestAppContext) {
+fn new_host_opens_a_modal_not_a_tab(cx: &mut TestAppContext) {
     let (handle, workspace) = open_workspace(cx);
 
     dispatch(cx, handle, NewHost);
-    assert_eq!(tab_labels(cx, &workspace), [TabId(1)]);
+    assert!(dialog_open(cx, handle));
+    assert!(tab_labels(cx, &workspace).is_empty());
     in_frame(cx, handle, |window, _| {
-        assert_eq!(
-            window.find(("tab", 1usize)).label().map(str::trim),
-            Some("新建主机")
-        );
-        // 在标签页里，不是叠在上面的对话框。
-        assert!(window.try_find("dialog").is_none());
+        assert_eq!(window.find("modal-title").label(), Some("New Host"));
+        // 叠在窗口上的对话框，不占标签。
+        assert!(window.try_find(("tab", 1usize)).is_none());
     });
 
-    // 先开一个终端标签，再要新建主机：切回原来那个表单标签。
+    // 已经开着时再要新建：不会叠第二个。
+    dispatch(cx, handle, NewHost);
+    assert!(dialog_open(cx, handle));
+    assert!(tab_labels(cx, &workspace).is_empty());
+
+    // 先关掉，开一个终端标签，再要新建：标签不动，弹窗照旧。
+    in_frame(cx, handle, |window, cx| window.press("escape", cx));
     dispatch(cx, handle, NewLocalTerminalTab);
     dispatch(cx, handle, NewHost);
-    assert_eq!(tab_labels(cx, &workspace), [TabId(1), TabId(2)]);
-    cx.update(|cx| assert_eq!(workspace.read(cx).active_tab(), Some(TabId(1))));
+    assert_eq!(tab_labels(cx, &workspace), [TabId(1)]);
+    assert!(dialog_open(cx, handle));
 
     in_frame(cx, handle, |window, cx| window.press("escape", cx));
     assert!(!dialog_open(cx, handle));
-    assert_eq!(tab_labels(cx, &workspace), [TabId(2)]);
+    assert_eq!(tab_labels(cx, &workspace), [TabId(1)]);
 }
 
-/// 「取消」关掉表单标签，什么都不存；回车就是保存（备注是一行，回车不用换行）。
+/// 「取消」关掉弹窗，什么都不存；回车就是保存（备注是一行，回车不用换行）。
 #[gpui_kit::test]
-fn cancel_closes_the_tab_and_enter_saves(cx: &mut TestAppContext) {
+fn cancel_closes_the_dialog_and_enter_saves(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open_with_seed(cx);
     let before = host_names(cx, &workspace).len();
 
@@ -281,23 +284,15 @@ fn cancel_closes_the_tab_and_enter_saves(cx: &mut TestAppContext) {
     assert!(cx.update(|cx| workspace.read(cx).tab_ids().is_empty()));
 }
 
-/// 编辑一台主机开它自己的标签，写「编辑 主机名」；和新建的标签互不顶替。
+/// 编辑一台主机也开模态，标题写「编辑 主机名」，不新增标签。
 #[gpui_kit::test]
-fn editing_a_host_opens_its_own_tab(cx: &mut TestAppContext) {
+fn editing_a_host_opens_a_modal_not_a_tab(cx: &mut TestAppContext) {
     let (handle, workspace, _) = open_with_seed(cx);
 
-    dispatch(cx, handle, NewHost);
     dispatch(cx, handle, EditHost(HostId(1)));
-    dispatch(cx, handle, EditHost(HostId(1)));
-    assert_eq!(tab_labels(cx, &workspace), [TabId(1), TabId(2)]);
+    assert!(dialog_open(cx, handle));
+    assert!(tab_labels(cx, &workspace).is_empty());
     in_frame(cx, handle, |window, _| {
-        assert_eq!(
-            window.find(("tab", 2usize)).label().map(str::trim),
-            Some("编辑 web-01")
-        );
-        assert_eq!(
-            window.find("host-dialog-title").label(),
-            Some("编辑 web-01")
-        );
+        assert_eq!(window.find("modal-title").label(), Some("Edit web-01"));
     });
 }

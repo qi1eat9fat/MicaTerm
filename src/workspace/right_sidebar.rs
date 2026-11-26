@@ -1,11 +1,10 @@
-//! 右侧图标栏（26 号 `.rail`）：左边一条细线加内宽 32（和窗口按钮同宽，图标对着关闭按钮的 ×）、
-//! 标签栏同色的窄条；一列图标（26 宽、图标 17），
-//! 依次是文件、命令片段、凭据。
+//! 右侧面板的入口：照空壳，四个图标并排放在标签栏右侧（文件、片段、凭据、Agent），
+//! 不再用自己的图标栏。
 //!
 //! 「文件」打开或切换到 SFTP 标签（工单 20），不展开面板；在 SFTP 标签里显示成按下的样子（当前所在），
 //! 没有远程文件可开时变灰，悬停说为什么。
-//! 另外两个点一下在右边展开宽 280 的面板，再点一下收起，展开时图标显示成按下的样子。
-//! 凭据下面隔一条细线是「Agent」（Agent CLI 工单 07）：展开宽 440 的 Agent 面板，收起时 Agent 照常在跑。
+//! 片段、凭据点一下在右边展开宽 400 的面板，再点一下收起，展开时图标显示成按下的样子。
+//! Agent 展开宽 400 的 Agent 面板，收起时 Agent 照常在跑。
 //!
 //! 面板左边那条细线可以左右拖（`with_panel`）：三种面板各记各的宽度，收起再展开还是拖到的宽度；
 //! 窗口变宽变窄时面板宽度不变，内容区让出或吃下差额。
@@ -18,12 +17,10 @@ use gpui_kit::*;
 use crate::agent::AGENT_PANEL_WIDTH;
 use crate::app::{CatalogIcon, OpenSftp, ShowAgent, ShowCredentials, ShowSnippets};
 use crate::i18n::t;
+use crate::theme::space;
 use crate::theme::{Tokens, size};
 use crate::ui::icon_button::IconButton;
 use crate::ui::resize::invisible_handle;
-
-/// 图标栏里按钮的边长（`.rail .ib`）。
-const RAIL_BUTTON: Pixels = px(26.);
 
 /// 拖面板时内容区（终端、SFTP……）至少留这么宽。
 const MIN_CONTENT_WIDTH: Pixels = px(240.);
@@ -131,7 +128,7 @@ pub enum FilesButton {
     Unavailable(SharedString),
 }
 
-pub(super) fn render_right_sidebar(
+pub(super) fn render_panel_tools(
     open: Option<RightPanel>,
     files: FilesButton,
     agent: AgentRail,
@@ -139,7 +136,7 @@ pub(super) fn render_right_sidebar(
     tokens: &Tokens,
 ) -> impl IntoElement {
     let button = |id: &'static str, icon: CatalogIcon, label: SharedString| {
-        IconButton::new(id, icon, label).size(RAIL_BUTTON, size::RAIL_ICON)
+        IconButton::new(id, icon, label).sm()
     };
     let files_button = button(
         "right-sidebar-files",
@@ -157,15 +154,11 @@ pub(super) fn render_right_sidebar(
         .id("right-sidebar")
         .test_support()
         .flex()
-        .flex_col()
         .flex_none()
         .items_center()
-        .gap(px(4.))
-        .w(size::RAIL_WIDTH)
-        .py(px(6.))
-        .border_l(size::LINE)
-        .border_color(tokens.line)
-        .bg(tokens.tabbar)
+        .gap(space::SPACE_2)
+        // 右边不留白：分隔线紧挨着 Agent 图标，左边才留 2。
+        .pl(space::SPACE_2)
         .child(files_button.dispatch(Box::new(OpenSftp), target, tokens))
         .child(
             button(
@@ -185,8 +178,6 @@ pub(super) fn render_right_sidebar(
             .pressed(open == Some(RightPanel::Credentials))
             .dispatch(Box::new(ShowCredentials), target, tokens),
         )
-        // 26 号 `.rail .rsep`：和上面三个隔开。
-        .child(div().w(px(16.)).h(size::LINE).my(px(2.)).bg(tokens.line))
         .child(
             div()
                 .relative()
@@ -206,11 +197,11 @@ pub(super) fn render_right_sidebar(
                         .test_support()
                         .aria_label(agent.tooltip.clone())
                         .absolute()
-                        .top(px(1.))
-                        .right(px(1.))
-                        .size(px(9.))
+                        .top(px(2.))
+                        .right(px(2.))
+                        .size(px(7.))
                         .rounded_full()
-                        .border(px(2.))
+                        .border(px(1.5))
                         .border_color(tokens.tabbar)
                         .bg(match dot {
                             RailDot::Attention => tokens.warn,

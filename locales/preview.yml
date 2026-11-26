@@ -4,38 +4,56 @@ _version: 2
 # 部分文案来自 since2006/shell-rs @ b2a307a: locales/explorer.yml
 
 preview.info:
+  en: "%{place} · %{size}"
   zh-CN: "%{place} · %{size}"
 preview.info_image:
+  en: "%{place} · %{size} · %{width}×%{height}"
   zh-CN: "%{place} · %{size} · %{width}×%{height}"
 preview.place_remote:
+  en: "%{host}:%{directory}"
   zh-CN: "%{host}:%{directory}"
 preview.place_local:
+  en: "%{local} · %{directory}"
   zh-CN: "%{local} · %{directory}"
 preview.close:
+  en: Close
   zh-CN: 关闭
 preview.edit:
+  en: Edit
   zh-CN: 编辑
 preview.download:
+  en: Download
   zh-CN: 下载…
 preview.fit:
+  en: Fit to Window
   zh-CN: 适合窗口
 preview.actual_size:
+  en: Actual Size
   zh-CN: 原图
 preview.zoom_in:
+  en: Zoom In
   zh-CN: 放大
 preview.zoom_out:
+  en: Zoom Out
   zh-CN: 缩小
 preview.undecodable:
+  en: Could not display this image
   zh-CN: 无法显示这张图片
 preview.decoding:
+  en: Showing image…
   zh-CN: 正在显示图片…
 preview.refused.title:
+  en: Cannot Preview
   zh-CN: 无法预览
 preview.refused.too_large_image:
+  en: '"%{name}" is %{size}; only images up to %{limit} can be previewed.'
   zh-CN: 「%{name}」有 %{size}，图片只预览 %{limit} 以内的。
 preview.refused.too_large_markdown:
+  en: '"%{name}" is %{size}; only Markdown up to %{limit} can be previewed.'
   zh-CN: 「%{name}」有 %{size}，Markdown 只预览 %{limit} 以内的。
 preview.refused.not_text:
+  en: '"%{name}" is not UTF-8 text; only UTF-8 Markdown can be previewed.'
   zh-CN: 「%{name}」不是 UTF-8 文本文件，Markdown 只预览 UTF-8 文本。
 preview.refused.not_file:
+  en: '"%{name}" is not a regular file and cannot be previewed.'
   zh-CN: 「%{name}」不是普通文件，无法预览。

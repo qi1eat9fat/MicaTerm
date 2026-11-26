@@ -1,51 +1,74 @@
 _version: 2
 workspace.cli.vault_wanted:
+  en: The Agent needs a password or key from the vault to sign in, but the vault is locked. Click to unlock
   zh-CN: Agent 要用保险库里的密码或私钥登录主机，但保险库已锁定。点这里解锁
 workspace.window.minimize:
+  en: Minimize
   zh-CN: 最小化
 workspace.window.maximize:
+  en: Maximize
   zh-CN: 最大化
 workspace.window.restore:
+  en: Restore
   zh-CN: 还原
 workspace.window.close:
+  en: Close
   zh-CN: 关闭
 workspace.title_bar.new_local_terminal:
+  en: New Local Terminal
   zh-CN: 新建本地终端
 workspace.title_bar.to_dark:
+  en: Switch to Dark
   zh-CN: 切换到深色
 workspace.title_bar.to_light:
+  en: Switch to Light
   zh-CN: 切换到浅色
 workspace.title_bar.settings:
+  en: Settings
   zh-CN: 设置
 workspace.host_sidebar.title:
+  en: Hosts
   zh-CN: 主机
 workspace.host_sidebar.expand:
+  en: Expand Hosts Sidebar
   zh-CN: 展开主机栏
 workspace.host_sidebar.collapse:
+  en: Collapse Hosts Sidebar
   zh-CN: 收起主机栏
 workspace.host_sidebar.new_host:
+  en: New Host
   zh-CN: 新建主机
 workspace.host_sidebar.empty:
+  en: No hosts yet
   zh-CN: 还没有主机
 workspace.right_sidebar.files:
+  en: Files
   zh-CN: 文件
 workspace.right_sidebar.snippets:
+  en: Snippets
   zh-CN: 片段
 workspace.right_sidebar.credentials:
+  en: Credentials
   zh-CN: 凭据
 # 开始卡片的最近连接（工单 18）
 # 最近连接每行右边的连接时间（原型「10 分钟前」「今天 09:12」「昨天」「3 天前」）
 
 # 终端的通知和响铃（工单 03）：标题以卡片名称开头
 workspace.notice.titled:
+  en: "%{card}: %{title}"
   zh-CN: "%{card}：%{title}"
 workspace.notice.bell:
+  en: "%{card}: Bell"
   zh-CN: "%{card}：响铃"
 workspace.new_tab.title:
+  en: New Tab
   zh-CN: 新标签页
 workspace.new_tab.new_host:
+  en: New Host
   zh-CN: 新建主机
 workspace.new_tab.local_terminal:
+  en: Local Terminal
   zh-CN: 本地终端
 workspace.right_sidebar.agent:
+  en: Agent
   zh-CN: Agent

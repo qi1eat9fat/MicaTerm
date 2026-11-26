@@ -10,10 +10,7 @@ pub mod shortcuts;
 pub mod win32;
 
 pub use actions::*;
-pub use assets::{
-    AppAssets, CatalogIcon, MARK_ICON, MARK_THIN_ICON, SERVER_PLUS_ICON, TRIANGLE_DOWN_ICON,
-    TRIANGLE_RIGHT_ICON,
-};
+pub use assets::{AppAssets, CatalogIcon, LOGO_IMAGE, MARK_ICON, MARK_THIN_ICON};
 pub use paths::{CLI_BIN_DIR, PROGRAM_FILE, cli_endpoint};
 pub use paths::{DATA_DIR_ENV, DATA_DIR_NAME, SETTINGS_FILE, data_dir, data_dir_of, settings_path};
 pub use paths::{DATABASE_FILE, database_path};

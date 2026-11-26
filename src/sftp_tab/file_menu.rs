@@ -7,7 +7,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use micaterm_ui::Menu;
 
 use super::{CardSide, NewEntryKind, PreviewKind};
-use crate::app::{SftpShortcut, SftpTabCommand, ToggleHiddenFiles};
+use crate::app::{SftpShortcut, SftpTabCommand};
 use crate::i18n::t;
 
 /// 菜单要知道的卡片的事，开菜单时读。
@@ -23,8 +23,6 @@ pub(super) struct CardMenuState {
     pub can_modify: bool,
     /// 现在能开始传输。
     pub can_transfer: bool,
-    /// 这一侧在显示隐藏文件。
-    pub show_hidden: bool,
     /// 这一侧能改权限（Windows 本地不能）。
     pub has_properties: bool,
 }
@@ -114,7 +112,7 @@ pub(super) fn item_menu(menu: Menu, state: &CardMenuState) -> Menu {
     })
 }
 
-/// 空白处的右键：新建文件夹… / 新建文件… / 上传… / 上传文件夹… / 刷新 / 上级目录 / 复制路径 / 显示隐藏文件。
+/// 空白处的右键：新建文件夹… / 新建文件… / 上传… / 上传文件夹… / 刷新 / 上级目录 / 复制路径。
 pub(super) fn directory_menu(menu: Menu, state: &CardMenuState) -> Menu {
     let side = state.side;
     // 远程一侧的「上传…」用原生选择框挑；本地一侧传的是选中的，没选中不能点。
@@ -162,12 +160,6 @@ pub(super) fn directory_menu(menu: Menu, state: &CardMenuState) -> Menu {
     .menu(
         t!("sftp_tab.menu.copy_path"),
         state.action(SftpTabCommand::CopyPath { side }),
-    )
-    .separator()
-    .check(
-        t!("sftp_tab.menu.show_hidden"),
-        state.show_hidden,
-        Box::new(ToggleHiddenFiles(side)),
     )
 }
 
@@ -217,7 +209,7 @@ mod tests {
     fn offers_a_folder(labels: &[String]) -> bool {
         labels
             .windows(2)
-            .any(|pair| pair[0] == "上传…" && pair[1] == "上传文件夹…")
+            .any(|pair| pair[0] == "Upload" && pair[1] == "Upload Folder…")
     }
 
     /// 工单 35：本地卡片空白处和文件上、远程卡片空白处都有「上传文件夹…」；远程文件上是下载，没有它。
@@ -255,7 +247,6 @@ mod tests {
             can_go_up: true,
             can_modify: true,
             can_transfer: true,
-            show_hidden: false,
             has_properties: true,
         }
     }

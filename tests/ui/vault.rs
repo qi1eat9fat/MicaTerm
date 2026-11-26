@@ -49,37 +49,13 @@ fn click(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &'static str) 
     in_frame(cx, handle, move |window, cx| window.click(id, cx));
 }
 
-/// 主机对话框放不下全部字段，要滚动：把它里面的 `id` 滚进看得见的地方（照 `route.rs` 的 `reveal`）。
+/// 主机对话框放不下全部字段，要滚动：把它里面的 `id` 滚进看得见的地方。
 fn reveal(cx: &mut TestAppContext, handle: WindowHandle<Root>, id: &'static str) {
     // 底部按钮不随内容滚动。
     if !id.starts_with("host-") || id.starts_with("host-dialog") {
         return;
     }
-    for _ in 0..40 {
-        let place = in_frame(cx, handle, |window, _| {
-            let target = window.find(id);
-            let Some(dialog) = window.try_find("host-dialog").map(|dialog| dialog.bounds()) else {
-                return (true, false);
-            };
-            let bounds = target.bounds();
-            let shown = target.visible()
-                && bounds.top() >= dialog.top() + px(46.)
-                && bounds.bottom() <= dialog.bottom() - px(60.);
-            (shown, bounds.top() < dialog.center().y)
-        });
-        match place {
-            (true, _) => return,
-            (false, above) => in_frame(cx, handle, |window, cx| {
-                let step = if above { 80. } else { -80. };
-                window.scroll(
-                    "host-dialog",
-                    gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(step))),
-                    cx,
-                )
-            }),
-        }
-    }
-    panic!("{id} 滚不进视野");
+    reveal_in(cx, handle, "host-dialog-body", &id.into());
 }
 
 /// 把字段 `field` 的内容换成 `text`。
@@ -128,7 +104,7 @@ fn the_first_saved_password_asks_for_a_master_password(cx: &mut TestAppContext) 
 
     assert_eq!(
         label(cx, handle, "vault-password-dialog").as_deref(),
-        Some("设置主密码")
+        Some("Set Master Password")
     );
     // 「在本机记住」默认勾选；主机对话框还开着，主机还没存。
     in_frame(cx, handle, |window, _| {
@@ -178,9 +154,12 @@ fn not_setting_a_master_password_still_saves_the_password(cx: &mut TestAppContex
         vault.read(&SecretRef::password(7)).as_deref(),
         Some("hunter2")
     );
-    // 没设主密码：没有锁定这回事，主机栏底部没有锁。
+    // 没设主密码：主机栏底部的锁变灰，点了没反应。
+    assert!(visible(cx, handle, "vault-lock-unavailable"));
     assert!(!visible(cx, handle, "lock-vault"));
     assert!(!visible(cx, handle, "unlock-vault"));
+    click(cx, handle, "vault-lock-unavailable");
+    assert_eq!(vault.status(), VaultStatus::Unprotected);
 
     // 之后再存密码不再问。
     dispatch(cx, handle, EditHost(micaterm_hosts::HostId(1)));
@@ -203,7 +182,7 @@ fn cancelling_the_master_password_keeps_the_host_dialog_open(cx: &mut TestAppCon
     click(cx, handle, "vault-password-confirm");
     assert_eq!(
         label(cx, handle, "vault-master-password-again-error").as_deref(),
-        Some("两次输入的主密码不一样")
+        Some("The two master passwords do not match")
     );
     assert_eq!(vault.status(), VaultStatus::Absent);
 
@@ -226,7 +205,7 @@ fn a_saved_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestApp
     dispatch(cx, handle, EditHost(micaterm_hosts::HostId(1)));
     assert_eq!(
         label(cx, handle, "host-password-locked").as_deref(),
-        Some("已保存，保险库锁定中 · 解锁后修改")
+        Some("Saved; the vault is locked · unlock to edit")
     );
     assert!(!visible(cx, handle, "host-password"));
 
@@ -240,7 +219,7 @@ fn a_saved_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut TestApp
     click(cx, handle, "vault-unlock-confirm");
     assert_eq!(
         label(cx, handle, "vault-unlock-password-error").as_deref(),
-        Some("主密码不对")
+        Some("Incorrect master password")
     );
     assert_eq!(vault.status(), VaultStatus::Locked);
 
@@ -285,7 +264,7 @@ fn a_saved_proxy_password_shows_as_locked_until_the_vault_is_unlocked(cx: &mut T
     reveal(cx, handle, "host-proxy-password-locked");
     assert_eq!(
         label(cx, handle, "host-proxy-password-locked").as_deref(),
-        Some("已保存，保险库锁定中 · 解锁后修改")
+        Some("Saved; the vault is locked · unlock to edit")
     );
     assert!(!visible(cx, handle, "host-proxy-password"));
 
@@ -344,7 +323,7 @@ fn connecting_unlocks_only_when_a_saved_secret_is_needed(cx: &mut TestAppContext
     assert!(visible(cx, handle, "vault-unlock"));
     assert_eq!(
         label(cx, handle, "vault-unlock-reason").as_deref(),
-        Some("连接 web-01 要用保存的密码")
+        Some("Connecting to web-01 needs the saved password")
     );
     assert_eq!(connected_hosts(&remote), vec![2]);
     fill(cx, handle, "vault-unlock-password", MASTER);
@@ -454,7 +433,7 @@ fn cancelling_the_unlock_leaves_that_card_unconnected_and_does_not_ask_again(
     assert!(visible(cx, handle, "vault-unlock"));
     assert_eq!(
         label(cx, handle, "vault-unlock-reason").as_deref(),
-        Some("输入主密码解锁保险库")
+        Some("Enter the master password to unlock the vault")
     );
 }
 
@@ -477,15 +456,23 @@ fn the_lock_button_locks_and_the_next_use_asks_again(cx: &mut TestAppContext) {
     let (handle, _, remote) = open_with_vault(cx, &vault);
     assert_eq!(
         label(cx, handle, "lock-vault").as_deref(),
-        Some("锁定保险库")
+        Some("Lock Vault")
     );
+    // 锁夹在深浅切换和设置之间。
+    in_frame(cx, handle, |window, _| {
+        let theme = window.find("toggle-appearance").bounds();
+        let lock = window.find("lock-vault").bounds();
+        let settings = window.find("open-settings").bounds();
+        assert!(theme.right() <= lock.left(), "锁不在深浅切换右边");
+        assert!(lock.right() <= settings.left(), "锁不在设置左边");
+    });
 
     click(cx, handle, "lock-vault");
     assert_eq!(vault.status(), VaultStatus::Locked);
     assert!(!visible(cx, handle, "lock-vault"));
     assert_eq!(
         label(cx, handle, "unlock-vault").as_deref(),
-        Some("解锁保险库")
+        Some("Unlock Vault")
     );
 
     dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
@@ -517,7 +504,7 @@ fn open_security(cx: &mut TestAppContext, handle: WindowHandle<Root>) {
     in_frame(cx, handle, |window, cx| {
         assert_eq!(
             window.find(("settings-category", 3_usize)).label(),
-            Some("安全")
+            Some("Security")
         );
         window.click(("settings-category", 3_usize), cx);
     });
@@ -543,7 +530,7 @@ fn settings_change_the_master_password(cx: &mut TestAppContext) {
     click(cx, handle, "security-change-master");
     assert_eq!(
         label(cx, handle, "vault-password-dialog").as_deref(),
-        Some("更换主密码")
+        Some("Change Master Password")
     );
     fill(cx, handle, "vault-current-password", "wrong horse");
     fill(cx, handle, "vault-master-password", "battery staple");
@@ -551,7 +538,7 @@ fn settings_change_the_master_password(cx: &mut TestAppContext) {
     click(cx, handle, "vault-password-confirm");
     assert_eq!(
         label(cx, handle, "vault-current-password-error").as_deref(),
-        Some("主密码不对")
+        Some("Incorrect master password")
     );
 
     fill(cx, handle, "vault-current-password", MASTER);
@@ -607,7 +594,7 @@ fn settings_set_a_master_password_later(cx: &mut TestAppContext) {
     click(cx, handle, "security-set-master");
     assert_eq!(
         label(cx, handle, "vault-password-dialog").as_deref(),
-        Some("设置主密码")
+        Some("Set Master Password")
     );
     // 从设置里打开没有「不设置」。
     assert!(!visible(cx, handle, "vault-password-skip"));
@@ -638,8 +625,9 @@ fn settings_reset_the_vault_after_confirming(cx: &mut TestAppContext) {
     assert!(!visible(cx, handle, "vault-reset"));
     assert_eq!(vault.status(), VaultStatus::Absent);
     assert_eq!(vault.read(&web01_password()), None);
-    // 主机保留；主密码清掉了，锁按钮不见了。
+    // 主机保留；主密码清掉了，锁按钮变灰。
     assert_eq!(host_names(cx, &workspace).len(), 6);
+    assert!(visible(cx, handle, "vault-lock-unavailable"));
     assert!(!visible(cx, handle, "lock-vault"));
     assert!(visible(cx, handle, "security-set-master"));
 }
@@ -651,12 +639,14 @@ fn a_vault_from_another_computer_asks_once_and_keeps_the_hosts(cx: &mut TestAppC
         .on_another_computer();
     assert_eq!(vault.status(), VaultStatus::KeyLost);
     let (handle, workspace, remote) = open_with_vault(cx, &vault);
+    // 打不开的保险库：锁变灰。
+    assert!(visible(cx, handle, "vault-lock-unavailable"));
 
     dispatch(cx, handle, ConnectHost(micaterm_hosts::HostId(1)));
     assert_eq!(
         label(cx, handle, "vault-key-lost-text").as_deref(),
         Some(
-            "这个保险库在另一台电脑上创建、没设主密码，这里打不开。重置后清空所有保存的密码、口令和私钥，主机和凭据都保留；不重置就这次现场输入密码。"
+            "This vault was created on another computer without a master password and cannot be opened here. Resetting clears all saved passwords, passphrases and private keys while keeping hosts and credentials; without resetting, enter passwords when connecting this time."
         )
     );
     // 不重置：这次现场询问密码，照样连。

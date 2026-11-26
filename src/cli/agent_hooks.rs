@@ -5,9 +5,11 @@
 //!   按 JSON 改，键的顺序不动。
 //! - Codex：`~/.codex/config.toml` 顶层的一行 `notify = [...]`。按行改，别的行、注释和格式都不动；
 //!   已经有别人的 `notify` 时不碰它，说为什么。
+//! - Antigravity CLI：`~/.gemini/antigravity-cli/hooks.json` 里自己的一组 `micaterm`，
+//!   `PreInvocation`、`PostInvocation`、`Stop` 各一项（2026-11-24 加）。按 JSON 改，别的组不动。
 //!
 //! 改之前把原文件备份成同目录的 `<文件名>.micaterm-backup`。只增删自己那几项（命令里有 `micaterm`
-//! 和 ` hook claude` / ` hook codex` 的）；读不懂的文件不写，说为什么。
+//! 和 ` hook claude` / ` hook codex` / ` hook agy` 的）；读不懂的文件不写，说为什么。
 
 use std::fs;
 use std::io;
@@ -33,14 +35,32 @@ pub enum HookStatus {
 }
 
 /// 能装状态 hook 的 Agent，按设置页的顺序。
-pub const HOOK_AGENTS: [AgentKind; 2] = [AgentKind::ClaudeCode, AgentKind::Codex];
+pub const HOOK_AGENTS: [AgentKind; 3] = [
+    AgentKind::ClaudeCode,
+    AgentKind::Codex,
+    AgentKind::Antigravity,
+];
+
+/// Antigravity CLI 的三个事件：一次调用开始（回合开始）、一次调用结束（回合里还在干）、整个任务结束。
+/// 事件名来自命令行参数，不在载荷里。
+const AGY_EVENTS: [&str; 3] = ["PreInvocation", "PostInvocation", "Stop"];
+
+/// Antigravity CLI 在 hooks.json 里的那一组叫什么。
+const AGY_GROUP: &str = "micaterm";
 
 /// `agent` 的配置文件。
 pub fn hook_file(paths: &IntegrationPaths, agent: AgentKind) -> Option<PathBuf> {
     match agent {
         AgentKind::ClaudeCode => Some(paths.home.join(".claude").join("settings.json")),
         AgentKind::Codex => Some(paths.home.join(".codex").join("config.toml")),
-        AgentKind::Generic | AgentKind::WorkBuddy => None,
+        AgentKind::Antigravity => Some(
+            paths
+                .home
+                .join(".gemini")
+                .join("antigravity-cli")
+                .join("hooks.json"),
+        ),
+        AgentKind::Generic => None,
     }
 }
 
@@ -76,7 +96,27 @@ pub fn hook_status(paths: &IntegrationPaths, agent: AgentKind) -> HookStatus {
             Some((_, line)) => HookStatus::Blocked(foreign_notify(line)),
             None => HookStatus::Missing,
         },
-        AgentKind::Generic | AgentKind::WorkBuddy => HookStatus::Missing,
+        AgentKind::Antigravity => match parse_agy(&text) {
+            Ok(root) => {
+                let installed = AGY_EVENTS.iter().all(|event| {
+                    root.get(AGY_GROUP)
+                        .and_then(|group| group.get(*event))
+                        .and_then(Value::as_array)
+                        .is_some_and(|handlers| {
+                            handlers
+                                .iter()
+                                .any(|handler| handler_is_ours(handler, "agy"))
+                        })
+                });
+                if installed {
+                    HookStatus::Installed
+                } else {
+                    HookStatus::Missing
+                }
+            }
+            Err(error) => HookStatus::Blocked(error.to_string()),
+        },
+        AgentKind::Generic => HookStatus::Missing,
     }
 }
 
@@ -133,7 +173,35 @@ pub fn install_hooks(paths: &IntegrationPaths, agent: AgentKind) -> io::Result<(
             new.push('\n');
             new
         }
-        AgentKind::Generic | AgentKind::WorkBuddy => return Ok(()),
+        AgentKind::Antigravity => {
+            let mut root = parse_agy(&text)?;
+            let group = root
+                .as_object_mut()
+                .expect("parse_agy only returns objects")
+                .entry(AGY_GROUP)
+                .or_insert_with(|| Value::Object(Map::new()));
+            let group = group
+                .as_object_mut()
+                .ok_or_else(|| invalid(&t!("settings.cli.hooks_agy_group_not_object")))?;
+            for event in AGY_EVENTS {
+                let handlers = group
+                    .entry(event)
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                let handlers = handlers.as_array_mut().ok_or_else(|| {
+                    invalid(&t!("settings.cli.hooks_agy_event_not_array", event = event))
+                })?;
+                handlers.retain(|handler| !handler_is_ours(handler, "agy"));
+                // Antigravity 自己把事件名接在命令后面（`… hook agy PreInvocation`），
+                // 所以这里三个事件写同一条命令。
+                handlers.push(json!({
+                    "type": "command",
+                    "command": format!("\"{}\" hook agy", shell_path(&command)),
+                    "timeout": 5
+                }));
+            }
+            pretty(&root)?
+        }
+        AgentKind::Generic => return Ok(()),
     };
     write_with_backup(&file, &text, &new)
 }
@@ -165,7 +233,41 @@ pub fn remove_hooks(paths: &IntegrationPaths, agent: AgentKind) -> io::Result<()
             }
             _ => return Ok(()),
         },
-        AgentKind::Generic | AgentKind::WorkBuddy => return Ok(()),
+        AgentKind::Antigravity => {
+            let mut root = parse_agy(&text)?;
+            let mut changed = false;
+            let empty;
+            {
+                let Some(group) = root.get_mut(AGY_GROUP).and_then(Value::as_object_mut) else {
+                    return Ok(());
+                };
+                for event in AGY_EVENTS {
+                    let Some(handlers) = group.get_mut(event).and_then(Value::as_array_mut) else {
+                        continue;
+                    };
+                    let before = handlers.len();
+                    handlers.retain(|handler| !handler_is_ours(handler, "agy"));
+                    changed |= handlers.len() != before;
+                }
+                group.retain(|_, handlers| {
+                    handlers
+                        .as_array()
+                        .is_none_or(|handlers| !handlers.is_empty())
+                });
+                empty = group.is_empty();
+            }
+            if empty {
+                root.as_object_mut()
+                    .expect("parse_agy only returns objects")
+                    .remove(AGY_GROUP);
+                changed = true;
+            }
+            if !changed {
+                return Ok(());
+            }
+            pretty(&root)?
+        }
+        AgentKind::Generic => return Ok(()),
     };
     write_with_backup(&file, &text, &new)
 }
@@ -202,9 +304,15 @@ fn group_is_ours(group: &Value) -> bool {
 }
 
 fn hook_is_ours(hook: &Value) -> bool {
-    hook.get("command")
+    handler_is_ours(hook, "claude")
+}
+
+/// 某一项 handler 是不是我们为 `source` 装的（Antigravity 的 handlers 直接在事件下面，没有 `hooks` 包一层）。
+fn handler_is_ours(handler: &Value, source: &str) -> bool {
+    handler
+        .get("command")
         .and_then(Value::as_str)
-        .is_some_and(|command| is_ours(command, "claude"))
+        .is_some_and(|command| is_ours(command, source))
 }
 
 /// 读 settings.json：空文件当 `{}`；不是 JSON 对象就说不懂。
@@ -219,6 +327,19 @@ fn parse_claude(text: &str) -> io::Result<Value> {
     }
     if root.get("hooks").is_some_and(|hooks| !hooks.is_object()) {
         return Err(invalid(&t!("settings.cli.hooks_not_object")));
+    }
+    Ok(root)
+}
+
+/// 读 Antigravity CLI 的 hooks.json：空文件当 `{}`；不是 JSON 对象就说不懂。
+fn parse_agy(text: &str) -> io::Result<Value> {
+    if text.trim().is_empty() {
+        return Ok(Value::Object(Map::new()));
+    }
+    let root: Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))
+        .map_err(|error| invalid(&t!("settings.cli.hooks_agy_bad_json", error = error)))?;
+    if !root.is_object() {
+        return Err(invalid(&t!("settings.cli.hooks_agy_not_json_object")));
     }
     Ok(root)
 }
@@ -394,6 +515,65 @@ mod tests {
         assert_eq!(
             hook_status(&paths, AgentKind::ClaudeCode),
             HookStatus::Missing
+        );
+    }
+
+    /// Antigravity CLI（2026-11-24）：自己的一组 `micaterm` 装进 hooks.json，
+    /// 别的组、别的 handler 都不动；移除后和原来一样。
+    #[test]
+    fn antigravity_hooks_go_into_their_own_group() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = paths(root.path());
+        let file = hook_file(&paths, AgentKind::Antigravity).unwrap();
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let original = r#"{
+  "other": {
+    "Stop": [
+      { "type": "command", "command": "say done", "timeout": 5 }
+    ]
+  }
+}
+"#;
+        fs::write(&file, original).unwrap();
+        assert_eq!(
+            hook_status(&paths, AgentKind::Antigravity),
+            HookStatus::Missing
+        );
+
+        install_hooks(&paths, AgentKind::Antigravity).unwrap();
+        install_hooks(&paths, AgentKind::Antigravity).unwrap();
+        assert_eq!(
+            hook_status(&paths, AgentKind::Antigravity),
+            HookStatus::Installed
+        );
+        assert!(
+            PathBuf::from(format!("{}{BACKUP_SUFFIX}", file.display())).is_file(),
+            "改之前备份"
+        );
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(saved["other"]["Stop"][0]["command"], "say done");
+        for event in AGY_EVENTS {
+            let handlers = saved[AGY_GROUP][event].as_array().unwrap();
+            assert_eq!(handlers.len(), 1, "重装不重复：{event}");
+            assert_eq!(handlers[0]["type"], "command");
+            assert!(
+                handlers[0]["command"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with(" hook agy"),
+                "事件名由 Antigravity 自己接在命令后面"
+            );
+        }
+
+        remove_hooks(&paths, AgentKind::Antigravity).unwrap();
+        assert_eq!(
+            hook_status(&paths, AgentKind::Antigravity),
+            HookStatus::Missing
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&fs::read_to_string(&file).unwrap()).unwrap(),
+            serde_json::from_str::<Value>(original).unwrap(),
+            "移除后和原来一样"
         );
     }
 

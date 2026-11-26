@@ -3,7 +3,6 @@
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable as _, FocusableExt as _, Sizable as _, switch::Switch};
 use gpui_kit::*;
 
 use super::AppSettings;
@@ -14,8 +13,9 @@ use crate::cli::{
     SKILL, SkillStatus, hook_file,
 };
 use crate::i18n::t;
-use crate::theme::Tokens;
+use crate::theme::{Tokens, TypeScale};
 use crate::ui::modal::{ModalButtonTone, OnClick, modal_button};
+use crate::ui::toggle::Toggle;
 
 pub(super) fn cli(
     tab: &SettingsTab,
@@ -40,7 +40,13 @@ pub(super) fn cli(
         CliStatus::Off => t!("settings.cli.off"),
     };
     let mut rows = vec![
-        section(t!("settings.cli.section"), None, true, tokens),
+        section(
+            t!("settings.cli.section"),
+            None,
+            true,
+            tokens,
+            TypeScale::current(cx),
+        ),
         row(
             t!("settings.cli.enabled"),
             Some(t!("settings.cli.enabled_description")),
@@ -171,7 +177,13 @@ fn install_rows(
         )
     }));
     let mut rows = vec![
-        section(t!("settings.cli.tools"), None, false, tokens),
+        section(
+            t!("settings.cli.tools"),
+            None,
+            false,
+            tokens,
+            TypeScale::current(cx),
+        ),
         div()
             .id("cli-binary-status")
             .test_support()
@@ -184,7 +196,13 @@ fn install_rows(
                 tokens,
             ))
             .into_any_element(),
-        section(t!("settings.cli.skills"), None, false, tokens),
+        section(
+            t!("settings.cli.skills"),
+            None,
+            false,
+            tokens,
+            TypeScale::current(cx),
+        ),
     ];
     for agent in AgentKind::ALL {
         let skill = status.as_ref().map(|status| status.skill(agent));
@@ -195,12 +213,12 @@ fn install_rows(
             Some(SkillStatus::Missing) => t!("settings.cli.skill_missing"),
             Some(SkillStatus::Outdated) => t!("settings.cli.skill_outdated"),
         };
-        // WorkBuddy 没有能在 Agent 面板里跑的命令，只装 Skill：说清楚，再说本机有没有它。
+        // Antigravity：Skill 装进它 CLI 的目录，那一行再说本机有没有它的命令行（agy）。
         let description = match (agent, &status) {
-            (AgentKind::WorkBuddy, Some(status)) if status.workbuddy_found => {
-                Some(t!("settings.cli.workbuddy_found"))
+            (AgentKind::Antigravity, Some(status)) if status.antigravity_found => {
+                Some(t!("settings.cli.antigravity_found"))
             }
-            (AgentKind::WorkBuddy, Some(_)) => Some(t!("settings.cli.workbuddy_missing")),
+            (AgentKind::Antigravity, Some(_)) => Some(t!("settings.cli.antigravity_missing")),
             _ => agent.description(),
         };
         let note = match description {
@@ -290,6 +308,7 @@ fn install_rows(
         installable,
         busy,
         tokens,
+        TypeScale::current(cx),
     ));
     rows
 }
@@ -303,12 +322,14 @@ fn hook_rows(
     installable: bool,
     busy: bool,
     tokens: &Tokens,
+    scale: TypeScale,
 ) -> Vec<AnyElement> {
     let mut rows = vec![section(
         t!("settings.cli.hooks"),
         Some(t!("settings.cli.hooks_description")),
         false,
         tokens,
+        scale,
     )];
     for agent in HOOK_AGENTS {
         let hooks = status.map(|status| status.hooks(agent));
@@ -318,21 +339,24 @@ fn hook_rows(
             .unwrap_or_default();
         let note = match &hooks {
             Some(HookStatus::Blocked(reason)) => reason.clone().into(),
-            _ if agent == AgentKind::ClaudeCode => {
-                t!("settings.cli.hooks_claude", file = file.as_str())
-            }
-            _ => t!("settings.cli.hooks_codex", file = file.as_str()),
+            _ => match agent {
+                AgentKind::ClaudeCode => t!("settings.cli.hooks_claude", file = file.as_str()),
+                AgentKind::Antigravity => {
+                    t!("settings.cli.hooks_antigravity", file = file.as_str())
+                }
+                _ => t!("settings.cli.hooks_codex", file = file.as_str()),
+            },
         };
         let checked = hooks == Some(HookStatus::Installed);
         let integration = integration.clone();
-        let switch = Switch::new(SharedString::from(format!("cli-hooks-{}", agent.key())))
-            .small()
-            .focus_ring(false)
-            .checked(checked)
-            .disabled(!installable || busy || hooks.is_none())
-            .accessibility_label(agent.label())
-            .on_click(move |checked: &bool, window, cx| {
-                let change = if *checked {
+        let switch = Toggle::new(
+            SharedString::from(format!("cli-hooks-{}", agent.key())),
+            agent.label(),
+            checked,
+        )
+        .disabled(!installable || busy || hooks.is_none())
+        .on_click(move |checked, window, cx| {
+            let change = if checked {
                     IntegrationChange::InstallHooks(agent)
                 } else {
                     IntegrationChange::RemoveHooks(agent)

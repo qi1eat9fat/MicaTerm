@@ -1,11 +1,13 @@
-//! 表格（26 号 SFTP `.sf-hd` / `.sf-r`，照 Zed `ui/components/data_table.rs`）：SFTP 文件列表和
-//! 传输队列共用这一种，没有别的表格实现。
+//! Shared virtualized table & list rows (aligned with Muxy's inset rounded list language and
+//! `docs/ui-standard.md` §4.9): shared by SFTP file lists and the transfer queue.
 //!
-//! - 表头一行高 28、下边一条 `--line`、`--st-dim` 字；排序的那一列是 `--text2`，后面一个 10 的小箭头。
-//! - 行高 26、没有行线；悬停一层 `--hover`，选中 `--sel`（列表没有焦点时选中退成 `--hover`）。
-//! - 单元格左右留 8，每行第一格左边 12；列宽是一列占剩下的（`Fill`）加几列定宽，表头和行用同一套，
-//!   所以上下对齐。放不下的文字截断成省略号。
-//! - 行在 `uniform_list` 里（只画看得见的），右边一条滚动条，从表头下面开始。
+//! - Header row: `24px` tall (`size::TABLE_HEADER`), `11px Regular` (`TypeScale::sm`), bottom
+//!   `1px` hairline (`tokens.line`), `4px` horizontal inset matching body rows; active sorted
+//!   column uses `tokens.text` with a `10px` brand chevron.
+//! - Body rows: `26px` tall (`size::TABLE_ROW`), `4px` horizontal list inset, `6px` (`RADIUS_MD`)
+//!   rounded hover/selection fill (`tokens.hover` / `tokens.sel`, falling back to `tokens.tab_active`
+//!   when the pane is unfocused), zero row divider lines.
+//! - Virtualized via `uniform_list` with an overlay vertical `Scrollbar`.
 
 use std::ops::Range;
 
@@ -14,29 +16,32 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use crate::theme::{Tokens, size};
+use crate::theme::{Tokens, TypeScale, WEIGHT_NORMAL, size};
 
-/// 表头的高（`.sf-hd`）。
-pub const HEADER_HEIGHT: Pixels = px(28.);
-/// 一行的高（`.sf-r`）。
-pub const ROW_HEIGHT: Pixels = px(26.);
-/// 单元格左右的边距；每行第一格左边是 12。
+/// Table header height (`24px`, same as the tab bar and pane header).
+pub const HEADER_HEIGHT: Pixels = size::TABLE_HEADER;
+/// Uniform row height (`26px`).
+pub const ROW_HEIGHT: Pixels = size::TABLE_ROW;
+/// Horizontal inset around rounded rows and matching header alignment (`4px`, Muxy `mx-1`).
+pub const ROW_INSET: Pixels = px(4.);
+/// Horizontal cell padding; first cell gets `8px` inside the `4px` inset (`12px` from pane edge).
 const CELL_PADDING: Pixels = px(8.);
-const FIRST_CELL_PADDING: Pixels = px(12.);
-/// 行列表上面留 2（`.sf-list` 的 padding-top）。
-const LIST_TOP: Pixels = px(2.);
-/// 表头排序箭头的边长和它离标题的距离。
+const FIRST_CELL_PADDING: Pixels = px(8.);
+/// Top breathing room above the first row (`3px`) and bottom padding (`4px`).
+const LIST_TOP: Pixels = px(3.);
+const LIST_BOTTOM: Pixels = px(4.);
+/// Sort indicator chevron size.
 const SORT_ICON: Pixels = px(10.);
 
-/// 一列多宽。
+/// Column width policy.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ColumnWidth {
-    /// 占剩下的宽度（一张表只有一列这样）。
+    /// Expands to take remaining width (one `Fill` column per table).
     Fill,
     Fixed(Pixels),
 }
 
-/// 格子里的东西靠哪边。
+/// Horizontal cell alignment.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Align {
     #[default]
@@ -45,17 +50,17 @@ pub enum Align {
     Right,
 }
 
-/// 一列：键（元素 id `column:键`）、标题、宽度、对齐。
+/// Column definition: key (`column:<key>`), title, width, and alignment.
 #[derive(Clone, Debug)]
 pub struct TableColumn {
     pub key: &'static str,
     pub title: SharedString,
     pub width: ColumnWidth,
-    /// 行里格子的对齐。
+    /// Cell alignment inside data rows.
     pub align: Align,
-    /// 表头的对齐，默认和格子一样。
+    /// Header cell alignment (defaults to `align`).
     pub header_align: Align,
-    /// 格子不留左右边距：里面的东西自己摆（队列的折叠箭头）。
+    /// Omit default cell horizontal padding when the caller positions its own control.
     pub bare: bool,
 }
 
@@ -71,14 +76,14 @@ impl TableColumn {
         }
     }
 
-    /// 格子和表头都靠右（大小、数字）。
+    /// Right-align both data cells and header (for numeric columns like Size).
     pub fn right(mut self) -> Self {
         self.align = Align::Right;
         self.header_align = Align::Right;
         self
     }
 
-    /// 表头另外的对齐。
+    /// Override header alignment independently.
     pub fn header(mut self, align: Align) -> Self {
         self.header_align = align;
         self
@@ -90,7 +95,7 @@ impl TableColumn {
     }
 }
 
-/// 第 `index` 列的格子：宽、边距、对齐，里面一行放不下就截断。
+/// Sized cell box for column `index`.
 fn sized(column: &TableColumn, index: usize, align: Align) -> Div {
     let cell = div()
         .flex()
@@ -120,26 +125,26 @@ fn sized(column: &TableColumn, index: usize, align: Align) -> Div {
     }
 }
 
-/// 行里第 `index` 列的格子。
+/// Data cell for column `index`.
 pub fn cell(columns: &[TableColumn], index: usize) -> Div {
     let column = &columns[index];
     sized(column, index, column.align)
 }
 
-/// 行里第 `index` 列的格子，放一段会截断的文字。
+/// Data cell containing a single truncated text string.
 pub fn text_cell(columns: &[TableColumn], index: usize, text: impl Into<SharedString>) -> Div {
     cell(columns, index).child(div().min_w_0().truncate().child(text.into()))
 }
 
-/// 排序的方向。
+/// Sort direction for a column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortDirection {
     Ascending,
     Descending,
 }
 
-/// 表头第 `index` 列（元素 id `column:键`）；`sorted` 是这一列按什么排（不是排序的那一列就是 `None`）。
-/// 点击由调用方加，调用方最后加 `.test_support()`。
+/// Header cell for column `index` (`id = "column:<key>"`).
+/// Caller attaches click handler if sortable and finishes with `.test_support()`.
 pub fn header_cell(
     columns: &[TableColumn],
     index: usize,
@@ -147,14 +152,19 @@ pub fn header_cell(
     tokens: &Tokens,
 ) -> Stateful<Div> {
     let column = &columns[index];
+    let hover_color = tokens.text2;
     sized(column, index, column.header_align)
         .id(ElementId::Name(format!("column:{}", column.key).into()))
         .aria_label(column.title.clone())
-        .gap(px(3.))
+        .gap(px(4.))
         .text_color(if sorted.is_some() {
-            tokens.text2
+            tokens.text
         } else {
             tokens.st_dim
+        })
+        .when(!column.title.is_empty(), |cell| {
+            cell.cursor_pointer()
+                .hover(move |style| style.text_color(hover_color))
         })
         .child(div().min_w_0().truncate().child(column.title.clone()))
         .when_some(sorted, |cell, sorted| {
@@ -164,31 +174,35 @@ pub fn header_cell(
                     SortDirection::Descending => IconName::ChevronDown,
                 })
                 .size(SORT_ICON)
-                .flex_none(),
+                .flex_none()
+                .text_color(tokens.brand),
             )
         })
 }
 
-/// 表头那一行，放 `header_cell`。
-pub fn header_row(tokens: &Tokens) -> Div {
+/// Table header row (`28px` tall, `11px Regular`, `4px` horizontal inset to align with body rows).
+pub fn header_row(tokens: &Tokens, scale: TypeScale) -> Div {
     div()
         .flex()
         .flex_none()
         .w_full()
         .h(HEADER_HEIGHT)
+        .px(ROW_INSET)
         .border_b(size::LINE)
         .border_color(tokens.line)
+        .text_size(scale.sm)
+        .font_weight(WEIGHT_NORMAL)
 }
 
-/// 一行怎么显示。
+/// Visual selection and focus state for a row.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RowState {
     pub selected: bool,
-    /// 表格有焦点：选中才是 `--sel`，不然退成 `--hover`。
+    /// Whether the owning pane/list currently holds focus (`tokens.sel` vs `tokens.tab_active`).
     pub focused: bool,
 }
 
-/// 一行（26 高、悬停有底色、选中 `--sel`），放 `cell` / `text_cell`。调用方最后加 `.test_support()`。
+/// Inset rounded row (`26px` tall, `RADIUS_MD = 6px`). Caller finishes with `.test_support()`.
 pub fn row(id: impl Into<ElementId>, state: RowState, tokens: &Tokens) -> Stateful<Div> {
     let hover = tokens.hover;
     div()
@@ -197,6 +211,7 @@ pub fn row(id: impl Into<ElementId>, state: RowState, tokens: &Tokens) -> Statef
         .flex_none()
         .w_full()
         .h(ROW_HEIGHT)
+        .rounded(size::RADIUS_MD)
         .text_color(tokens.label)
         .map(|row| match state {
             RowState {
@@ -206,12 +221,14 @@ pub fn row(id: impl Into<ElementId>, state: RowState, tokens: &Tokens) -> Statef
             RowState {
                 selected: true,
                 focused: false,
-            } => row.bg(hover),
+            } => row
+                .bg(tokens.tab_active)
+                .hover(move |style| style.bg(hover)),
             _ => row.hover(move |style| style.bg(hover)),
         })
 }
 
-/// 表格的行列表：只画看得见的行，`render` 给出 `range` 那几行。
+/// Virtualized row list with `4px` horizontal inset matching `header_row`.
 pub fn body<V: 'static>(
     id: impl Into<ElementId>,
     count: usize,
@@ -223,14 +240,21 @@ pub fn body<V: 'static>(
         .track_scroll(scroll)
         .flex_1()
         .min_h_0()
+        .px(ROW_INSET)
         .pt(LIST_TOP)
+        .pb(LIST_BOTTOM)
 }
 
-/// 行列表的滚动条：贴着右边，从表头下面开始。放在表格容器（`relative`）里最后。
+/// Overlay vertical scrollbar starting below `HEADER_HEIGHT`.
 pub fn scrollbar(scroll: &UniformListScrollHandle) -> impl IntoElement {
+    scrollbar_from(HEADER_HEIGHT, scroll)
+}
+
+/// Overlay vertical scrollbar starting at `top` (use `px(0.)` for headerless lists).
+pub fn scrollbar_from(top: Pixels, scroll: &UniformListScrollHandle) -> impl IntoElement {
     div()
         .absolute()
-        .top(HEADER_HEIGHT)
+        .top(top)
         .right_0()
         .bottom_0()
         .w(Scrollbar::width())

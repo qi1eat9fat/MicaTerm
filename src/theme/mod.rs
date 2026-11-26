@@ -1,33 +1,57 @@
-//! 视觉常量：颜色 token（`tokens`）、尺寸（`size`）、字号（`TypeScale`）和字体。
+//! Visual design tokens: color (`Tokens`), dimensions (`size`, `space`), interaction
+//! opacity (`opacity`), typography (`TypeScale`), elevation shadows (`Elevation`), and fonts.
 //!
-//! 颜色取自 Ayu 主题（见 `tokens`）；尺寸和字号仍按 26 号逐屏原型的换算表（见 `size`、`type_scale`）。
-//! 规则：业务代码里不写颜色、尺寸和字号数字，都从这里取。
+//! See `docs/ui-standard.md` for the full specification. Feature modules must consume values
+//! from here instead of hardcoding colors, font sizes, radii, or shadows.
 
 pub mod code_colors;
 mod component;
+pub mod elevation;
+pub mod opacity;
 pub mod size;
+pub mod space;
 mod tokens;
 mod type_scale;
 
 pub use component::{DARK_THEME_NAME, LIGHT_THEME_NAME, component_theme, component_theme_name};
+pub use elevation::Elevation;
 pub use tokens::Tokens;
+pub(crate) use tokens::{dark_ink_on, on_color};
 pub use type_scale::{INTERFACE_FONT_SIZE, TypeScale, ui_text};
 
-use gpui_kit::{FontWeight, Pixels};
+use gpui_kit::{Font, FontFallbacks, FontWeight, Pixels, font};
 
-/// 界面字体：中英文都用 HarmonyOS Sans SC（用户定）。本机有 300 / 400 / 500 / 700，没有 600。
-pub const UI_FONT_FAMILY: &str = "HarmonyOS Sans SC";
-/// 等宽字体：终端、编辑器、快捷键、等宽小字，Maple Mono 的 CN 版自带中文（用户定）。
+/// Primary UI font family: Instrument Sans (bundled 400 / 600).
+pub const UI_FONT_FAMILY: &str = "Instrument Sans";
+
+/// Explicit CJK fallback for user data containing Chinese characters.
+///
+/// Microsoft YaHei UI has no 500 face and DirectWrite resolves a 500 request to Semibold 600
+/// (unlike CSS, which falls back to 400), so every medium-weight Chinese label looked bold.
+/// The UI therefore only uses two weights (400 / 600): see `WEIGHT_NORMAL` / `WEIGHT_SEMIBOLD`.
+pub const UI_FONT_FALLBACK: &str = "Microsoft YaHei UI";
+
+/// Monospace font family: Maple Mono Normal NL NF CN (terminal, editor, shortcuts, paths, IPs).
 pub const MONO_FONT_FAMILY: &str = micaterm_terminal::DEFAULT_FONT_FAMILY;
 
-/// 字重只用两种：正文 400，标题和强调 500。主机栏一律 400。
-/// HarmonyOS Sans SC 没有 600，写 600 会落到 Bold。
+/// Font weights (2 tiers: 400 / 600).
+///
+/// There is deliberately no 500 tier: DirectWrite maps a 500 request to YaHei UI's Semibold face
+/// for Chinese, which looks much heavier than Instrument Sans Medium. Emphasis comes from size
+/// and color instead.
 pub const WEIGHT_NORMAL: FontWeight = FontWeight::NORMAL;
-pub const WEIGHT_MEDIUM: FontWeight = FontWeight::MEDIUM;
+pub const WEIGHT_SEMIBOLD: FontWeight = FontWeight::SEMIBOLD;
 
-/// 同一行里两段不同字体、字号的文字（如 12 的界面字 + 11.5 的 Maple Mono 快捷键）都设成行高
-/// `line_height`、盒子居中时，要把 `to` 那段往下挪多少，两者的基线才对齐（ui-lessons 第四节第 3 条：
-/// 按字形度量算，不写死像素）。GPUI 把字形盒在行高里上下居中，基线在 `(行高 − 上伸 − 下伸) / 2 + 上伸`。
+/// Root UI font with explicit CJK fallback attached.
+pub fn ui_font() -> Font {
+    Font {
+        fallbacks: Some(FontFallbacks::from_fonts(vec![UI_FONT_FALLBACK.into()])),
+        ..font(UI_FONT_FAMILY)
+    }
+}
+
+/// Computes the vertical offset needed to align the baseline of `to` to `from` within a shared
+/// `line_height` box.
 pub fn baseline_shift(
     window: &gpui_kit::Window,
     from: (&'static str, Pixels),
@@ -36,7 +60,7 @@ pub fn baseline_shift(
 ) -> Pixels {
     let text = window.text_system();
     let baseline = |(family, size): (&'static str, Pixels)| {
-        let id = text.resolve_font(&gpui_kit::font(family));
+        let id = text.resolve_font(&font(family));
         text.baseline_offset(id, size, line_height)
     };
     baseline(from) - baseline(to)

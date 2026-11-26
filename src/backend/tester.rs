@@ -304,14 +304,17 @@ mod tests {
             key_changed: true,
             ..HostTrust::default()
         };
-        assert!(describe_test_failure(&error, changed).starts_with("主机密钥与已保存的不一致"));
+        assert!(
+            describe_test_failure(&error, changed)
+                .starts_with("The host key does not match the saved one")
+        );
         let declined = HostTrust {
             declined: true,
             ..HostTrust::default()
         };
         assert_eq!(
             describe_test_failure(&error, declined),
-            "未信任该主机的密钥"
+            "The host's key was not trusted"
         );
     }
 }

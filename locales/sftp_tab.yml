@@ -4,127 +4,192 @@ _version: 2
 # 部分文案来自 since2006/shell-rs @ b2a307a: locales/explorer.yml
 
 sftp_tab.local_name:
+  en: This Computer
   zh-CN: 本机
 sftp_tab.kind.folder:
+  en: Folder
   zh-CN: 文件夹
 sftp_tab.kind.file:
+  en: File
   zh-CN: 文件
 sftp_tab.kind.link:
+  en: Link
   zh-CN: 链接
 sftp_tab.kind.parent:
+  en: Parent Directory
   zh-CN: 上级目录
 sftp_tab.kind.extension:
+  en: "%{ext} file"
   zh-CN: "%{ext} 文件"
 sftp_tab.column.name:
+  en: Name
   zh-CN: 名称
 sftp_tab.column.size:
+  en: Size
   zh-CN: 大小
 sftp_tab.column.type:
+  en: Type
   zh-CN: 类型
 sftp_tab.column.modified:
+  en: Modified
   zh-CN: 修改时间
 sftp_tab.column.rights:
+  en: Permissions
   zh-CN: 权限
 sftp_tab.column.owner:
+  en: Owner
   zh-CN: 所有者
 sftp_tab.list.connecting:
+  en: Connecting to SFTP…
   zh-CN: 正在连接 SFTP…
 sftp_tab.list.reading:
+  en: Reading directory…
   zh-CN: 正在读取目录…
-sftp_tab.list.only_hidden:
-  zh-CN: 只有隐藏文件
 sftp_tab.list.empty:
+  en: Empty folder
   zh-CN: 空目录
 sftp_tab.list.not_connected:
+  en: Not Connected
   zh-CN: 未连接
 sftp_tab.list.unreadable:
+  en: Cannot read this directory
   zh-CN: 无法读取目录
 sftp_tab.list.read_failed:
+  en: "Cannot read this directory: %{error}"
   zh-CN: 无法读取目录：%{error}
 sftp_tab.path.hint:
+  en: Enter to switch · Esc to cancel
   zh-CN: 回车切换 · Esc 取消
 sftp_tab.status.items_selected:
+  en: "%{count} items · %{selected} selected"
+  zh-CN: "%{count} 项 · 已选 %{selected} 项"
+sftp_tab.status.items_selected_one:
+  en: "%{count} item · %{selected} selected"
   zh-CN: "%{count} 项 · 已选 %{selected} 项"
 sftp_tab.status.opening:
+  en: Opening %{name}…
   zh-CN: 正在打开 %{name}…
 sftp_tab.status.connecting:
+  en: Connecting
   zh-CN: 正在连接
 sftp_tab.status.disconnected:
+  en: Disconnected
   zh-CN: 已断开
 sftp_tab.drag.upload:
+  en: "Upload %{count} items"
+  zh-CN: 上传 %{count} 项
+sftp_tab.drag.upload_one:
+  en: "Upload %{count} item"
   zh-CN: 上传 %{count} 项
 sftp_tab.drag.download:
+  en: "Download %{count} items"
+  zh-CN: 下载 %{count} 项
+sftp_tab.drag.download_one:
+  en: "Download %{count} item"
   zh-CN: 下载 %{count} 项
 sftp_tab.menu.edit:
+  en: Edit
   zh-CN: 编辑
 sftp_tab.menu.preview:
+  en: Preview
   zh-CN: 预览
 sftp_tab.menu.upload:
+  en: Upload
   zh-CN: 上传…
 sftp_tab.menu.download:
+  en: Download
   zh-CN: 下载…
 sftp_tab.menu.copy_path:
+  en: Copy Path
   zh-CN: 复制路径
 sftp_tab.menu.delete:
+  en: Delete
   zh-CN: 删除
 sftp_tab.menu.rename:
+  en: Rename…
   zh-CN: 重命名…
 sftp_tab.menu.properties:
+  en: Properties…
   zh-CN: 属性…
 sftp_tab.menu.new_folder:
+  en: New Folder…
   zh-CN: 新建文件夹…
 sftp_tab.menu.new_file:
+  en: New File…
   zh-CN: 新建文件…
 sftp_tab.menu.refresh:
+  en: Refresh
   zh-CN: 刷新
 sftp_tab.menu.up:
+  en: Parent Directory
   zh-CN: 上级目录
-sftp_tab.menu.show_hidden:
-  zh-CN: 显示隐藏文件
 sftp_tab.connection.start_failed:
+  en: "Could not start SFTP: %{error}"
   zh-CN: 无法启动 SFTP：%{error}
 sftp_tab.connection.lost:
+  en: SFTP Disconnected
   zh-CN: SFTP 已断开
 sftp_tab.connection.lost_title:
+  en: "The SFTP connection to %{name} was closed"
   zh-CN: 与 %{name} 的 SFTP 连接已断开
 sftp_tab.connection.lost_reconnect:
+  en: "%{reason}. Reconnect before working with remote files."
   zh-CN: "%{reason}。重新连接后再操作远程文件。"
 sftp_tab.connection.lost_stopped_batch:
+  en: "%{reason}. The transfer queue has a stopped batch; click Resume on it to reconnect and continue."
   zh-CN: "%{reason}。传输队列里有停止的批次，点它的「继续」会重新连接并接着传输。"
 sftp_tab.connection.lost_reconnecting:
+  en: "%{reason}. The transfer is reconnecting on its own."
   zh-CN: "%{reason}。传输正在自己重新连接。"
 sftp_tab.connection.reconnect:
+  en: Reconnect
   zh-CN: 重新连接
 sftp_tab.connection.cancel:
+  en: Cancel
   zh-CN: 取消
 sftp_tab.connection.ok:
+  en: OK
   zh-CN: 确定
 sftp_tab.files.open:
+  en: Open SFTP Tab
   zh-CN: 打开 SFTP 标签
 sftp_tab.files.local_card:
+  en: A local terminal has no remote files
   zh-CN: 本地终端没有远程文件
 sftp_tab.files.no_remote_files:
+  en: The current tab has no remote files
   zh-CN: 当前标签没有远程文件
 sftp_tab.close.title_one:
+  en: Close SFTP Tab
   zh-CN: 关闭 SFTP 标签
 sftp_tab.close.title_many:
+  en: Close Tabs
   zh-CN: 关闭标签
 sftp_tab.close.transfers:
+  en: "%{name} still has %{count} unfinished transfer batches%{detail}."
   zh-CN: "%{name} 还有 %{count} 批传输没完成%{detail}。"
 sftp_tab.close.detail:
+  en: " (%{file}, %{percent})"
   zh-CN: （%{file}，%{percent}）
 sftp_tab.close.detail_file:
+  en: " (%{file})"
   zh-CN: （%{file}）
 sftp_tab.close.transfers_note:
+  en: Closing clears the queue; resume records are kept, and the next transfer of the same file will ask whether to resume.
   zh-CN: 关闭后队列清空；续传记录保留，下次传同一个文件会问是否续传。
 sftp_tab.close.unsaved:
+  en: '"%{name}" has unsaved changes and will close too.'
   zh-CN: 「%{name}」有未保存的修改，也会一起关闭。
 sftp_tab.close.cancel:
+  en: Cancel
   zh-CN: 取消
 sftp_tab.close.confirm:
+  en: Close
   zh-CN: 关闭
 sftp_tab.connection.no_resume_folder:
+  en: "The data folder could not be found; this transfer will not record resume progress and cannot continue after a drop: %{error}"
   zh-CN: 找不到数据目录，这次的传输不会记续传记录，断了不能接着传：%{error}
 # 上传文件夹（工单 35）
 sftp_tab.menu.upload_folder:
+  en: Upload Folder…
   zh-CN: 上传文件夹…

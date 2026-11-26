@@ -16,8 +16,10 @@ use crate::app::{
 };
 use crate::i18n::t;
 use crate::settings::segmented;
-use crate::theme::{Tokens, TypeScale, ui_text};
+use crate::theme::space;
+use crate::theme::{Tokens, TypeScale, WEIGHT_SEMIBOLD, size, ui_text};
 use crate::ui::DialogLayer;
+use crate::ui::icon_button::IconButton;
 
 /// 预览读的图片不能比这大。
 pub const IMAGE_LIMIT: u64 = 20 * 1024 * 1024;
@@ -163,7 +165,7 @@ impl PreviewDialog {
         }
     }
 
-    /// 「下载…」：确认框叠在预览上面，取消了回到预览。
+    /// 「下载」：直接下载到本地一侧的当前目录，预览留着。
     fn download(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(action) = &self.download {
             self.dispatch.dispatch_sftp_action(action, window, cx);
@@ -214,21 +216,26 @@ impl PreviewDialog {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(6.))
+            .gap(space::SPACE_6)
             .child(segmented(
                 "preview-zoom-mode",
                 vec![t!("preview.fit"), t!("preview.actual_size")],
                 image.mode(),
                 choose_mode,
                 tokens,
+                TypeScale::current(cx),
             ))
-            .child(tool_icon(
-                "preview-zoom-out",
-                CatalogIcon::ZoomOut,
-                t!("preview.zoom_out"),
-                tokens,
-                cx.listener(|this, _, _, cx| this.with_image(cx, ImageView::step_out)),
-            ))
+            .child(
+                IconButton::new(
+                    "preview-zoom-out",
+                    CatalogIcon::ZoomOut,
+                    t!("preview.zoom_out"),
+                )
+                .on_click(
+                    cx.listener(|this, _, _, cx| this.with_image(cx, ImageView::step_out)),
+                    tokens,
+                ),
+            )
             .child(
                 div()
                     .id("preview-zoom")
@@ -240,13 +247,17 @@ impl PreviewDialog {
                     .text_color(tokens.faint)
                     .child(zoom),
             )
-            .child(tool_icon(
-                "preview-zoom-in",
-                CatalogIcon::ZoomIn,
-                t!("preview.zoom_in"),
-                tokens,
-                cx.listener(|this, _, _, cx| this.with_image(cx, ImageView::step_in)),
-            ))
+            .child(
+                IconButton::new(
+                    "preview-zoom-in",
+                    CatalogIcon::ZoomIn,
+                    t!("preview.zoom_in"),
+                )
+                .on_click(
+                    cx.listener(|this, _, _, cx| this.with_image(cx, ImageView::step_in)),
+                    tokens,
+                ),
+            )
     }
 
     /// 标题行（原型 `.dh`）：文件名、灰字、工具、「编辑」「下载…」、关闭。
@@ -259,10 +270,10 @@ impl PreviewDialog {
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(8.))
+            .gap(space::SPACE_8)
             .h(px(46.))
             .pl(px(18.))
-            .pr(px(8.))
+            .pr(space::SPACE_8)
             .child(
                 div()
                     .min_w_0()
@@ -272,7 +283,7 @@ impl PreviewDialog {
                     .whitespace_nowrap()
                     .text_ellipsis()
                     .text_size(TypeScale::current(cx).title)
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_weight(WEIGHT_SEMIBOLD)
                     .child(self.name.clone()),
             )
             .child({
@@ -309,13 +320,12 @@ impl PreviewDialog {
                     cx.listener(|this, _, window, cx| this.download(window, cx)),
                 ))
             })
-            .child(div().ml(px(6.)).child(tool_icon(
-                "preview-close",
-                IconName::Close,
-                t!("preview.close"),
-                tokens,
-                cx.listener(|this, _, window, cx| this.close(window, cx)),
-            )))
+            .child(div().ml(space::SPACE_6).child(
+                IconButton::new("preview-close", IconName::Close, t!("preview.close")).on_click(
+                    cx.listener(|this, _, window, cx| this.close(window, cx)),
+                    tokens,
+                ),
+            ))
     }
 }
 
@@ -327,7 +337,7 @@ impl Render for PreviewDialog {
         let body = match &self.body {
             PreviewBody::Image(image) => image.render_frame(&tokens, window, cx).into_any_element(),
             PreviewBody::Markdown(text) => {
-                render_markdown(&self.name, text, TypeScale::current(cx).side).into_any_element()
+                render_markdown(&self.name, text, TypeScale::current(cx).emphasis).into_any_element()
             }
         };
         div()
@@ -409,33 +419,7 @@ fn decode(image: Image, cx: &mut Context<PreviewDialog>) -> Task<()> {
     })
 }
 
-/// 头部的图标按钮（原型 `.ib`）。
-fn tool_icon<I: Into<Icon>, F: Fn(&ClickEvent, &mut Window, &mut App) + 'static>(
-    id: &'static str,
-    icon: I,
-    label: SharedString,
-    tokens: &Tokens,
-    on_click: F,
-) -> impl IntoElement + use<I, F> {
-    let (hover, text) = (tokens.hover, tokens.text);
-    div()
-        .id(id)
-        .test_support()
-        .aria_label(label)
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(26.))
-        .rounded(px(10.))
-        .text_color(tokens.icon)
-        .cursor_pointer()
-        .hover(move |style| style.bg(hover).text_color(text))
-        .on_click(on_click)
-        .child(icon.into().size(px(15.)))
-}
-
-/// 头部带字的按钮（原型 `.btn.sm`）。
+/// 头部带字的按钮。
 fn tool_button<F: Fn(&ClickEvent, &mut Window, &mut App) + 'static>(
     id: &'static str,
     icon: CatalogIcon,
@@ -451,17 +435,17 @@ fn tool_button<F: Fn(&ClickEvent, &mut Window, &mut App) + 'static>(
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(6.))
-        .h(px(26.))
-        .px(px(10.))
-        .rounded(px(13.))
+        .gap(space::SPACE_6)
+        .h(size::CONTROL_MD)
+        .px(space::SPACE_10)
+        .rounded(size::RADIUS_MD)
         .bg(tokens.hover)
         .text_size(ui_text())
         .whitespace_nowrap()
         .cursor_pointer()
         .hover(move |style| style.bg(pressed))
         .on_click(on_click)
-        .child(Icon::new(icon).size(px(14.)))
+        .child(Icon::new(icon).size(size::ICON_MD))
         .child(label)
 }
 
@@ -477,14 +461,13 @@ pub(super) fn open_preview_dialog(
     let focus = view.read(cx).focus_handle.clone();
     layer.open_dismissable(
         move |dialog, window, _| {
-            // 原型 `.pv`：四周留白，占窗口大部分。
             let viewport = window.viewport_size();
             dialog
                 .w((viewport.width - px(120.)).max(px(320.)))
                 .h((viewport.height - px(80.)).max(px(320.)))
                 .margin_top(px(40.))
                 .p_0()
-                .rounded(px(14.))
+                .rounded(size::RADIUS_MODAL)
                 .close_button(false)
                 .overlay_closable(false)
                 // 放进 `content` 而不是 `child`：`child` 放在对话框体的滚动区里（gpui-kit 0.9 起

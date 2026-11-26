@@ -1,95 +1,136 @@
 _version: 2
 
-# 来自 since2006/shell-rs @ b2a307a: locales/terminal.yml（只留 zh-CN，去掉不拷的功能的键）
+# 来自 since2006/shell-rs @ b2a307a: locales/terminal.yml（只留界面语言，去掉不拷的功能的键）
 
 terminal.notice.exited_signal:
+  en: "Process exited: %{signal}, exit code %{code}"
   zh-CN: 进程已退出：%{signal}，退出码 %{code}
 terminal.notice.exited:
+  en: "Process exited with code %{code}"
   zh-CN: 进程已退出，退出码 %{code}
 terminal.notice.error:
+  en: "Terminal error: %{error}"
   zh-CN: 终端错误：%{error}
 
 # A command put on the input line (history, snippets)
 terminal.command.not_connected:
+  en: The terminal is not connected
   zh-CN: 终端没有连接
 terminal.command.full_screen:
+  en: A full-screen program is running in the terminal; exit it first
   zh-CN: 终端里正在运行全屏程序，先退出它
 terminal.command.multiline:
+  en: This is a multi-line command and can only be run directly in this terminal
   zh-CN: 这是一条多行命令，在这个终端里只能直接执行
 
 # State of a terminal
 terminal.lifecycle.starting:
+  en: Starting
   zh-CN: 正在启动
 terminal.lifecycle.running:
+  en: Running
   zh-CN: 运行中
 terminal.lifecycle.exited:
+  en: Exited
   zh-CN: 已退出
 terminal.lifecycle.failed:
+  en: Failed to Start
   zh-CN: 启动失败
 terminal.lifecycle.closing:
+  en: Closing
   zh-CN: 正在关闭
 terminal.lifecycle.exited_signal:
+  en: "Exited (%{signal}, code %{code})"
   zh-CN: 已退出（%{signal}，退出码 %{code}）
 terminal.lifecycle.exited_code:
+  en: "Exited (code %{code})"
   zh-CN: 已退出（退出码 %{code}）
 terminal.lifecycle.failed_with:
+  en: "Failed to start: %{error}"
   zh-CN: 启动失败：%{error}
 
 # Context menu
 terminal.menu.copy:
+  en: Copy
   zh-CN: 复制
 terminal.menu.paste:
+  en: Paste
   zh-CN: 粘贴
 terminal.menu.select_all:
+  en: Select All
   zh-CN: 全选
 terminal.menu.find:
+  en: Find…
   zh-CN: 查找…
 terminal.menu.clear:
+  en: Clear Screen
   zh-CN: 清屏
 
 # Links
 terminal.link.open_hint:
+  en: "%{key}+click to open"
   zh-CN: "%{key} 单击打开"
 
 # Find bar
 terminal.find.placeholder:
+  en: Find
   zh-CN: 查找
 terminal.find.previous:
+  en: Previous
   zh-CN: 上一个
 terminal.find.next:
+  en: Next
   zh-CN: 下一个
 terminal.find.close:
+  en: Close
   zh-CN: 关闭
 terminal.find.no_results:
+  en: No Results
   zh-CN: 无结果
 terminal.find.count:
+  en: "%{count} results"
+  zh-CN: "%{count} 项"
+terminal.find.count_one:
+  en: "%{count} result"
   zh-CN: "%{count} 项"
 
 # Font preview in settings, for screen readers
 terminal.font.preview:
+  en: "%{family} %{size} px, line height %{line_height}"
   zh-CN: "%{family} %{size} px，行高 %{line_height}"
 
 # Local shell
 terminal.pty.open_failed:
+  en: Could not create the local PTY
   zh-CN: 无法创建本地 PTY
 terminal.pty.shell_failed:
+  en: Could not start the system default shell
   zh-CN: 无法启动系统默认 shell
 # The program 设置 › 终端 › 本地终端 names, as written there, and why.
 terminal.pty.command_failed:
+  en: "Could not start %{command}: %{error}"
   zh-CN: 无法启动 %{command}：%{error}
 terminal.pty.unmatched_quote:
+  en: "The Shell in Settings → Terminal → Local Terminal has an unmatched quote: %{command}"
   zh-CN: 设置 → 终端 → 本地终端里的 Shell 有引号没有配对：%{command}
 terminal.pty.reader_failed:
+  en: Could not read from the local PTY
   zh-CN: 无法读取本地 PTY
 terminal.pty.writer_failed:
+  en: Could not write to the local PTY
   zh-CN: 无法写入本地 PTY
 terminal.pty.reader_thread:
+  en: Could not start the PTY reader thread
   zh-CN: 无法启动 PTY 读取线程
 terminal.pty.read_error:
+  en: "Failed to read from the PTY: %{error}"
   zh-CN: 读取 PTY 失败：%{error}
 terminal.pty.write_error:
+  en: "Failed to write to the PTY: %{error}"
   zh-CN: 写入 PTY 失败：%{error}
 terminal.pty.resize_error:
+  en: "Failed to resize the PTY: %{error}"
   zh-CN: 调整 PTY 尺寸失败：%{error}
 terminal.pty.exit_status:
+  en: Could not read the shell exit status
   zh-CN: 无法读取 shell 退出状态

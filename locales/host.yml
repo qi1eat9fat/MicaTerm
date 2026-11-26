@@ -1,166 +1,246 @@
 _version: 2
 # 主机数据说的话（工单 11）：写不进数据库、保险库没收下
 host.store.copy_name:
+  en: "%{name} copy"
   zh-CN: "%{name} 副本"
 host.store.not_saved.new_host:
+  en: "The new host could not be saved to the local database: %{error}"
   zh-CN: 新建主机未能保存到本地数据库：%{error}
 host.store.not_saved.save_host:
+  en: "The host could not be saved to the local database: %{error}"
   zh-CN: 保存主机未能保存到本地数据库：%{error}
 host.store.not_saved.delete_host:
+  en: "The host could not be deleted from the local database: %{error}"
   zh-CN: 删除主机未能保存到本地数据库：%{error}
 host.store.not_saved.duplicate_host:
+  en: "The host copy could not be saved to the local database: %{error}"
   zh-CN: 复制主机未能保存到本地数据库：%{error}
 host.store.not_saved.host_order:
+  en: "The new host order could not be saved to the local database: %{error}"
   zh-CN: 主机的新顺序未能保存到本地数据库：%{error}
 host.store.not_saved.new_credential:
+  en: "The new credential could not be saved to the local database: %{error}"
   zh-CN: 新建凭据未能保存到本地数据库：%{error}
 host.store.not_saved.save_credential:
+  en: "The credential could not be saved to the local database: %{error}"
   zh-CN: 保存凭据未能保存到本地数据库：%{error}
 host.store.not_saved.delete_credential:
+  en: "The credential could not be deleted from the local database: %{error}"
   zh-CN: 删除凭据未能保存到本地数据库：%{error}
 host.store.not_saved.host_os:
+  en: "The detected system could not be saved to the local database: %{error}"
   zh-CN: 记录主机系统未能保存到本地数据库：%{error}
 host.store.not_saved.new_snippet:
+  en: "The new snippet could not be saved to the local database: %{error}"
   zh-CN: 新建命令片段未能保存到本地数据库：%{error}
 host.store.not_saved.save_snippet:
+  en: "The snippet could not be saved to the local database: %{error}"
   zh-CN: 保存命令片段未能保存到本地数据库：%{error}
 host.store.not_saved.delete_snippet:
+  en: "The snippet could not be deleted from the local database: %{error}"
   zh-CN: 删除命令片段未能保存到本地数据库：%{error}
 host.store.not_saved.batch:
+  en: "These changes could not be saved to the local database: %{error}"
   zh-CN: 这批改动未能保存到本地数据库：%{error}
 host.store.secret.write:
+  en: "The password, passphrase or key could not be written to the vault: %{error}"
   zh-CN: 密码、口令或私钥未能写入保险库：%{error}
 host.store.secret.delete:
+  en: "The password, passphrase or key could not be deleted from the vault: %{error}"
   zh-CN: 密码、口令或私钥未能从保险库删除：%{error}
 host.store.secret.unavailable:
+  en: No vault is available on this computer
   zh-CN: 这台电脑上没有可用的保险库
 host.store.secret.locked:
+  en: The vault is locked
   zh-CN: 保险库已锁定
 host.store.secret.not_set_up:
+  en: The vault has not been set up yet
   zh-CN: 还没有设置保险库
 host.store.secret.key_lost:
+  en: This vault was created on another computer without a master password and cannot be opened here
   zh-CN: 这个保险库在另一台电脑上创建、没设主密码，这里打不开
 host.store.open_failed:
+  en: "The host database could not be opened; these changes will not be saved: %{error}"
   zh-CN: 主机数据库打不开，这次的改动不会保存：%{error}
 host.store.newer_database:
+  en: "The database comes from a newer MicaTerm (schema version %{version}; this version supports up to %{supported})"
   zh-CN: 数据库来自更新版本的 MicaTerm（结构版本 %{version}，这个版本最高认 %{supported}）
 
 # 主机表单的错误
 host.draft.address:
+  en: Address is required
   zh-CN: 地址不能为空
 host.draft.port:
+  en: Port must be a number from 1 to 65535
   zh-CN: 端口必须是 1 到 65535 之间的数字
 host.draft.no_jump_hosts:
+  en: Add a jump host
   zh-CN: 请添加跳板主机
 host.draft.deleted_jump_host:
+  en: Remove the deleted jump host
   zh-CN: 请移除已删除的跳板主机
 host.draft.proxy_address:
+  en: Proxy address is required
   zh-CN: 代理地址不能为空
 host.draft.proxy_port:
+  en: Proxy port must be a number from 1 to 65535
   zh-CN: 代理端口必须是 1 到 65535 之间的数字
 
 # 主机栏的列表和搜索
 host.list.search:
+  en: Search Hosts
   zh-CN: 搜索主机
 host.list.clear_search:
+  en: Clear Search
   zh-CN: 清空搜索
 host.list.no_match:
+  en: 'No hosts match "%{query}"'
   zh-CN: 没有匹配「%{query}」的主机
 
 # 主机右键菜单
 host.menu.connect:
+  en: Connect
   zh-CN: 连接
 host.menu.open_sftp:
+  en: Open SFTP
   zh-CN: 打开 SFTP
 host.menu.edit:
+  en: Edit…
   zh-CN: 编辑…
 host.menu.duplicate:
+  en: Duplicate
   zh-CN: 创建副本
 host.menu.copy_ip:
+  en: Copy IP
   zh-CN: 复制 IP
-host.menu.copy_id:
-  zh-CN: 复制 ID
 host.menu.copy_host_name:
+  en: Copy Hostname
   zh-CN: 复制主机名
 host.menu.delete:
+  en: Delete
   zh-CN: 删除
 
 # 主机对话框
 host.dialog.title_new:
+  en: New Host
   zh-CN: 新建主机
+host.dialog.subtitle:
+  en: Connect to a Linux host over SSH.
+  zh-CN: 通过 SSH 连接 Linux 主机。
 host.dialog.title_edit:
+  en: "Edit %{name}"
   zh-CN: 编辑 %{name}
 host.dialog.name:
+  en: Name
   zh-CN: 名称
 host.dialog.name_placeholder:
+  en: Leave empty to use the address
   zh-CN: 留空时用地址
 host.dialog.address:
+  en: Address
   zh-CN: 地址
 host.dialog.address_placeholder:
+  en: Hostname or IP address
   zh-CN: 主机名或 IP 地址
 host.dialog.port:
+  en: Port
   zh-CN: 端口
 host.dialog.auth:
+  en: Authentication
   zh-CN: 认证方式
 host.dialog.auth_password:
+  en: Password
   zh-CN: 密码
 host.dialog.auth_credential:
+  en: Credential
   zh-CN: 使用凭据
 host.dialog.auth_no_password:
+  en: No Password
   zh-CN: 无密码
 host.dialog.credential:
+  en: Credential
   zh-CN: 凭据
 host.dialog.choose_credential:
+  en: Choose Credential
   zh-CN: 选择凭据
 host.dialog.credential_required:
+  en: Choose a credential
   zh-CN: 请选一条凭据
 host.dialog.credential_user:
+  en: "The username comes from the credential: %{user}"
   zh-CN: 用户名跟着凭据走：%{user}
 host.dialog.credential_option:
+  en: "%{name} (%{kind} · %{user})"
   zh-CN: "%{name}（%{kind} · %{user}）"
 host.dialog.new_credential:
+  en: New Credential…
   zh-CN: 新建凭据…
 host.dialog.no_password_hint:
+  en: Tries the SSH Agent and the default keys in ~/.ssh in turn
   zh-CN: 依次尝试 SSH Agent 和 ~/.ssh 下的默认私钥
 host.dialog.user:
+  en: Username
   zh-CN: 用户名
 host.dialog.password:
+  en: Password
   zh-CN: 密码
 host.dialog.password_placeholder:
+  en: Leave empty to ask on each connection
   zh-CN: 留空则每次连接时询问
 host.dialog.route:
+  en: Connection
   zh-CN: 连接方式
 host.dialog.route_direct:
+  en: Direct
   zh-CN: 直接
 host.dialog.notes:
+  en: Notes
   zh-CN: 备注
 host.dialog.notes_placeholder:
+  en: Shown when hovering the host
   zh-CN: 悬停主机时显示
 host.dialog.test_connection:
+  en: Test Connection
   zh-CN: 测试连接
 host.dialog.testing:
+  en: Testing…
   zh-CN: 正在测试…
 host.dialog.test_ok:
+  en: Connected successfully
   zh-CN: 连接成功
 host.dialog.test_failed:
+  en: "Connection failed: %{reason}"
   zh-CN: 连接失败：%{reason}
 host.dialog.cancel:
+  en: Cancel
   zh-CN: 取消
 host.dialog.save:
+  en: Save
   zh-CN: 保存
 
 # 删除主机的确认
 host.delete.title:
+  en: Delete Host
   zh-CN: 删除主机
 host.delete.question:
+  en: 'Delete "%{name}"?'
   zh-CN: 确定删除「%{name}」吗？
 host.delete.jump_users:
+  en: "%{count} hosts use it as a jump host:"
+  zh-CN: 有 %{count} 台主机把它当作跳板：
+host.delete.jump_users_one:
+  en: "%{count} host uses it as a jump host:"
   zh-CN: 有 %{count} 台主机把它当作跳板：
 host.delete.jump_users_after:
+  en: After deletion, their jump host lists will keep a "Deleted Host" entry that fails on connect.
   zh-CN: 删除后，这些主机的跳板列表里会留一项「已删除的主机」，连接时直接报错。
 host.delete.cards_stay:
+  en: Open cards are not affected.
   zh-CN: 已打开的卡片不受影响。
 host.delete.cancel:
+  en: Cancel
   zh-CN: 取消
 host.delete.confirm:
+  en: Delete
   zh-CN: 删除

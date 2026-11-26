@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use gpui_kit::point;
-use micaterm::app::{CopyHostAddress, CopyHostId, DeleteHost, DuplicateHost};
+use micaterm::app::{CopyHostAddress, DeleteHost, DuplicateHost};
 
 use crate::support::*;
 
@@ -27,27 +27,18 @@ fn the_host_sidebar_lists_every_saved_host_with_its_badge(cx: &mut TestAppContex
     let (handle, _, _) = open_with_seed(cx);
 
     in_frame(cx, handle, |window, _| {
-        // 从上到下，按保存的顺序；一台两行：名称，下面是地址。用户名和端口只在悬停提示里。
+        // 从上到下，按保存的顺序；一行一台：左边 22 的徽章，右边名称。地址只在悬停提示里。
         let tops: Vec<_> = (1..=6)
             .map(|id| window.find(host_row(id)).bounds().top())
             .collect();
         assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
         assert_eq!(window.find(host_row(1)).label(), Some("web-01"));
-        assert_eq!(
-            window.find(("host-address", 1usize)).label(),
-            Some("10.0.1.12")
-        );
-        let (name, address) = (
-            window.find(host_row(1)).bounds(),
-            window.find(("host-address", 1usize)).bounds(),
-        );
-        assert!(name.contains(&address.center()), "{name:?} {address:?}");
-        // 徽章占两行：和整行一样居中，比地址那一行高。
+        let row = window.find(host_row(1)).bounds();
+        assert_eq!(row.size.height, px(30.));
         let badge = window.find(("host-badge", 1usize)).bounds();
-        assert!(
-            badge.size.height > address.size.height,
-            "{badge:?} {address:?}"
-        );
+        assert_eq!(badge.size.height, px(22.));
+        assert!(row.contains(&badge.center()), "{row:?} {badge:?}");
+        assert!(window.try_find(("host-address", 1usize)).is_none());
         // 没探测出系统：名称首字。
         assert_eq!(window.find(("host-badge", 1usize)).label(), Some("W"));
         assert_eq!(window.find(("host-badge", 3usize)).label(), Some("D"));
@@ -72,7 +63,7 @@ fn without_hosts_the_sidebar_says_how_to_make_one(cx: &mut TestAppContext) {
     let (handle, _) = open_workspace(cx);
 
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("host-list-empty").label(), Some("还没有主机"));
+        assert_eq!(window.find("host-list-empty").label(), Some("No hosts yet"));
     });
 }
 
@@ -90,10 +81,15 @@ fn hovering_a_host_shows_where_it_logs_in_and_its_notes(cx: &mut TestAppContext)
     cx.run_until_parked();
 
     in_frame(cx, handle, |window, _| {
+        let tip = window.find("host-tooltip");
         assert_eq!(
-            window.find("host-tooltip").label(),
+            tip.label(),
             Some("root@10.0.1.12:22\n改配置前先在群里说一声")
         );
+        // 两行保持横向排开：长文本的限宽换行不能把每行压成一列竖排的单字。
+        let size = tip.bounds().size;
+        assert!(size.width >= px(120.), "提示条缩成了一列竖排字：{size:?}");
+        assert!(size.height <= px(60.), "提示条被撑得太高：{size:?}");
     });
 }
 
@@ -187,7 +183,7 @@ fn a_search_without_matches_says_so(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, _| {
         assert_eq!(
             window.find("host-list-empty").label(),
-            Some("没有匹配「zzz」的主机")
+            Some("No hosts match \"zzz\"")
         );
         assert!(window.try_find(host_row(1)).is_none());
     });
@@ -314,13 +310,12 @@ fn the_host_menu_edits_copies_and_deletes(cx: &mut TestAppContext) {
     assert_eq!(
         menu_labels(cx, handle, 1),
         [
-            "连接",
-            "打开 SFTP",
-            "编辑…",
-            "创建副本",
-            "复制 IP",
-            "复制 ID",
-            "删除"
+            "Connect",
+            "Open SFTP",
+            "Edit…",
+            "Duplicate",
+            "Copy IP",
+            "Delete"
         ]
     );
     // 右键不改选中（被右键的那一行只描细边，26 号「主机右键」）。
@@ -329,13 +324,12 @@ fn the_host_menu_edits_copies_and_deletes(cx: &mut TestAppContext) {
     assert_eq!(
         menu_labels(cx, handle, 7),
         [
-            "连接",
-            "打开 SFTP",
-            "编辑…",
-            "创建副本",
-            "复制主机名",
-            "复制 ID",
-            "删除"
+            "Connect",
+            "Open SFTP",
+            "Edit…",
+            "Duplicate",
+            "Copy Hostname",
+            "Delete"
         ]
     );
 }
@@ -350,7 +344,7 @@ fn a_copy_goes_right_after_the_original_without_its_password(cx: &mut TestAppCon
 
     assert_eq!(
         host_names(cx, &workspace)[..3],
-        ["web-01", "web-01 副本", "web-02"]
+        ["web-01", "web-01 copy", "web-02"]
     );
     let copy = saved_host(cx, &workspace, 7).unwrap();
     assert_eq!(copy.address.as_ref(), "10.0.1.12");
@@ -374,17 +368,6 @@ fn copy_ip_puts_the_address_on_the_clipboard(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn copy_id_puts_the_host_s_public_id_on_the_clipboard(cx: &mut TestAppContext) {
-    let (handle, workspace, _) = open_with_seed(cx);
-    let id = saved_host(cx, &workspace, 4).unwrap().public_id.to_string();
-
-    dispatch(cx, handle, CopyHostId(HostId(4)));
-
-    let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
-    assert_eq!(copied, Some(id));
-}
-
-#[gpui_kit::test]
 fn deleting_a_host_asks_first(cx: &mut TestAppContext) {
     let (handle, workspace, secrets) = open_with_seed(cx);
     let web01 = saved_host(cx, &workspace, 1).unwrap();
@@ -394,7 +377,7 @@ fn deleting_a_host_asks_first(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, cx| {
         assert_eq!(
             window.find("host-delete-text").label(),
-            Some("确定删除「web-01」吗？\n已打开的卡片不受影响。")
+            Some("Delete \"web-01\"?\nOpen cards are not affected.")
         );
         window.click("host-delete-cancel", cx);
     });
@@ -432,9 +415,9 @@ fn deleting_a_jump_host_names_the_hosts_that_go_through_it(cx: &mut TestAppConte
         assert_eq!(
             window.find("host-delete-text").label(),
             Some(
-                "确定删除「web-01」吗？\n有 1 台主机把它当作跳板：\ndb-master\n\
-                 删除后，这些主机的跳板列表里会留一项「已删除的主机」，连接时直接报错。\n\
-                 已打开的卡片不受影响。"
+                "Delete \"web-01\"?\n1 host uses it as a jump host:\ndb-master\n\
+                 After deletion, their jump host lists will keep a \"Deleted Host\" entry that fails on connect.\n\
+                 Open cards are not affected."
             )
         );
     });
@@ -461,7 +444,7 @@ fn a_change_the_database_refuses_still_shows_and_is_reported(cx: &mut TestAppCon
     dispatch(cx, handle, DuplicateHost(HostId(1)));
 
     // 内存为准：副本照样在列表里，同时告诉用户没存进去。
-    assert_eq!(host_names(cx, &workspace), ["web-01", "web-01 副本"]);
+    assert_eq!(host_names(cx, &workspace), ["web-01", "web-01 copy"]);
     assert!(notifications(cx) >= 1);
 }
 
@@ -476,6 +459,6 @@ fn a_database_that_cannot_be_opened_is_reported_once_the_window_is_up(cx: &mut T
     let shown = in_frame(cx, handle, |window, cx| window.notifications(cx).len());
     assert_eq!(shown, 1);
     in_frame(cx, handle, |window, _| {
-        assert_eq!(window.find("host-list-empty").label(), Some("还没有主机"));
+        assert_eq!(window.find("host-list-empty").label(), Some("No hosts yet"));
     });
 }

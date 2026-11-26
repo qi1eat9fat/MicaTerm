@@ -31,11 +31,13 @@ mod vault;
 pub use std::sync::Arc;
 
 pub use credentials::*;
+use gpui_kit::InputEvent as _;
 pub use gpui_kit::component::ActiveTheme as _;
 pub use gpui_kit::component::{Root, WindowExt as _};
 pub use gpui_kit::test::TestWindowExt;
 pub use gpui_kit::{
-    Action, App, AppContext as _, ElementId, Entity, TestAppContext, WindowHandle, px, size,
+    Action, App, AppContext as _, ElementId, Entity, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, TestAppContext, WindowHandle, point, px, size,
 };
 pub use hosts::*;
 pub use micaterm::app::{CloseCard, NewLocalTerminalTab, ToggleHostSidebar};
@@ -200,7 +202,46 @@ pub fn terminal_menu_labels(
             .filter_map(|item| item.label().map(str::to_owned))
             .collect::<Vec<_>>()
     });
-    in_frame(cx, handle, |window, cx| window.press("escape", cx));
+    // 菜单要下一帧才收掉；没收掉的话下一次右键会点在旧菜单上，读到的还是旧的项。
+    // 放大着的卡片上 Esc 有时落不到菜单上，这时点一下窗口左上角（菜单外面）把它关掉。
+    in_frame(cx, handle, |window, cx| {
+        if window.try_find("popup-menu").is_some() {
+            window.press("escape", cx);
+        }
+    });
+    in_frame(cx, handle, |window, cx| {
+        if window.try_find("popup-menu").is_some() {
+            let position = point(px(2.), px(2.));
+            let modifiers = Modifiers::default();
+            for input in [
+                MouseMoveEvent {
+                    position,
+                    pressed_button: None,
+                    modifiers,
+                }
+                .to_platform_input(),
+                MouseDownEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers,
+                    click_count: 1,
+                    first_mouse: false,
+                }
+                .to_platform_input(),
+                MouseUpEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers,
+                    click_count: 1,
+                }
+                .to_platform_input(),
+            ] {
+                window.dispatch_event(input, cx);
+            }
+            window.render_frame(cx);
+        }
+    });
+    in_frame(cx, handle, |_, _| {});
     labels
 }
 
@@ -238,10 +279,10 @@ pub fn ended_notice(
     let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
     let at = lines
         .iter()
-        .rposition(|line| line.contains("[连接已断开]"))?;
+        .rposition(|line| line.contains("[Connection closed]"))?;
     assert_eq!(
         lines.get(at + 1..at + 3),
-        Some(&["按 Enter 重新连接", "按 Space 关闭"][..]),
+        Some(&["Press Enter Reconnect", "Press Space Close"][..]),
         "{screen}"
     );
     let line = lines[at].trim();

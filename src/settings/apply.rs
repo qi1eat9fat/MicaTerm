@@ -13,17 +13,22 @@ use micaterm_terminal::{
 
 use super::backdrop::apply_backdrop;
 use super::{AppSettings, DEFAULT_TERMINAL_FONT_FAMILY};
-use crate::sftp_tab::ShowHiddenFiles;
 use crate::theme::code_colors::code_highlight;
 use crate::theme::{
-    INTERFACE_FONT_SIZE, MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY, component_theme,
-    component_theme_name,
+    Elevation, INTERFACE_FONT_SIZE, MONO_FONT_FAMILY, Tokens, TypeScale, UI_FONT_FAMILY,
+    component_theme, component_theme_name, size,
 };
 use micaterm_ui::{FindStyle, MenuStyle};
 
 /// 让窗口和设置一致：应用外观（跟随系统时看窗口当前的外观）、界面字号、终端主题、
 /// 终端字体和交互。
 pub fn apply(settings: &AppSettings, window: &mut Window, cx: &mut App) {
+    // 界面语言：文案是进程全局量，换了就把整窗重画一次，所有视图（菜单、对话框、卡片）都换成新语言。
+    if crate::i18n::language() != settings.language {
+        crate::i18n::set_language(settings.language);
+        window.refresh();
+    }
+
     // 每次都读窗口的外观，不只在设置变化时：跟随系统时，系统一变主题就跟着变。
     let mode = settings.appearance.theme_mode(window.appearance());
     apply_app_theme(mode, window, cx);
@@ -50,7 +55,8 @@ pub fn apply(settings: &AppSettings, window: &mut Window, cx: &mut App) {
         window.refresh();
     }
 
-    // 终端背景跟着界面的内容底走，主题只管前景和 ANSI 色。
+    // 终端背景统一跟随界面的内容底（`Tokens::content`），终端主题只管前景、光标、选区与 ANSI 色；
+    // OSC 11 也会通过 `TerminalColors::query_color` 自动同步回报覆盖后的背景色。
     let colors = TerminalColors::new(settings.terminal_theme.theme(mode))
         .on_background(Tokens::current(cx).content);
     if cx.try_global::<TerminalColors>() != Some(&colors) {
@@ -73,69 +79,63 @@ pub fn apply(settings: &AppSettings, window: &mut Window, cx: &mut App) {
     apply_sftp(settings, cx);
 }
 
-/// 右键菜单的样子（26 号 `.menu`）：浅色底同内容区、深色 `#202124`，外圈 `--line-strong`；
-/// 悬停 `--sel`；快捷键 `--st-dim` 的 Maple Mono 11.5（随界面字号）；置灰 `--faint`；危险 `--err`。
+/// 右键菜单的样子（照空壳的右键菜单）：面板色底、外圈 `--line-strong`、`0 8 24` 的 35% 黑影；
+/// 悬停强调色底、强调色上的字；快捷键 `--st-dim`、界面字体、和菜单文字同号；置灰 `--faint`；危险 `--err`。
 fn menu_style(tokens: &Tokens, cx: &App) -> MenuStyle {
     let scale = TypeScale::current(cx);
     MenuStyle {
         background: tokens.popup,
-        border: tokens.line_strong,
-        shadow: if cx.theme().is_dark() {
-            gpui_kit::hsla(0., 0., 0., 0.45)
-        } else {
-            gpui_kit::hsla(0., 0., 0., 0.10)
-        },
-        separator: tokens.line,
+        border: tokens.menu_border,
+        shadows: Elevation::Elevated.shadow(tokens.popup),
+        separator: tokens.menu_separator,
         text: tokens.text,
         hint: tokens.st_dim,
         disabled: tokens.faint,
         danger: tokens.err,
-        selected: tokens.sel,
+        selected: tokens.brand,
+        selected_text: tokens.on_brand,
         font: UI_FONT_FAMILY.into(),
-        text_size: scale.ui,
-        hint_font: MONO_FONT_FAMILY.into(),
-        hint_size: scale.mono_small,
+        text_size: scale.sm,
+        hint_font: UI_FONT_FAMILY.into(),
+        hint_size: scale.sm,
+        min_width: size::MENU_MIN_WIDTH,
+        row_height: size::MENU_ROW,
+        padding: size::MENU_PADDING,
+        radius: size::RADIUS_LG,
+        item_radius: size::RADIUS_SM,
     }
 }
 
-/// 查找浮卡的样子（26 号 `.find`、`.hl`）：浅色底同内容区、深色 `#202124`，外圈 `--line-strong`，
-/// 阴影浅色 `0 4 14 / .08`、深色 `/ .4`；放大镜和计数 `--st-dim`，按钮图标 `--icon`、悬停 `--hover`；
-/// 匹配暖黄（`find_*` token）。
 fn find_style(tokens: &Tokens, cx: &App) -> FindStyle {
     let scale = TypeScale::current(cx);
     FindStyle {
         background: tokens.popup,
         border: tokens.line_strong,
-        shadow: if cx.theme().is_dark() {
-            gpui_kit::hsla(0., 0., 0., 0.4)
-        } else {
-            gpui_kit::hsla(0., 0., 0., 0.08)
-        },
+        shadows: Elevation::Elevated.shadow(tokens.popup),
         text: tokens.text,
         dim: tokens.st_dim,
         icon: tokens.icon,
         hover: tokens.hover,
         disabled: tokens.faint,
-        separator: tokens.line,
+        separator: tokens.line_strong,
         tooltip: tokens.tooltip,
         tooltip_text: tokens.tooltip_text,
         font: UI_FONT_FAMILY.into(),
-        text_size: scale.ui,
+        text_size: scale.body,
         mono_font: MONO_FONT_FAMILY.into(),
-        mono_size: scale.mono_small,
+        mono_size: scale.sm,
         matched: tokens.find_match,
         matched_line: tokens.find_match_line,
         current: tokens.find_current,
         current_text: tokens.find_current_text,
+        radius: size::RADIUS_LG,
+        button_radius: size::RADIUS_SM,
+        tooltip_radius: size::RADIUS_MD,
     }
 }
 
-/// SFTP 读的全局量：隐藏文件即时生效，并发数下一批生效。
-fn apply_sftp(settings: &AppSettings, cx: &mut App) {
-    let hidden = settings.sftp.show_hidden;
-    if cx.try_global::<ShowHiddenFiles>() != Some(&hidden) {
-        cx.set_global(hidden);
-    }
+/// SFTP 的全局量：并发数下一批生效。
+fn apply_sftp(settings: &AppSettings, _: &mut App) {
     micaterm_ssh::sftp::set_parallel_transfers(settings.sftp.parallel);
 }
 

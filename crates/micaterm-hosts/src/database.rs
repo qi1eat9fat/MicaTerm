@@ -68,7 +68,7 @@ pub const SCHEMA_VERSION: i64 = 5;
 ///     host form.
 ///   - `probe_os` 是登录后探不探测系统：主机表单写它，探测把连接弄断时连接也写它。
 ///   - `hostname` 是上次探测到的 `uname -n`，连接写它；关了探测时用来核对远程报告的目录。
-///   - `public_id` 是主机对外的随机 ID（外部 CLI、「复制 ID」），唯一。加列时旧行还没有值，
+///   - `public_id` 是主机对外的随机 ID（外部 CLI 用），唯一。加列时旧行还没有值，
 ///     所以列上不能写 `NOT NULL`；新建、复制主机时 store 总是写一个，迁移给旧主机补上。
 /// - **host_jumps** lists a host's jump hosts in order. A deleted jump
 ///   host leaves its row behind with no `jump_id`, so the host fails to

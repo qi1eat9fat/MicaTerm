@@ -441,10 +441,14 @@ impl EditorTab {
                         (clip, marks)
                     };
                     let (family, font_size) = font.clone();
-                    // 和终端的高亮一样：比行矮，高是字号的 1.3 倍，在行里居中。
-                    let height = (font_size * 1.3).round();
+                    let scale = window.scale_factor();
                     window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
                         for (ix, line, slice) in marks {
+                            let height = micaterm_ui::find_highlight_height(
+                                font_size,
+                                line.size.height,
+                                scale,
+                            );
                             let mark = Bounds::new(
                                 point(
                                     line.left(),

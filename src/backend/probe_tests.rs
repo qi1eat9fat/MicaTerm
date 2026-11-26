@@ -189,7 +189,7 @@ fn a_bastion_that_drops_the_connection_on_the_probe_reports_it_lost_and_reconnec
         )
     );
     let error = terminal.finish().expect_err("探测把 shell 一起弄断了");
-    assert!(error.to_string().contains("断开"), "{error}");
+    assert!(error.to_string().contains("Closed"), "{error}");
 
     // 原地重连：这次不探测，shell 留得住。
     let terminal = Terminal::open(&remote, 1, &fixture.target(false));

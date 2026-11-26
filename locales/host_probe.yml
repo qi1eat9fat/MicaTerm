@@ -1,12 +1,17 @@
 _version: 2
 # 系统探测可关、失败后自动停用（工单 34）
 host.store.not_saved.host_probe:
+  en: "Could not save the system probe setting to the local database: %{error}"
   zh-CN: 记录是否探测系统未能保存到本地数据库：%{error}
 host.store.not_saved.host_hostname:
+  en: "Could not save the detected hostname to the local database: %{error}"
   zh-CN: 记录探测到的主机名未能保存到本地数据库：%{error}
 host.dialog.probe_os:
+  en: Detect System After Login
   zh-CN: 登录后探测系统
 ssh.probe.disabled:
+  en: 'System probing is off for "%{host}": it refused a new channel during probing. Re-enable it in the host settings.'
   zh-CN: 已为「%{host}」关闭系统探测：探测时这台主机拒绝了新通道。可在主机设置里重新打开。
 ssh.probe.disabled_reconnecting:
+  en: 'System probing is off for "%{host}": the connection dropped during probing and is reconnecting. Re-enable it in the host settings.'
   zh-CN: 已为「%{host}」关闭系统探测：探测时连接被断开，正在重新连接。可在主机设置里重新打开。

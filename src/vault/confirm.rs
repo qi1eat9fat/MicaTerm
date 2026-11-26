@@ -78,7 +78,8 @@ pub(super) fn open_confirm_dialog(
                         vault.update(cx, |_, cx| cx.emit(VaultStoreEvent::Failed(message)));
                     }
                     // 钥匙串里的旧密钥删不掉时，保险库照样已经重置。
-                    let reset = vault.read(cx).status() == Some(micaterm_hosts::VaultStatus::Absent);
+                    let reset =
+                        vault.read(cx).status() == Some(micaterm_hosts::VaultStatus::Absent);
                     layer.close(window, cx);
                     reply.send(reset, window, cx);
                 });

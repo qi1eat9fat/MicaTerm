@@ -353,11 +353,11 @@ fn the_find_card_buttons_step_and_close(cx: &mut TestAppContext) {
     let (handle, _, _) = open_printing(cx, "gamma gamma\r\n", "gamma gamma");
     in_frame(cx, handle, |window, cx| window.press("ctrl-shift-f", cx));
     in_frame(cx, handle, |window, cx| window.input("zeta", cx));
-    wait_for_find_count(cx, handle, "无结果");
+    wait_for_find_count(cx, handle, "No Results");
     in_frame(cx, handle, |window, cx| {
         window.click("terminal-find-next", cx)
     });
-    wait_for_find_count(cx, handle, "无结果");
+    wait_for_find_count(cx, handle, "No Results");
 
     in_frame(cx, handle, |window, cx| {
         window.press("ctrl-a", cx);
@@ -405,7 +405,8 @@ fn right_click_shows_the_terminal_menu_by_default(cx: &mut TestAppContext) {
             .collect();
         assert_eq!(
             labels,
-            ["复制", "粘贴", "全选", "查找…", "清屏"].map(|label| Some(label.to_owned()))
+            ["Copy", "Paste", "Select All", "Find…", "Clear Screen"]
+                .map(|label| Some(label.to_owned()))
         );
         menu.click(1usize, cx);
     });
@@ -740,7 +741,7 @@ fn a_bell_notice_is_titled_as_a_bell(cx: &mut TestAppContext) {
     let shown = wait_until(cx, handle, |cx| !cx.shown_system_notifications().is_empty());
     assert!(shown, "没有系统通知");
     let shown = cx.shown_system_notifications();
-    assert_eq!(shown[0].title.as_ref(), "pwsh：响铃");
+    assert_eq!(shown[0].title.as_ref(), "pwsh: Bell");
     assert_eq!(shown[0].body.as_ref(), "继续吗 y/N?");
 }
 

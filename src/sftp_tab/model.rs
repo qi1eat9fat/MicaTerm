@@ -3,8 +3,7 @@
 // 修改时间不带秒（原型）；加上 `reported_directory`（工单 20）。
 //! 文件列表一行的快照和显示格式。
 
-use gpui_kit::{App, Global, SharedString};
-use serde::{Deserialize, Serialize};
+use gpui_kit::SharedString;
 
 use super::CardSide;
 use crate::backend::sftp::{DirectoryEntry, EntryKind, RemotePath};
@@ -127,7 +126,7 @@ impl FileEntry {
         self.name.as_ref() == ".."
     }
 
-    /// 点开头的文件：隐藏文件不显示时列表里没有它。`..` 不算。
+    /// 点开头的文件：列表里整行更淡。`..` 不算。
     pub fn is_hidden(&self) -> bool {
         !self.is_parent() && self.name.starts_with('.')
     }
@@ -247,41 +246,6 @@ pub fn path_ancestors(path: &str, side: CardSide) -> Vec<(String, String)> {
     chain
 }
 
-/// 显示隐藏文件：列表显示不显示点开头的文件，本地和远程各一个开关（设置 › SFTP）。
-/// 是全局量，由设置设：SFTP 标签不依赖设置。默认都关。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ShowHiddenFiles {
-    pub local: bool,
-    pub remote: bool,
-}
-
-impl Global for ShowHiddenFiles {}
-
-impl ShowHiddenFiles {
-    /// `side` 现在显示不显示。
-    pub fn get(side: CardSide, cx: &App) -> bool {
-        cx.try_global::<Self>()
-            .copied()
-            .unwrap_or_default()
-            .on(side)
-    }
-
-    pub fn on(self, side: CardSide) -> bool {
-        match side {
-            CardSide::Local => self.local,
-            CardSide::Remote => self.remote,
-        }
-    }
-
-    pub fn toggle(&mut self, side: CardSide) {
-        match side {
-            CardSide::Local => self.local = !self.local,
-            CardSide::Remote => self.remote = !self.remote,
-        }
-    }
-}
-
 /// 简短的大小，用让数字小于 1024 的最小单位：`12 B`、`1.5 KB`、`348 KB`、`1.2 MB`。
 /// 100 以下带一位小数，以上取整。
 pub fn format_size(bytes: u64) -> String {
@@ -392,10 +356,10 @@ mod tests {
 
     #[test]
     fn type_label_uses_extension_for_files() {
-        assert_eq!(FileEntry::file("a.log", 1).type_label(), "LOG 文件");
-        assert_eq!(FileEntry::file(".zshrc", 1).type_label(), "文件");
-        assert_eq!(FileEntry::dir("etc").type_label(), "文件夹");
-        assert_eq!(FileEntry::parent().type_label(), "上级目录");
+        assert_eq!(FileEntry::file("a.log", 1).type_label(), "LOG file");
+        assert_eq!(FileEntry::file(".zshrc", 1).type_label(), "File");
+        assert_eq!(FileEntry::dir("etc").type_label(), "Folder");
+        assert_eq!(FileEntry::parent().type_label(), "Parent Directory");
     }
 
     #[test]

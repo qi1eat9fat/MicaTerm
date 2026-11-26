@@ -3,8 +3,8 @@
 //! 唯一的 UI 级 seam 是注入式构造 `Workspace::new_with_services`：生产代码传真实服务，
 //! 无头 UI 测试传假实现（`tests/ui/support/mod.rs` 的 `fake_services`）。
 
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -13,10 +13,10 @@ use micaterm_hosts::secrets::{InMemorySecretStore, SharedSecretStore};
 use micaterm_terminal::{LocalPtyTransportProvider, SharedLocalTerminalTransportProvider};
 
 use super::handlers;
-use super::host_sidebar::render_host_sidebar;
+use super::host_sidebar::{render_collapsed_host_sidebar, render_host_sidebar};
 use super::notices::NoticeTimes;
 use super::remote::PromptQueue;
-use super::right_sidebar::{RightPanel, RightPanelWidths, render_right_sidebar};
+use super::right_sidebar::{RightPanel, RightPanelWidths};
 use super::title_bar::{TitleBarState, render_title_bar};
 use crate::app::PRODUCT_NAME;
 use crate::backend::sftp::{
@@ -35,7 +35,7 @@ use crate::settings::{SettingsStore, SettingsStoreEvent, WindowBackdrop, WindowS
 use crate::snippets::SnippetPanel;
 use crate::split::NodeId;
 use crate::tabs::{Tab, TabId, TabList, TabRail, TabSnapshot, TerminalTab};
-use crate::theme::{Tokens, TypeScale, size};
+use crate::theme::{Tokens, TypeScale, size, ui_font};
 use crate::vault::{Vault, VaultStore, VaultStoreEvent};
 
 /// 窗口壳用到的外部服务。生产代码用 `WorkspaceServices::new()` 建真实的，
@@ -272,7 +272,7 @@ impl Workspace {
         window.on_window_should_close(cx, |window, cx| !crate::app::quit_held_back(window, cx));
         let (hosts, host_list, host_subscriptions) =
             Self::open_hosts(&mut services, &focus_handle, window, cx);
-        let snippet_panel = SnippetPanel::new(window, cx);
+        let snippet_panel = SnippetPanel::new();
         let mut subscriptions = vec![
             // 设置写不进文件时告诉用户，不静默吞掉。
             cx.subscribe_in(
@@ -305,19 +305,6 @@ impl Workspace {
         subscriptions.extend(host_subscriptions);
         let (vault, vault_subscriptions) = Self::open_vault(&mut services, window, cx);
         subscriptions.extend(vault_subscriptions);
-        subscriptions.push(
-            // 命令片段面板的搜索框。
-            cx.subscribe(
-                snippet_panel.search(),
-                |this, input, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        let query = input.read(cx).value().to_string();
-                        this.snippet_panel.set_query(query);
-                        cx.notify();
-                    }
-                },
-            ),
-        );
         apply(&settings.read(cx).settings(), window, cx);
         // 点终端的系统通知，回到那张卡片。
         Self::listen_for_notice_clicks(window, cx);
@@ -598,10 +585,6 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Tokens::current(cx);
         let target = self.focus_handle.clone();
-        // 主机栏右侧的绿色数字（工单 16）：开卡片、关卡片、关标签都会让窗口壳重画，这里统一告诉主机列表。
-        let open_cards = self.open_cards_by_host(cx);
-        self.host_list
-            .update(cx, |list, cx| list.set_open_cards(open_cards, cx));
         // 有标签时是在前那个标签的内容，没有时是新标签页。
         let content =
             div()
@@ -616,7 +599,7 @@ impl Render for Workspace {
         let body = match self.right_panel {
             Some(panel) => {
                 let panel_element = match panel {
-                    RightPanel::Snippets => self.render_snippet_panel(&tokens, window, cx),
+                    RightPanel::Snippets => self.render_snippet_panel(&tokens, cx),
                     RightPanel::Credentials => self.credential_panel.clone().into_any_element(),
                     RightPanel::Agent => match &self.agent {
                         Some(agent) => agent.render(&target, &tokens),
@@ -643,7 +626,9 @@ impl Render for Workspace {
                     host_sidebar_open: self.host_sidebar_open,
                     rail: &self.tab_rail,
                     tabs: self.tab_snapshots(cx),
-                    vault: self.vault.read(cx).status(),
+                    right_panel: self.right_panel,
+                    files: self.files_button(cx),
+                    agent: self.agent_rail(),
                 },
                 &target,
                 &tokens,
@@ -655,14 +640,7 @@ impl Render for Workspace {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(div().flex().flex_1().min_w_0().child(body))
-                    .child(render_right_sidebar(
-                        self.right_panel,
-                        self.files_button(cx),
-                        self.agent_rail(),
-                        &target,
-                        &tokens,
-                    )),
+                    .child(div().flex().flex_1().min_w_0().child(body)),
             );
         // action 处理器不挂在这里，挂在包住整个 `Root` 的外层（`render_frame`）。
         div()
@@ -672,17 +650,33 @@ impl Render for Workspace {
             .flex()
             .size_full()
             .overflow_hidden()
+            .font(ui_font())
             .text_color(tokens.text)
-            .text_size(TypeScale::current(cx).ui)
+            .text_size(TypeScale::current(cx).body)
             // 窗口底就是侧栏底；开了 Mica 时是半透明的，让系统的 Mica 从侧栏透出来（工单 26）。
             .bg(tokens.window_background(WindowBackdrop::current(cx)))
-            .when(self.host_sidebar_open, |root| {
-                root.child(render_host_sidebar(
+            .child(if self.host_sidebar_open {
+                render_host_sidebar(
                     self.host_list.clone(),
+                    self.vault.read(cx).status(),
+                    cx.theme().is_dark(),
                     &target,
                     &tokens,
                     TypeScale::current(cx),
-                ))
+                )
+                .into_any_element()
+            } else if cfg!(target_os = "macos") {
+                // macOS 收起时整条侧栏都不画：红绿灯要占左上角。
+                div().into_any_element()
+            } else {
+                render_collapsed_host_sidebar(
+                    self.vault.read(cx).status(),
+                    cx.theme().is_dark(),
+                    &target,
+                    &tokens,
+                    TypeScale::current(cx),
+                )
+                .into_any_element()
             })
             .child(main)
     }
@@ -763,7 +757,7 @@ mod tests {
         let lost = || Err(std::io::Error::other("没有可执行文件的路径"));
         let (_, problem) = sftp_provider(connector(), lost(), Ok("/data/download-resume".into()));
         let problem = problem.expect("the user is told");
-        assert!(problem.contains("续传"), "{problem}");
+        assert!(problem.contains("resume"), "{problem}");
         assert!(problem.contains("没有可执行文件的路径"), "{problem}");
         let (_, problem) = sftp_provider(connector(), Ok("/data/upload-resume".into()), lost());
         assert!(problem.is_some());
