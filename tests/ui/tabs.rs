@@ -630,7 +630,7 @@ fn dropping_at_the_left_edge_puts_the_tab_first(cx: &mut TestAppContext) {
     in_frame(cx, handle, |window, cx| {
         let from = window.find(tab(3)).bounds().center();
         // macOS 收起后「展开主机栏」在轨道左边，拖到它上面；Windows、Linux 收起后侧栏
-        // 还占 40 宽，拖到第一个标签的左半边。
+        // 还占 32 宽，拖到第一个标签的左半边。
         let to = if cfg!(target_os = "macos") {
             window.find("expand-host-sidebar").bounds().center()
         } else {

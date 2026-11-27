@@ -134,7 +134,7 @@ fn collapsing_the_host_sidebar_puts_an_expand_button_at_the_left_of_the_tab_rail
             // macOS 收起主机栏时整条侧栏让给红绿灯，展开按钮在标签轨道左边。
             assert!(window.try_find("host-sidebar").is_none());
         } else {
-            assert_eq!(window.find("host-sidebar").bounds().size.width, px(44.));
+            assert_eq!(window.find("host-sidebar").bounds().size.width, px(32.));
         }
         let expand = window.find("expand-host-sidebar");
         assert_eq!(expand.label(), Some("Expand Hosts Sidebar"));
@@ -167,7 +167,7 @@ fn ctrl_shift_b_toggles_the_host_sidebar(cx: &mut TestAppContext) {
         if cfg!(target_os = "macos") {
             assert!(window.try_find("host-sidebar").is_none());
         } else {
-            assert_eq!(window.find("host-sidebar").bounds().size.width, px(44.));
+            assert_eq!(window.find("host-sidebar").bounds().size.width, px(32.));
         }
         assert!(window.find("expand-host-sidebar").visible());
     });

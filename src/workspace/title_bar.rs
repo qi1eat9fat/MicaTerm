@@ -80,7 +80,7 @@ pub(super) fn render_title_bar(
                 .bg(tokens.line),
         )
         // macOS 上主机栏收起时整条侧栏都不画，给红绿灯让位，展开按钮放在标签轨道左边；
-        // Windows、Linux 收起后还留 40 宽的侧栏，展开按钮在它底部。
+        // Windows、Linux 收起后还留 32 宽的侧栏，展开按钮在它底部。
         .when(!host_sidebar_open && cfg!(target_os = "macos"), |bar| {
             bar.pl(size::TRAFFIC_LIGHTS_WIDTH).child(
                 div().flex_none().px(space::SPACE_4).child(

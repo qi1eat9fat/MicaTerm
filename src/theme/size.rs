@@ -53,7 +53,7 @@ pub const CARD_TITLE: Pixels = px(22.);
 pub const STATUS_BAR: Pixels = px(22.);
 /// Left host sidebar width (expanded / collapsed).
 pub const SIDEBAR_WIDTH: Pixels = px(240.);
-pub const SIDEBAR_COLLAPSED: Pixels = px(44.);
+pub const SIDEBAR_COLLAPSED: Pixels = px(32.);
 /// Host sidebar list row height (30px).
 pub const SIDEBAR_ROW: Pixels = px(30.);
 /// Right dock panel list / tree row height (22px).
